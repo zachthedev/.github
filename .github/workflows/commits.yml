@@ -6,6 +6,9 @@ name: commits
 # lints, from the same lockfile. The range is the pull request's base..head, and commitlint reads
 # it from git. The title is linted as the subject a squash merge writes: the title with the pull
 # request number appended.
+#
+# A caller's uses: job grants permissions: contents: read. A called job can only lower what its
+# caller passes, and a caller passing none is refused before any step runs.
 on:
   workflow_call:
 

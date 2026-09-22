@@ -15,6 +15,9 @@ name: release-pr
 # config is the caller's file, so the release tool holds the version and the changelog and this
 # file holds nothing of either. A root package is the contract: release_created and tag_name are
 # the root outputs.
+#
+# A caller's uses: job grants no permission. Every credential here is the app's, and the job
+# declares none for the job token.
 on:
   workflow_call:
     outputs:

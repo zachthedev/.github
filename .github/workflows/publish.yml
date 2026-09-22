@@ -24,6 +24,9 @@ name: publish
 #   rebuild dispatched on a tag ref needs the tag pattern in that policy too, and nothing else
 #   does.
 # - A user verifies an attached file with gh attestation verify <file> --repo <owner>/<repo>.
+# - A caller's uses: job grants permissions: contents: write, id-token: write, attestations: write.
+#   A called job can only lower what its caller passes, and a caller passing less is refused before
+#   any step runs.
 on:
   workflow_call:
     inputs:
