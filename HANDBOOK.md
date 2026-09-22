@@ -220,7 +220,8 @@ One active ruleset on the default branch, classic branch protection off. Rules: 
 - Every required check records its source app, GitHub Actions, which the API takes as `integration_id` 15368.
   A token with `checks: write` therefore cannot satisfy it under the same name.
 - A repository not yet on GitHub is created in this order: the repository, its environments with their values,
-  its labels from the kickstart, the Actions settings, the first push, the first green run, then the rulesets.
+  its labels from the kickstart, the Actions settings, private vulnerability reporting on, the wiki and projects
+  off, the first push, the first green run, then the rulesets.
   A workflow that names an environment holding no values fails on its first run, and a ruleset that requires a
   check nothing has reported blocks the first pull request.
 
@@ -331,7 +332,8 @@ pull requests.
   `deps.yml` is the caller.
 - Every action is pinned by full commit SHA with a trailing `# vX.Y.Z` comment.
 - Job permissions are the minimum the job needs. `persist-credentials: false` on any checkout that pushes
-  nothing.
+  nothing. A caller grants the called workflow's declared permissions on its `uses:` job, because GitHub
+  refuses the call otherwise.
 - A tool published by GitHub, a platform service or a runtime setup runs through its maintainer's official
   action, pinned by commit. Platform services: code scanning, dependency review, a release bot, a dependency
   bot, an app token, an attestation, a secret scanner. Runtime setups: Go, .NET, Bun. A runtime setup action
@@ -353,8 +355,9 @@ pull requests.
   actionlint exits 0 with ShellCheck absent, and no flag changes that.
 - A scheduled workflow's requirement reads "at least once a day", and its header claims nothing tighter (Known
   defects).
-- After any edit to a scheduled workflow's cron line, the owner confirms the failure notification still reaches
-  a person (Known defects).
+- After any edit to a scheduled workflow's cron line, the `if:` that names the cron changes with it, and the
+  owner confirms the failure notification still reaches a person (Known defects). A job gated on a cron string
+  its schedule no longer raises skips forever, green.
 
 ## CodeQL
 
@@ -462,7 +465,9 @@ pull requests.
 - Go adds `govulncheck` beside both advisory checks, because it blocks only on a reachable call.
 - Live whole-tree readers run as reports, never as checks: `bun audit` daily, `cargo deny check advisories`
   weekly, `dotnet package list --vulnerable` weekly. They run from `audit.yml`, on its own clock. GitHub's
-  database lacks RustSec entries that OSV carries, and the weekly report covers those.
+  database lacks RustSec entries that OSV carries, and the weekly report covers those. `audit.yml` also carries a
+  weekly job that calls the reusable `workflows` workflow, so zizmor's online audits of the pinned actions run
+  without a pull request. A red run is the report.
 - The advisory check sees direct npm packages only under Bun, no NuGet package under central package
   management, and full lockfiles under Cargo. `CONTRIBUTING.md` states which legs the check covers. A C# repository
   submits a dependency snapshot from the restored graph on every pull request head (Known defects). The
@@ -543,6 +548,9 @@ pull requests.
 
 - The kickstart ships one label set with colors and descriptions. Labels are created at repository creation with
   `gh label clone` from the kickstart, so no repository defines them by hand.
+- The base set is thirteen labels: GitHub's ten defaults without `good first issue` and `question`, plus
+  `dependencies`, `ci`, `security`, `autorelease: pending` and `autorelease: tagged`. GitHub creates its
+  defaults at repository creation, so a new repository deletes those two after the clone.
 - A repository whose label set differs records why at the drift site, the file that names the label.
 - Every label a tool applies exists before the tool runs. An undefined label is created on demand with no color
   and no description. That is how a set drifts.
