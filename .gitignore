@@ -2,6 +2,10 @@
 # not yet on GitHub, so it stays on the maintainer's machine.
 REPOS.md
 
+# What Claude Code writes locally: its worktrees and a settings file that never leaves the machine.
+.claude/worktrees/
+.claude/settings.local.json
+
 # Below: github/gitignore/Node.gitignore at f5de2c2bb2c117f9ae643d6baa7acc23c580b7aa, unchanged.
 # The block can be edited in place. A note here says what changed, so a refresh knows what to carry.
 # Logs
