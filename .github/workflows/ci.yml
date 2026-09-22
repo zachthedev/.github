@@ -54,11 +54,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+  # Each calling job grants what its called job declares. A called job can only lower what its
+  # caller passes, and a caller passing none is refused before any step runs.
   commits:
+    permissions:
+      contents: read
     uses: ./.github/workflows/commits.yml
 
   workflows:
+    permissions:
+      contents: read
     uses: ./.github/workflows/workflows.yml
 
   dependency-review:
+    permissions:
+      contents: read
     uses: ./.github/workflows/dependency-review.yml

@@ -9,6 +9,9 @@ name: deps
 # loop in the workflow tree is refused, so the schedule and the dispatch below
 # run the job directly here. Every other repository carries the caller in the
 # kickstart and reaches the job through workflow_call.
+#
+# A caller's uses: job grants no permission. Every credential here is the
+# app's, and the job declares none for the job token.
 on:
   workflow_call:
     inputs:

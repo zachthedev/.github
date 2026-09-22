@@ -17,6 +17,10 @@ name: codeql
 #
 # codeql-action can fall back from build-mode none to autobuild on a server-side flag and logs
 # it. A first run's log is read before its conclusion is trusted.
+#
+# A caller's uses: job grants permissions: security-events: write, contents: read, actions: read.
+# A called job can only lower what its caller passes, and a caller passing less is refused before
+# any step runs.
 on:
   workflow_call:
     inputs:

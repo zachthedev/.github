@@ -18,6 +18,9 @@ name: dependency-review
 # The check reads GitHub's dependency graph: direct npm packages under Bun, the full lockfile
 # under Cargo, and no NuGet package under central package management. The caller's
 # CONTRIBUTING.md states which legs the check covers.
+#
+# A caller's uses: job grants permissions: contents: read. A called job can only lower what its
+# caller passes, and a caller passing none is refused before any step runs.
 on:
   workflow_call:
     inputs:

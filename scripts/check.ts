@@ -19,6 +19,17 @@ import { install, lockfileFindings, resolve } from './tools';
 /** The deadline for one linter or formatter pass over the tree. */
 const TOOL_TIMEOUT_MS = 300_000;
 
+// The two tokens CI hands the gate are read once and taken out of the
+// environment every row's processes inherit. GH_TOKEN is the job token; the
+// zizmor row is the one that uses it. MISE_GITHUB_TOKEN is the same token as
+// jdx/mise-action exports it; the mise install in the tools row is the one
+// that uses it, for its attestation reads. No other row's process sees
+// either.
+const ghToken: string | undefined = process.env['GH_TOKEN'];
+delete process.env['GH_TOKEN'];
+const miseToken: string | undefined = process.env['MISE_GITHUB_TOKEN'];
+delete process.env['MISE_GITHUB_TOKEN'];
+
 /** A row of the gate: its name, what it checks, and the check itself. */
 interface Row {
   readonly name: string;
@@ -65,7 +76,7 @@ async function tools(): Promise<void> {
   if (found.length > 0) {
     throw new Error(found.join('\n'));
   }
-  install();
+  install(miseToken);
   for (const [key, path] of await resolve()) {
     binaries.set(key, path);
   }
@@ -87,6 +98,16 @@ jobs:
       - run: echo $GITHUB_REF
 `;
 const SHELLCHECK_FINDING = 'SC2086';
+
+/** The GitHub token for zizmor's online audits: the CI token, else gh's, else none. */
+function githubToken(): string | undefined {
+  if (ghToken !== undefined && ghToken.length > 0) {
+    return ghToken;
+  }
+  const printed = run(['gh', 'auth', 'token'], TOOL_TIMEOUT_MS);
+  const found = printed.stdout.trim();
+  return printed.exitCode === 0 && found.length > 0 ? found : undefined;
+}
 
 async function workflows(): Promise<void> {
   const actionlint = await binary('actionlint');
@@ -113,13 +134,13 @@ async function workflows(): Promise<void> {
   // --strict-collection fails on a file zizmor cannot parse. Without it the
   // file is dropped with a warning and the run reports no findings for a
   // workflow it never read. The config is named so ZIZMOR_CONFIG in the
-  // environment cannot swap it. Online when gh holds a token, because some
+  // environment cannot swap it. Online when a token is at hand, because some
   // audits read the pinned actions' repositories; offline otherwise, so no
-  // contributor needs a token.
-  const token = run(['gh', 'auth', 'token'], TOOL_TIMEOUT_MS);
-  const online = token.exitCode === 0 && token.stdout.trim().length > 0;
+  // contributor needs a token, and ZIZMOR_OFFLINE forces offline.
+  const token = process.env['ZIZMOR_OFFLINE'] !== undefined ? undefined : githubToken();
+  const online = token !== undefined;
   const mode = online ? [] : ['--offline'];
-  const env = online ? { GH_TOKEN: token.stdout.trim() } : {};
+  const env: Readonly<Record<string, string>> = online ? { GH_TOKEN: token } : {};
   expectClean(
     `zizmor (${online ? 'online' : 'offline'})`,
     [

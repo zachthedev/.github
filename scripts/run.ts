@@ -19,26 +19,36 @@ export interface Finished {
  * Every process the gate starts goes through here, so every one carries a
  * deadline. A tool that hangs is a red row, not a hung gate.
  *
+ * A program that is not on PATH is a failed process too, exit 127 with the
+ * spawn error as its stderr, so a missing prerequisite reads like any other
+ * red row rather than a crash of the gate.
+ *
  * @param cmd - The program and its arguments, the program first
  * @param timeoutMs - The deadline, after which the process is killed
  * @param env - Variables added to the gate's own environment for this process
  * @returns What the process printed and how it ended
  */
 export function run(cmd: readonly string[], timeoutMs: number, env: Readonly<Record<string, string>> = {}): Finished {
-  const finished = Bun.spawnSync({
-    cmd: [...cmd],
-    cwd: process.cwd(),
-    env: { ...process.env, ...env },
-    stdout: 'pipe',
-    stderr: 'pipe',
-    timeout: timeoutMs,
-    killSignal: 'SIGKILL',
-  });
+  let finished: ReturnType<typeof Bun.spawnSync>;
+  try {
+    finished = Bun.spawnSync({
+      cmd: [...cmd],
+      cwd: process.cwd(),
+      env: { ...process.env, ...env },
+      stdout: 'pipe',
+      stderr: 'pipe',
+      timeout: timeoutMs,
+      killSignal: 'SIGKILL',
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { exitCode: 127, stdout: '', stderr: `${cmd[0] ?? ''}: ${message}`, timedOut: false };
+  }
   const timedOut: boolean = finished.exitedDueToTimeout === true;
   return {
     exitCode: timedOut ? -1 : finished.exitCode,
-    stdout: finished.stdout.toString(),
-    stderr: finished.stderr.toString(),
+    stdout: finished.stdout?.toString() ?? '',
+    stderr: finished.stderr?.toString() ?? '',
     timedOut,
   };
 }

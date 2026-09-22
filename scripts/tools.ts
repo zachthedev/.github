@@ -326,9 +326,13 @@ export async function lockfileFindings(): Promise<string[]> {
  * This runs only after {@link lockfileFindings} came back empty, held by the
  * row that calls it first. `--locked` refuses
  * an entry with no url for this platform rather than resolving one.
+ *
+ * @param githubToken - The token mise reads attestations with, when CI hands
+ * one over; absent locally, where mise reads them anonymously
  */
-export function install(): void {
-  const finished = run(['mise', 'install', '--locked'], INSTALL_TIMEOUT_MS);
+export function install(githubToken: string | undefined): void {
+  const env: Readonly<Record<string, string>> = githubToken === undefined ? {} : { MISE_GITHUB_TOKEN: githubToken };
+  const finished = run(['mise', 'install', '--locked'], INSTALL_TIMEOUT_MS, env);
   if (finished.exitCode !== 0) {
     throw new Error(`mise install --locked ${describe(finished)}`);
   }
