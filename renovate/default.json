@@ -30,6 +30,18 @@
     "enabled": true,
     "schedule": ["* 0-11 * * 1"]
   },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "trufflesecurity/trufflehog's version input is the image tag and digest the action runs, which the github-actions manager does not read. Looked up on Docker Hub for its timestamp; the action pulls the same digest from ghcr.io.",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "matchStrings": [
+        "uses: trufflesecurity/trufflehog@[^\\n]*\\n(?:[ \\t]+(?:#|[A-Za-z0-9_-]+:)[^\\n]*\\n)*?[ \\t]+version: (?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "depNameTemplate": "trufflesecurity/trufflehog",
+      "datasourceTemplate": "docker"
+    }
+  ],
   "packageRules": [
     {
       "description": "One pull request per ecosystem for minor and patch bumps. A major stays on its own branch, because it is a decision, not a bump.",
@@ -77,6 +89,12 @@
       "groupName": "zachthedev",
       "semanticCommitType": "ci",
       "addLabels": ["ci"]
+    },
+    {
+      "description": "One pull request whatever the bump size: the action and the image it runs carry the same release line.",
+      "matchDepNames": ["trufflesecurity/trufflehog"],
+      "groupName": "trufflehog",
+      "separateMajorMinor": false
     }
   ]
 }
