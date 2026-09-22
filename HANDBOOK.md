@@ -98,7 +98,7 @@ command. A row that a section owns names that section.
 | `.gitignore`                               | shape     | Authoring                                                                                                                |
 | `.editorconfig`                            | shape     | Formatting                                                                                                               |
 | `.prettierrc`                              | identical | Formatting                                                                                                               |
-| `.prettierignore`                          | own       | Formatting                                                                                                               |
+| `.prettierignore`                          | own       | Formatting; names `CHANGELOG.md` and `.release-please-manifest.json`, both release-please's output                       |
 | `package.json`, `bun.lock`, `bunfig.toml`  | shape     | commitlint, Prettier and lefthook pinned, `packageManager` set, the cooldown under Updates. Go pins lefthook in `go.mod` |
 | `commitlint.config.js`                     | identical | Commits                                                                                                                  |
 | `.github/commit-scopes.json`               | own       | Commits                                                                                                                  |
@@ -217,8 +217,13 @@ One active ruleset on the default branch, classic branch protection off. Rules: 
   that pushes.
 - A check becomes required only after it reports on a pull request the releaser app opened. A check nothing
   reports blocks every pull request.
-- Every required check records its source app, GitHub Actions, which the API takes as `integration_id` 15368.
-  A token with `checks: write` therefore cannot satisfy it under the same name.
+- Every required check records its source app. A workflow job's check run, the `Analyze (<language>)` entries
+  included, is posted by GitHub Actions, `integration_id` 15368. The check named `CodeQL` on a pull request
+  head is posted by GitHub Advanced Security, `integration_id` 57789. The ruleset requires the
+  `Analyze (<language>)` entries under 15368 and, where the repository wants the code-scanning gate, the
+  `CodeQL` entry under 57789. A token with `checks: write` therefore cannot satisfy a check under the same
+  name.
+- A red release pull request is never merged with `--admin`, because the bypass also skips the required checks.
 - A repository not yet on GitHub is created in this order: the repository, its environments with their values,
   its labels from the kickstart, the Actions settings, private vulnerability reporting on, the wiki and projects
   off, the first push, the first green run, then the rulesets.
@@ -363,7 +368,9 @@ pull requests.
 
 - A committed `codeql.yml`, never default setup. Default setup pins nothing and names checks the repository does
   not control.
-- The job carries an explicit `name: Analyze (<language>)`, so the check name is stable.
+- The job carries an explicit `name: Analyze (<language>)`, so the check name is stable. Its check run is a
+  workflow job's, under GitHub Actions. The `CodeQL` check GitHub Advanced Security posts on a pull request head
+  is a second check, and Branch rules says which the ruleset requires.
 - The languages are the shipped language plus `actions`. The `actions` analysis runs beside zizmor. Neither
   replaces the other.
 
@@ -447,7 +454,8 @@ pull requests.
   Hub, which records a push time (Known defects). The image is pulled from `ghcr.io` by digest. The digest is
   content-addressed, so no step compares the two registries. The workflow caps the Docker Hub lookup at ten
   pages. The registry refuses anonymous pagination past a thousand tags, and Renovate then drops every
-  timestamp.
+  timestamp. The secret scanner's image is pinned the same way on its action's `version` input, which the
+  github-actions manager does not read, so the base preset's regex manager moves its tag and digest.
 
 ## Advisories
 
@@ -508,7 +516,8 @@ pull requests.
   app. The publish job runs in `release`.
 - The release pull request says `Managed by` the app, not the tool.
 - A release is created as a draft, every time. Assets upload and attest against the draft. Whether a human or
-  the publish job flips the draft public is the repository's choice. The draft is not.
+  the publish job flips the draft public is the repository's choice. The draft is not. `publish` called with no
+  artifacts flips the draft alone, under the `release` reviewer. A service chains its deploy on that job.
 - release-please pairs the draft with forced tag creation, because GitHub creates no tag for a draft, and sets
   `bump-minor-pre-major`, so a breaking change below `1.0.0` bumps the minor (Versioning). release-plz creates
   the tag itself.
@@ -579,8 +588,9 @@ A reviewer holds this row, except where a bullet names a check.
 - A prose rule that survives takes Vale as its mechanism, run as one gate step.
 - A comment states what the code guarantees now. What changed goes in the commit message.
 - `.gitignore` starts from the `github/gitignore` template for the stack, below one marker naming the template
-  path and the commit it came from. Repository entries sit above the marker. The template block can be edited in
-  place. A terse note above it says what changed, so a refresh knows what to carry.
+  path and the commit it came from. Repository entries sit above the marker, and `.claude/worktrees/` and
+  `.claude/settings.local.json` are among them, because Claude Code writes both locally. The template block can
+  be edited in place. A terse note above it says what changed, so a refresh knows what to carry.
 
 ## Known defects
 
