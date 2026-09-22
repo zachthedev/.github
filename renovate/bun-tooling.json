@@ -1,0 +1,13 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "A Bun repository that ships nothing: tooling, scripts, a template. Every package under it is development tooling, so every bump is a chore. That includes the ones package.json lists as dependencies."
+  ],
+  "extends": ["./default"],
+  "packageRules": [
+    {
+      "matchManagers": ["bun", "bun-version"],
+      "semanticCommitType": "chore"
+    }
+  ]
+}

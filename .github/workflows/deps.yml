@@ -1,0 +1,100 @@
+name: deps
+
+# The one Renovate run every zachthedev repository calls. It runs in the caller's
+# context, so github.repository, the environment, its variable and its secret
+# are the caller's. The caller's renovate.json decides what Renovate proposes.
+# This file decides only how it runs.
+#
+# This repository is its own caller. A workflow cannot call itself, because a
+# loop in the workflow tree is refused, so the schedule and the dispatch below
+# run the job directly here. Every other repository carries the caller in the
+# kickstart and reaches the job through workflow_call.
+on:
+  workflow_call:
+    inputs:
+      log-level:
+        description: Renovate log level. debug shows why a version is held.
+        type: string
+        default: info
+      dry-run:
+        description: Renovate dryRun value (extract, lookup or full). Empty runs for real.
+        type: string
+        default: ''
+  # At least once a day. The preset opens new pull requests inside its Monday
+  # window alone, and this hour is inside it. Every other run keeps open
+  # branches current and raises security fixes, which ignore the schedule.
+  schedule:
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+    inputs:
+      log-level:
+        description: Renovate log level. debug shows why a version is held.
+        type: choice
+        options: [info, debug]
+        default: info
+      dry-run:
+        description: Renovate dryRun value. none runs for real.
+        type: choice
+        options: [none, extract, lookup, full]
+        default: none
+
+# The job token gets nothing. Every credential Renovate uses is the app's, and
+# the action needs no checkout.
+permissions: {}
+
+jobs:
+  deps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # One Renovate at a time per repository. Two runs would race on the same branches.
+    concurrency:
+      group: deps
+      cancel-in-progress: false
+    # Holds the app's credentials and admits main alone, through a deployment
+    # branch policy naming main. No reviewer: a scheduled run nobody watches
+    # would wait forever for an approval.
+    environment:
+      name: deps
+      deployment: false
+    steps:
+      # The app's installation token, narrowed to what Renovate documents.
+      # Without a permission-* input the token inherits every permission the
+      # installation holds, which zizmor's github-app audit refuses.
+      - id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.UPDATER_CLIENT_ID }}
+          private-key: ${{ secrets.UPDATER_PRIVATE_KEY }}
+          permission-checks: write
+          permission-statuses: write
+          permission-contents: write
+          permission-workflows: write
+          permission-pull-requests: write
+          permission-issues: write
+          # The alerts that turn into security fixes.
+          permission-vulnerability-alerts: read
+
+      # The action runs the Renovate image and passes every RENOVATE_ variable
+      # and LOG_LEVEL through to it. The image is pinned by tag and digest.
+      # This repository's own renovate.json moves both, looked up on Docker Hub.
+      - uses: renovatebot/github-action@dcfba84a42d1b5d5e49bf131b1bf53511851a123 # v46.3.1
+        with:
+          token: ${{ steps.token.outputs.token }}
+          renovate-version: 44.97.4@sha256:3419e4b7d68d5a26184ce4cbc6e352e80e61b0c897f336619c2c99da6f4c8296
+        env:
+          # One repository per run, because an installation token is scoped to
+          # one installation.
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          # No onboarding pull request. A repository without a config is a
+          # mistake, not a new adoption.
+          RENOVATE_ONBOARDING: 'false'
+          # Docker Hub answers 403 to an anonymous request past tag offset 1000.
+          # Renovate then drops every timestamp for that image, which holds a
+          # timestamp-required pin forever. Ten pages of 100 stay inside the
+          # window and cover every recent tag.
+          RENOVATE_DOCKER_MAX_PAGES: '10'
+          # A schedule run carries no inputs, so an empty value means the
+          # defaults. The dispatch's none maps to an empty value, which
+          # Renovate reads as no dry run.
+          RENOVATE_DRY_RUN: ${{ inputs.dry-run != 'none' && inputs.dry-run || '' }}
+          LOG_LEVEL: ${{ inputs.log-level || 'info' }}

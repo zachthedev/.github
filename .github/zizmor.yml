@@ -1,0 +1,13 @@
+# zizmor's settings for this repository. Every audit not named here runs at zizmor's defaults.
+rules:
+  # Every action is pinned to a commit, including the ones GitHub publishes. A tag can be
+  # retargeted by its owner with no pull request and no cooldown, and this is what refuses one.
+  unpinned-uses:
+    config:
+      policies:
+        '*': hash-pin
+  # ci.yml and cd.yml call the reusable workflows beside them with ./, the one same-repository
+  # form actionlint accepts. GitHub recommends $/, and this audit asks for it, but actionlint
+  # refuses $/ as a malformed call (rhysd/actionlint#711). Off until actionlint accepts $/.
+  self-repository:
+    disable: true

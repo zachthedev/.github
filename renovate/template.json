@@ -1,0 +1,16 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "A layer for a template repository, listed after its stack's kind: extends [kind, template]. It ships nothing, but its pins are copied into every repository created from it. It therefore takes the same updates as a live repository, and every bump is a chore. It extends nothing itself, so the base is merged once."
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": ["*"],
+      "semanticCommitType": "chore"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "semanticCommitType": "ci"
+    }
+  ]
+}

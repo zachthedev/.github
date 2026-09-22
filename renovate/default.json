@@ -1,0 +1,82 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "The base every zachthedev repository takes, through one kind preset beside this file. A repository's renovate.json extends the kind and adds only what is true of that repository alone.",
+    "No Renovate default is restated here. Renovate's own values give internalChecksFilter strict, minimumReleaseAgeBehaviour timestamp-required, semanticCommitType chore and semanticCommitScope deps. They also give prConcurrentLimit 10, automerge off, and a vulnerabilityAlerts object with an empty schedule and a null cooldown.",
+    "The Monday window below contains the daily cron in the caller's deps workflow. A window the cron never lands inside opens nothing new. Renovate's own weekly presets close at 04:00, before that cron.",
+    "Security fixes come from the repository's Dependabot alerts and skip the schedule and the cooldown. enabled is written out because it lets an alert force a disabled dependency, such as an indirect Go module, back on for that fix. Renovate matches an alert to a dependency it extracted. A direct dependency gets a pull request, a Go transitive gets one through its go.mod line, and a Bun, Cargo or NuGet transitive gets none."
+  ],
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    "abandonments:recommended",
+    ":semanticCommits",
+    ":prHourlyLimitNone",
+    ":label(dependencies)"
+  ],
+  "timezone": "UTC",
+  "schedule": ["* 0-11 * * 1"],
+  "minimumReleaseAge": "3 days",
+  "rebaseWhen": "conflicted",
+  "commitMessageAction": "bump",
+  "commitMessageTopic": "{{depName}}",
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "groupName": "security",
+    "commitMessageSuffix": "",
+    "addLabels": ["security"]
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["* 0-11 * * 1"]
+  },
+  "packageRules": [
+    {
+      "description": "One pull request per ecosystem for minor and patch bumps. A major stays on its own branch, because it is a decision, not a bump.",
+      "matchManagers": ["bun", "bun-version"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "bun"
+    },
+    {
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "cargo"
+    },
+    {
+      "matchManagers": ["nuget"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "nuget"
+    },
+    {
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "go"
+    },
+    {
+      "matchManagers": ["mise"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "mise"
+    },
+    {
+      "description": "A workflow change is a ci commit, whatever it pins.",
+      "matchManagers": ["github-actions"],
+      "semanticCommitType": "ci",
+      "addLabels": ["ci"]
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pinDigest"],
+      "groupName": "github actions"
+    },
+    {
+      "description": "A zachthedev repository is the author's own work, so a new tag of it waits for nothing. The shared workflows reach every caller on the next run.",
+      "matchPackageNames": ["zachthedev/**"],
+      "matchDatasources": ["github-tags"],
+      "minimumReleaseAge": null,
+      "schedule": ["at any time"],
+      "groupName": "zachthedev",
+      "semanticCommitType": "ci",
+      "addLabels": ["ci"]
+    }
+  ]
+}

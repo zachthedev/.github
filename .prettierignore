@@ -1,0 +1,4 @@
+# Written by release-please on every release. Its bullets are `*` and its
+# version headers carry a blank line prettier would collapse, so formatting it
+# turns each release into a failing check on main.
+CHANGELOG.md

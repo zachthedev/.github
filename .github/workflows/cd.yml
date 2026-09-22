@@ -1,0 +1,20 @@
+name: cd
+
+# Everything after a merge. A push to main keeps the release pull request open, and merging
+# that pull request makes the next push tag the merge commit and draft the release. This
+# repository ships no artifact, so publish is never called: there is nothing to attest or
+# attach, and the owner flips each draft public by hand. The tag exists from the draft, so a
+# caller's Renovate sees a new version of the reusable workflows without the flip.
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  release-pr:
+    uses: ./.github/workflows/release-pr.yml
+    # The called job names the release-pr environment, so its variable and secret resolve
+    # from this repository's environment of that name. This job runs in no environment, so
+    # it cannot pass an environment secret by name. inherit is the one form that reaches it.
+    secrets: inherit # zizmor: ignore[secrets-inherit]

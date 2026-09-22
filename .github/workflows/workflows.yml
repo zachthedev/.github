@@ -1,0 +1,78 @@
+name: workflows
+
+# actionlint and zizmor over the caller's workflows, at the versions the caller's mise.toml pins
+# and from the artifacts its mise.lock records. mise-action finds the lockfile and runs
+# mise install --locked, so the job installs the bytes the caller's gate installs. A run of this
+# job and a run of the gate read the same two files, and both prove ShellCheck ran before they
+# trust a clean actionlint run.
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  workflows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The action verifies its own download against the release's minisign-signed checksums.
+      # With mise.lock in the checkout it runs mise install --locked, which refuses a tool the
+      # lockfile does not pin for this platform. The caller's mise.toml settings apply, because
+      # the action trusts the checkout. cache: false, so every run installs cold and mise
+      # re-verifies each artifact and its provenance line. A restored cache would skip both.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          version: 2026.9.11
+          cache: false
+      # actionlint exits 0 with ShellCheck absent or unable to start, and no flag changes that. A
+      # path that resolves to nothing turns the rule off with no word outside -verbose. This step
+      # writes a workflow whose one finding belongs to ShellCheck and requires the finding back, so
+      # the clean run below carries weight. The path is resolved in its own statement, so a failed
+      # resolution stops the step, and the run below reads the path this step proved.
+      # -pyflakes= turns the Python linter off. No caller pins one, so a finding from it would be
+      # one the caller's gate never reports.
+      - name: ShellCheck present
+        id: shellcheck
+        run: |
+          shellcheck=$(mise which shellcheck)
+          canary=$(mktemp -d)
+          cat > "$canary/canary.yml" <<'CANARY'
+          name: canary
+          on: push
+          jobs:
+            canary:
+              runs-on: ubuntu-latest
+              steps:
+                - run: echo $GITHUB_REF
+          CANARY
+          found=$(mise exec -- actionlint -pyflakes= -shellcheck="$shellcheck" "$canary/canary.yml" || true)
+          case "$found" in
+            *SC2086*) ;;
+            *)
+              echo "::error::actionlint found no SC2086 in a script that carries one, so ShellCheck never ran."
+              echo "::error::Check that ${shellcheck} starts."
+              exit 1
+              ;;
+          esac
+          echo "path=$shellcheck" >> "$GITHUB_OUTPUT"
+      # -shellcheck names the binary the step above proved, so actionlint cannot pick another off
+      # PATH.
+      - name: actionlint
+        env:
+          SHELLCHECK: ${{ steps.shellcheck.outputs.path }}
+        run: mise exec -- actionlint -pyflakes= -shellcheck="$SHELLCHECK"
+      # Online, so the audits that ask GitHub run: a pinned commit outside its action's
+      # repository, a stale action ref. The job token is enough for them and is read-only.
+      # --strict-collection fails on a file zizmor cannot parse. Without it a broken workflow
+      # is dropped and reported as clean. The config is named, so ZIZMOR_CONFIG in the
+      # environment cannot swap it. The input is the workflows directory, the same input the
+      # gate reads, so the two report the same files.
+      - name: zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: mise exec -- zizmor --no-progress --strict-collection --config .github/zizmor.yml .github/workflows

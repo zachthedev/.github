@@ -1,0 +1,33 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "zachthedev/.github: the reusable workflows and the preset. The image pins below exist only here, because the workflows that carry them live only here.",
+    "The Renovate image is looked up on Docker Hub, the one registry whose tags carry a release timestamp, and pulled from ghcr.io by the same digest. The action reads renovate-version natively as ghcr.io/renovatebot/renovate, which has no timestamp and would hold forever, so that dependency is disabled and the regex manager owns the pin."
+  ],
+  "extends": ["github>zachthedev/.github//renovate/bun-tooling"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/deps\\.yml$/"],
+      "matchStrings": [
+        "renovate-version: (?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "depNameTemplate": "renovate/renovate",
+      "datasourceTemplate": "docker"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchManagers": ["github-actions"],
+      "matchDepTypes": ["uses-with"],
+      "matchDepNames": ["ghcr.io/renovatebot/renovate"],
+      "enabled": false
+    },
+    {
+      "description": "One pull request whatever the bump size: the action, the image it runs and the npm package whose validator the gate runs carry the same release line.",
+      "matchDepNames": ["renovate/renovate", "renovatebot/github-action", "renovate"],
+      "groupName": "renovate",
+      "separateMajorMinor": false
+    }
+  ]
+}

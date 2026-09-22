@@ -1,0 +1,74 @@
+name: release-pr
+
+# The release pull request, kept open against the default branch by release-please under the
+# releaser app. A push to the default branch updates it. Merging it is the act that releases:
+# on the next push release-please tags the merge commit and creates the GitHub release as a
+# draft, and this job reports the tag through its outputs. The caller's cd.yml builds on those
+# outputs and calls publish to attach assets and flip the draft.
+#
+# The caller's release-please-config.json carries draft: true and force-tag-creation: true.
+# GitHub creates no tag for a draft, and release-please reads the previous tag to build the next
+# changelog, so the second key makes the tag exist at draft time. The tag is created under the
+# releaser token: the tag ruleset restricts creation, update and deletion, and the releaser app
+# is its one bypass actor, so no other token in a caller can create a tag. A Rust caller running
+# release-plz in its own cd.yml pushes its tags under a releaser token for the same reason. The
+# config is the caller's file, so the release tool holds the version and the changelog and this
+# file holds nothing of either. A root package is the contract: release_created and tag_name are
+# the root outputs.
+on:
+  workflow_call:
+    outputs:
+      released:
+        description: true when this run created a release.
+        value: ${{ jobs.release-pr.outputs.released }}
+      tag:
+        description: The tag of the release this run created, such as v1.2.3.
+        value: ${{ jobs.release-pr.outputs.tag }}
+      version:
+        description: The version of the release this run created, such as 1.2.3.
+        value: ${{ jobs.release-pr.outputs.version }}
+
+permissions: {}
+
+jobs:
+  release-pr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Two pushes landing together would race to write the same pull request. Queued, not
+    # canceled, so the later push still reaches the release notes.
+    concurrency:
+      group: release-pr
+      cancel-in-progress: false
+    # Every credential comes from the app, so the job token gets nothing.
+    permissions: {}
+    # Holds the releaser app's credentials and admits the default branch alone, through a
+    # deployment branch policy naming it. No reviewer: an approval here would hold every push.
+    # deployment: false, because this is a credential scope and not a target, and a record for
+    # every push would bury the ones the publish job writes.
+    environment:
+      name: release-pr
+      deployment: false
+    outputs:
+      released: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      # A pull request opened with the job token starts no workflow run, so no check would
+      # reach the release commit. The app is a distinct actor, and its pull request runs CI.
+      # Narrowed with permission-* inputs. Without one the token carries the whole grant.
+      - id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASER_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASER_PRIVATE_KEY }}
+          # The release branch and its commits, the tag and the release.
+          permission-contents: write
+          # The pull request and its autorelease labels. A label on a pull request falls under
+          # this permission and not under issues.
+          permission-pull-requests: write
+      - id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ steps.token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

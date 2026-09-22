@@ -1,0 +1,11 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "A deployed Bun service, such as a Cloudflare Worker. The bundle carries the dependency tree, so a runtime bump and a lock refresh both change what runs. Each cuts a release.",
+    "config:recommended makes a runtime dependency a fix commit and everything else a chore."
+  ],
+  "extends": ["./default"],
+  "lockFileMaintenance": {
+    "semanticCommitType": "fix"
+  }
+}

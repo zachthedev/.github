@@ -1,0 +1,21 @@
+# Git hooks, installed by `lefthook install`, which the package.json prepare
+# script runs on every `bun install`.
+#
+# Every job resolves its tool with `bunx --no-install`, so the version that
+# runs is the one bun.lock pins and nothing is fetched at commit time. With no
+# installed package the job exits 1, which is a refusal rather than a pass.
+
+commit-msg:
+  jobs:
+    # {1} is the message file git hands the hook. The type list comes from the
+    # Conventional Commits specification and the scopes from
+    # .github/commit-scopes.json, both by way of commitlint.config.js.
+    - name: commitlint
+      run: bunx --no-install commitlint --edit {1}
+
+pre-push:
+  jobs:
+    # The gate, the same script the ci workflow's gate job runs. It runs over
+    # the working tree, so uncommitted edits count toward the result.
+    - name: check
+      run: bun run check

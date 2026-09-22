@@ -1,0 +1,64 @@
+name: ci
+
+# Everything that judges a pull request: the gate on three platforms, the commit messages, the
+# workflow linters and the advisory check. The three shared jobs call the reusable workflows
+# beside this file by relative path, which needs no pin.
+on:
+  # Every pull request, whatever it targets. A stacked pull request is based on the layer
+  # below it, and a base filter would leave each middle layer with no checks.
+  pull_request:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # The gate a contributor runs locally, called and never restated. bun run check:rows prints
+  # what it covers. It resolves every tool through mise which, asserts mise.lock against
+  # mise.toml, then installs, in that order by construction.
+  gate:
+    strategy:
+      # One platform failing still reports the others.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # packageManager in package.json is the one Bun pin.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      # mise alone, verified against the release's signed checksums. install: false, because
+      # the gate asserts mise.lock before it installs from it, and an install here would put
+      # the bytes on disk before the assertions read the file. cache: false for the same
+      # reason: nothing restored ahead of the assertions.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          version: 2026.9.11
+          install: false
+          cache: false
+      # GH_TOKEN, so the gate's zizmor runs online here as it does for a contributor whose
+      # gh auth token succeeds. The job token is read-only.
+      - run: bun run check
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  commits:
+    uses: ./.github/workflows/commits.yml
+
+  workflows:
+    uses: ./.github/workflows/workflows.yml
+
+  dependency-review:
+    uses: ./.github/workflows/dependency-review.yml

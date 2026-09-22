@@ -1,0 +1,100 @@
+name: dependency-review
+
+# Two checks with one action, both on pull requests. Every pull request is checked against its
+# base for a high or critical advisory on a package it adds, in the runtime and development
+# scopes. The release pull request is checked again against the last release tag, runtime scope
+# alone, because users and production hold the last release and not the default branch. A
+# repository with no tag yet is checked against its root commit, so everything reads as added.
+# Only a package the pull request adds or moves fails the check. A package it leaves alone passes
+# whatever is published against it. The waiver is allow-ghsas, passed by the caller with a comment
+# beside it naming the advisory, what it blocks, why shipping is safer and the removal condition.
+#
+# The release pull request is recognized by its head branch. release-please opens
+# release-please--branches--<target>, release-plz opens release-plz-<hash>, and the prefixes
+# input covers both. The last release tag is the nearest tag reachable from the base, whatever
+# its shape: v<version> under release-please, <crate>-v<version> under release-plz. Every tag in
+# a zachthedev repository is a release tag, so no tag pattern is read.
+#
+# The check reads GitHub's dependency graph: direct npm packages under Bun, the full lockfile
+# under Cargo, and no NuGet package under central package management. The caller's
+# CONTRIBUTING.md states which legs the check covers.
+on:
+  workflow_call:
+    inputs:
+      release-branch-prefixes:
+        description: Head branch prefixes that mark a release pull request, space-separated.
+        type: string
+        default: release-please--branches-- release-plz-
+      allow-ghsas:
+        description: Waived advisories, comma-separated GHSA ids. A comment beside the caller's value names each one.
+        type: string
+        default: ''
+
+permissions: {}
+
+jobs:
+  dependency-review:
+    # The refs of the first check come from the pull request event.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The compare API and the checkout read the repository. Nothing here writes.
+    permissions:
+      contents: read
+    steps:
+      # The action reads the working tree for a config-file input alone, so the first check
+      # needs no checkout.
+      - name: Against the base
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          fail-on-scopes: runtime, development
+          allow-ghsas: ${{ inputs.allow-ghsas }}
+      # An expression cannot loop over the prefixes, so the match is one shell case per prefix.
+      # A branch that matches none is a feature pull request, and the steps below are skipped.
+      - name: Release pull request
+        id: release
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          PREFIXES: ${{ inputs.release-branch-prefixes }}
+        run: |
+          release=false
+          for prefix in $PREFIXES; do
+            case "$HEAD_REF" in
+              "$prefix"*) release=true ;;
+            esac
+          done
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+      # The whole history with every tag, checked out at the base, so the last release tag
+      # reachable from the base is readable. Only the release pull request pays for it.
+      - if: steps.release.outputs.release == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      # No event and no action input names the last release tag, so this step reads it from git.
+      # The nearest tag reachable from the base is the last release. Two tags on one commit name
+      # the same commit, so either compares the same. A repository with no tag gets its root.
+      - name: Last release
+        id: last-release
+        if: steps.release.outputs.release == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if tag=$(git describe --tags --abbrev=0 "$BASE_SHA" 2>/dev/null); then
+            echo "ref=$tag" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=$(git rev-list --max-parents=0 "$BASE_SHA" | tail -n 1)" >> "$GITHUB_OUTPUT"
+          fi
+      # base-ref and head-ref override the event's refs. The compare API resolves a tag against
+      # a commit and reports live advisories per package the release adds since that tag.
+      - name: Against the last release
+        if: steps.release.outputs.release == 'true'
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          base-ref: ${{ steps.last-release.outputs.ref }}
+          head-ref: ${{ github.event.pull_request.head.sha }}
+          fail-on-severity: high
+          fail-on-scopes: runtime
+          allow-ghsas: ${{ inputs.allow-ghsas }}

@@ -1,0 +1,49 @@
+name: commits
+
+# Commit messages on a pull request, linted by the commitlint the caller pins. The caller's
+# package.json and bun.lock carry commitlint, and its commitlint.config.js carries the rules and
+# reads .github/commit-scopes.json. The job therefore lints what the caller's commit-msg hook
+# lints, from the same lockfile. The range is the pull request's base..head, and commitlint reads
+# it from git. The title is linted as the subject a squash merge writes: the title with the pull
+# request number appended.
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  commits:
+    # A push carries no pull request range or title, so the job runs on a pull request alone.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      # The whole history, so base..head is present. A shallow clone leaves commitlint nothing to
+      # read. The job pushes nothing, so the token does not stay in the checkout.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # packageManager in the caller's package.json is the one Bun pin. The action verifies no
+      # download, so that pin plus the cooldown is the control.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      # --from and --to are commitlint's own range: it walks base..head in git. --no-install runs
+      # the lockfile's commitlint and refuses to fetch another.
+      - name: Pull request commits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bunx --no-install commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
+      # A squash merge lands the title with the number appended, so that string is what reaches
+      # the default branch and what the header length rule applies to. Both values arrive through
+      # the environment and reach commitlint on stdin, so neither is ever a shell word.
+      - name: Pull request title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: printf '%s (#%s)\n' "$TITLE" "$NUMBER" | bunx --no-install commitlint --verbose

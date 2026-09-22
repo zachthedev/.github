@@ -1,0 +1,4 @@
+# The gitignored files a new worktree is seeded with. Each is a local record or
+# a local install that a worktree needs on day one and the repository never
+# carries.
+node_modules/

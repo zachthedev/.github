@@ -1,0 +1,23 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "A C# application under central package management that ships an installer. The nuget manager cannot tell a runtime package from a test package, because every PackageVersion carries the same depType. A package in Directory.Packages.props is therefore a fix, and the repository names its test-only packages as chore.",
+    "The SDK in global.json, the MSBuild SDKs and the tools in dotnet-tools.json stay chore. A refreshed packages.lock.json changes the assemblies the installer carries, so lock file maintenance is a fix.",
+    "The WiX project is not in the nuget manager's default file list. managerFilePatterns is additive."
+  ],
+  "extends": ["./default"],
+  "nuget": {
+    "managerFilePatterns": ["/\\.wixproj$/"]
+  },
+  "packageRules": [
+    {
+      "matchManagers": ["nuget"],
+      "matchDepTypes": ["nuget"],
+      "matchFileNames": ["Directory.Packages.props"],
+      "semanticCommitType": "fix"
+    }
+  ],
+  "lockFileMaintenance": {
+    "semanticCommitType": "fix"
+  }
+}

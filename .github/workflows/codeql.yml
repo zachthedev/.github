@@ -1,0 +1,85 @@
+name: codeql
+
+# Code scanning from a committed workflow, one analysis per language the caller names, each on
+# the runner and in the build mode the caller gives it. The caller lists the shipped language
+# plus actions itself, and nothing is added here, so the list in the caller's codeql.yml is the
+# whole list. The job name carries the language, so the check run is named Analyze (<language>)
+# and a branch ruleset can require it by that name. In a caller the check run is named
+# <caller job> / Analyze (<language>).
+#
+# An extractor that needs a runtime the runner image may not hold gets it from the official
+# setup action behind an input, so a caller never adds steps of its own. The one case is the C#
+# extractor under build-mode none, which restores through the .NET SDK global.json names.
+#
+# This repository is its own caller. A workflow cannot call itself, because a loop in the
+# workflow tree is refused, so the push, pull request and schedule triggers below run the job
+# directly here, over actions alone. Every other repository carries the caller in the kickstart.
+#
+# codeql-action can fall back from build-mode none to autobuild on a server-side flag and logs
+# it. A first run's log is read before its conclusion is trusted.
+on:
+  workflow_call:
+    inputs:
+      languages:
+        # Each object names a language and can name its runs-on and build-mode. The defaults
+        # are ubuntu-latest and none. For example:
+        # [{"language": "csharp", "runs-on": "windows-latest"}, {"language": "actions"}]
+        description: A JSON array with one object per CodeQL language. Each names language, runs-on and build-mode.
+        type: string
+        required: true
+      global-json-file:
+        description: A global.json path. When set, the .NET SDK it names is installed ahead of every analysis.
+        type: string
+        default: ''
+  push:
+    branches: [main]
+  pull_request:
+  # At least once a week, so a query published after the last change to this repository still
+  # reports against this tree. Thursday, clear of deps.yml's daily cron and audit.yml's.
+  schedule:
+    - cron: '37 9 * * 4'
+
+permissions: {}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ matrix.runs-on || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    # Job level, so it holds when the job is called. A caller's workflow-level group is its
+    # own, and a shared group with cancel-in-progress would cancel the caller.
+    concurrency:
+      group: codeql-${{ matrix.language }}-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      # Uploading the results to code scanning.
+      security-events: write
+      # Reading the checkout and the run's metadata. GitHub names both reads for a private
+      # repository, and granting them here keeps visibility from deciding what the job does.
+      contents: read
+      actions: read
+    strategy:
+      # One language failing still reports the others.
+      fail-fast: false
+      matrix:
+        # A caller must pass languages. The fallback is reachable from this repository's own
+        # triggers alone, where the inputs context is empty.
+        include: ${{ fromJSON(inputs.languages || '[{"language":"actions"}]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The SDK global.json names, for an extractor that restores. The action verifies no
+      # download, so that pin plus the cooldown is the control.
+      - if: inputs.global-json-file != ''
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: ${{ inputs.global-json-file }}
+      - uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode || 'none' }}
+      # The category keeps one language's results from replacing another's.
+      - uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        with:
+          category: '/language:${{ matrix.language }}'

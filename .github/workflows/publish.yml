@@ -1,0 +1,135 @@
+name: publish
+
+# Attaches a caller's build artifacts to the draft release its tag names, attested, and flips
+# the draft public only when the caller asks. The contract:
+#
+# - The caller's cd.yml builds in its own job, uploads the files with actions/upload-artifact,
+#   and calls this workflow after that job with needs. Every file at the root of every matched
+#   artifact is attached, so the caller's artifact is flat.
+# - The tag names the commit this run is for. The caller passes it from its release job's
+#   output, or checks the tag out for a rebuild. The stack-specific build and any deploy stay in
+#   the caller's cd.yml. A Rust repository runs release-plz there and calls this for a binary
+#   attach alone, where its kickstart says so.
+# - The release event cannot start this workflow. GitHub raises no created event for a draft,
+#   and published fires after the flip, which is after the assets must be on the release.
+# - The job token, GITHUB_TOKEN, is what uploads and what flips. An event a workflow raises with
+#   that token starts no workflow run, so no release event follows the flip and no caller
+#   listens for one. A deploy that follows the flip is chained with needs in the caller's cd.yml,
+#   in the same run. No app credential enters this job: the releaser key stays in release-pr,
+#   and a token that raised the event would also carry the tag ruleset bypass into a job that
+#   runs a caller's build output. This job creates no tag. The tag ruleset restricts creation to
+#   the releaser app, and the job token is not its bypass actor.
+# - The job runs in the release environment, which holds the publish approval where the
+#   repository names a reviewer. Its deployment branch policy names the default branch. A
+#   rebuild dispatched on a tag ref needs the tag pattern in that policy too, and nothing else
+#   does.
+# - A user verifies an attached file with gh attestation verify <file> --repo <owner>/<repo>.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The tag of the draft release the artifacts attach to.
+        type: string
+        required: true
+      artifacts:
+        description: A glob over the run's artifact names. Every file in every match is attached.
+        type: string
+        required: true
+      flip:
+        description: Flip the draft public after the upload.
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # One run per tag, so two releases never race and an approval pending on one does not
+    # queue behind another.
+    concurrency:
+      group: publish-${{ inputs.tag }}
+      cancel-in-progress: false
+    environment: release
+    permissions:
+      # Uploading to the release and flipping the draft.
+      contents: write
+      # Signing the attestation with this workflow's identity, and recording it.
+      id-token: write
+      attestations: write
+    env:
+      TAG: ${{ inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      # gh release upload binds nothing between the tag and the commit the artifacts came from,
+      # and a tag input can name any commit. This step refuses a tag that does not name the
+      # commit this run is for, which is the commit the caller built. The ref is read through
+      # the API, so the job needs no checkout. An annotated tag is peeled to its commit.
+      - name: Refuse a tag that does not name this commit
+        run: |
+          object=$(gh api "repos/${GH_REPO}/git/ref/tags/${TAG}" --jq '[.object.type, .object.sha] | join(" ")')
+          type=${object%% *}
+          target=${object##* }
+          if [ "$type" = "tag" ]; then
+            target=$(gh api "repos/${GH_REPO}/git/tags/${target}" --jq '.object.sha')
+          fi
+          if [ "$target" != "$GITHUB_SHA" ]; then
+            echo "::error::${TAG} names ${target} and this run is for ${GITHUB_SHA}."
+            exit 1
+          fi
+      # Every artifact the glob matches lands in one directory, so the attestation and the
+      # upload read one path.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: ${{ inputs.artifacts }}
+          path: dist
+          merge-multiple: true
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+      # --clobber, so a rerun replaces what an earlier attempt attached.
+      - name: Attach to the release
+        run: gh release upload "$TAG" dist/* --clobber
+      # GitHub marks a release it publishes as the latest, whatever its version. Two drafts can
+      # wait for approval at once, and flipping the older second would mark it latest and ship
+      # it last through any deploy the caller chains. The tag has to be ahead of the latest
+      # published release, or on its commit: a workspace releases several crates from one commit,
+      # each under its own tag. A release that is public already, on a rerun or a rebuild, is
+      # left as it is. A draft refused here stays a draft.
+      - name: Refuse to flip a tag behind the latest published release
+        id: flip-guard
+        if: inputs.flip
+        run: |
+          # Its own statement, so a failed read stops the step. The value is held to the two
+          # strings the API writes, so an empty or odd answer cannot read as published.
+          is_draft=$(gh release view "$TAG" --json isDraft --jq '.isDraft')
+          case "$is_draft" in
+            true) flip=true ;;
+            false)
+              flip=false
+              echo "${TAG} is published already."
+              ;;
+            *)
+              echo "::error::gh release view answered '${is_draft}' for isDraft on ${TAG}."
+              exit 1
+              ;;
+          esac
+          latest=$(gh release list --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName // empty')
+          if [ "$flip" = "true" ] && [ -n "$latest" ]; then
+            status=$(gh api "repos/${GH_REPO}/compare/${latest}...${TAG}" --jq '.status')
+            case "$status" in
+              ahead | identical) ;;
+              *)
+                echo "::error::${TAG} is ${status} of ${latest}, which is already published."
+                exit 1
+                ;;
+            esac
+          fi
+          echo "flip=$flip" >> "$GITHUB_OUTPUT"
+      # After the assets and the attestation, so nobody reaches a public release with nothing
+      # on it.
+      - name: Flip the draft public
+        if: inputs.flip && steps.flip-guard.outputs.flip == 'true'
+        run: gh release edit "$TAG" --draft=false

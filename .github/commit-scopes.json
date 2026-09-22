@@ -1,0 +1,13 @@
+[
+  {
+    "scope": "community",
+    "covers": "The default community files GitHub serves to every repository: SECURITY, SUPPORT, the code of conduct, FUNDING, the issue forms, the pull request template and CODEOWNERS"
+  },
+  { "scope": "deps", "covers": "Dependency updates, which Renovate opens under this scope" },
+  { "scope": "gate", "covers": "The check script under scripts/, the tools mise.toml pins, and the hooks" },
+  { "scope": "handbook", "covers": "HANDBOOK.md, the standard every repository is aligned to" },
+  { "scope": "profile", "covers": "The profile README under profile/" },
+  { "scope": "release", "covers": "release-please's configuration and manifest" },
+  { "scope": "renovate", "covers": "The shared presets under renovate/ that every repository extends" },
+  { "scope": "workflows", "covers": "The reusable workflows under .github/workflows/ that every repository calls" }
+]

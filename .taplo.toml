@@ -1,0 +1,6 @@
+# Every TOML file this repository authors, formatted by `taplo fmt`. The gate
+# runs `taplo fmt --check`. mise.lock is written by `mise lock` and carries no
+# .toml extension, so the pattern leaves it alone. node_modules is excluded by
+# name, because taplo walks it whatever .gitignore says.
+include = ["**/*.toml"]
+exclude = ["node_modules/**"]
