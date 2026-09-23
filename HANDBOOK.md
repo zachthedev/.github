@@ -490,10 +490,18 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - a tracked `.npmrc`, because it redirects even the frozen, script-free install.
 - Those checks import only built-in modules, so no package loads before they pass.
 - Every row that walks the tree prints what it checked, the files or their count, and fails on zero. A row that
-  checked nothing reads green otherwise, as a taplo row over an emptied file list did.
+  checked nothing reads green otherwise: taplo and Prettier each exit 0 on empty input.
+  - The actionlint row names the workflow files. With no file argument actionlint also needs a `.git`, so it fails
+    in an archive copy of the tree.
+  - The zizmor row checks the count of files it reports as completed.
+  - The toml row fails unless taplo's own list of found files matches the files the row handed it.
 - Every ignore file a row reads, such as `.prettierignore` and the excludes in `.taplo.toml`, is compared whole
   against a constant in that repository's gate. A change to what a row skips is then a gate change a reviewer
   sees.
+- `.github/zizmor.yml` is compared whole against a constant in that repository's gate as well, because it can
+  disable an audit. A waiver is then a gate change a reviewer sees.
+- The gate refuses a committed `.github/actionlint.yaml`, because its `paths` block can silence every finding. A
+  canonical one is added the day a repository needs it.
 - Where a runtime loads an env file before the gate starts, such as Task's `dotenv`, CI and the `pre-push` hook
   run the tracked-file refusal as their own step, before that runtime starts.
 - A test or script that spawns git drops every inherited `GIT_*` variable for that process and names the
@@ -685,8 +693,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   the source. `proseWrap` is not written. Prose stays as the author wrapped it.
 - One exact Prettier version across every repository, never a range. A bump is one pull request per repository.
 - `.editorconfig` agrees with the config for every file Prettier owns.
-- The Prettier row runs `prettier --check --config .prettierrc .`, with no glob and no ignore flags. `--config`
-  stops every other config search. A generated file the owning tool formats goes in `.prettierignore`.
+- Every Prettier run, the row's, a hook's and the `format` script's, passes `--config .prettierrc` and
+  `--ignore-path .prettierignore`, with no glob. `--config` stops every other config search. `--ignore-path` keeps
+  `.gitignore` from narrowing the check, so `.prettierignore` itself names `.claude/worktrees/` and every other
+  local-only path. A generated file the owning tool formats goes in `.prettierignore` too.
 - A Prettier config can name a plugin, and Prettier loads it before it checks anything. The gate therefore
   parses `.prettierrc` as JSON and compares it whole against the identical file's values, so key order and
   whitespace pass and a file that does not parse is refused. It refuses any other Prettier config file at any
