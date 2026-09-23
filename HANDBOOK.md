@@ -429,6 +429,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   before it is called done.
 - No gate row resolves a tool from the machine's `PATH`. The programs the gate expects on `PATH` are the
   prerequisites `docs/dev.md` names.
+- No gate, hook or shared job starts a tool on a `node` from `PATH`. `bunx` starts a bin whose shebang names
+  `node`, such as Prettier's or commitlint's, under the `node` on `PATH` when one exists, and GitHub's runners
+  carry Node. Every `bunx` therefore passes `--bun`, or the gate starts the tool through Bun by its path under
+  `node_modules`.
 - A gate resolves every program it spawns to an absolute path from `PATH` alone, and spawns that path. It drops
   empty and relative `PATH` entries and any entry inside the repository. Inside the repository compares file
   identity, never spelling. It never runs a bare name, and it never uses a directory the repository tracks or the
@@ -645,8 +649,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   the gate.
 - A Go repository pins lefthook as a `go.mod` tool directive, because lefthook is a Go program and the stack
   leans on its native abilities. Its `package.json` carries commitlint and Prettier alone.
-- A hook job that runs a package resolves it with `bunx --no-install`, so the lockfile's pin runs (Updates).
-  `bunx --no-install` refuses a missing package while `node_modules` exists.
+- A hook job that runs a package resolves it with `bunx --bun --no-install`, so the lockfile's pin runs under Bun
+  (Updates, Gate). `bunx --no-install` refuses a missing package while `node_modules` exists.
 - The hook script `lefthook install` writes fails open where lefthook itself resolves from `node_modules`: Bun,
   and any kind installing lefthook through `package.json`. With no lefthook binary found, it prints
   `Can't find lefthook in PATH` and exits 0, and the commit or push goes through unchecked.
