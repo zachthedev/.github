@@ -7,16 +7,22 @@ name: codeql
 # and a branch ruleset can require it by that name. In a caller the check run is named
 # <caller job> / Analyze (<language>).
 #
-# An extractor that needs a runtime the runner image may not hold gets it from the official
-# setup action behind an input, so a caller never adds steps of its own. The one case is the C#
-# extractor under build-mode none, which restores through the .NET SDK global.json names.
+# Build mode none wherever the extractor supports it. Go has no build mode none, so a Go caller
+# passes build-mode autobuild for its go entry. An extractor that needs a runtime the runner
+# image may not hold gets it from the official setup action behind an input, so a caller never
+# adds steps of its own. The one case is the C# extractor under build-mode none, which restores
+# through the .NET SDK global.json names. A caller whose code sits in a submodule passes
+# submodules, which the checkout reads.
+#
+# Every analysis runs the security-extended suite on the CodeQL bundle the action commit ships,
+# so the CLI version moves with the action pin and under its cooldown.
 #
 # This repository is its own caller. A workflow cannot call itself, because a loop in the
 # workflow tree is refused, so the push, pull request and schedule triggers below run the job
 # directly here, over actions alone. Every other repository carries the caller in the kickstart.
 #
-# codeql-action can fall back from build-mode none to autobuild on a server-side flag and logs
-# it. A first run's log is read before its conclusion is trusted.
+# codeql-action falls back from build-mode none to autobuild for C# and Java on a server-side
+# flag, and logs it. A C# caller reads its first run's log before it trusts the conclusion.
 #
 # A caller's uses: job grants permissions: security-events: write, contents: read, actions: read.
 # A called job can only lower what its caller passes, and a caller passing less is refused before
@@ -35,6 +41,10 @@ on:
         description: A global.json path. When set, the .NET SDK it names is installed ahead of every analysis.
         type: string
         default: ''
+      submodules:
+        description: The checkout's submodules value, false, true or recursive.
+        type: string
+        default: 'false'
   push:
     branches: [main]
   pull_request:
@@ -70,9 +80,11 @@ jobs:
         # triggers alone, where the inputs context is empty.
         include: ${{ fromJSON(inputs.languages || '[{"language":"actions"}]') }}
     steps:
+      # This repository's own triggers carry no inputs, so submodules falls back to false there.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          submodules: ${{ inputs.submodules || 'false' }}
       # The SDK global.json names, for an extractor that restores. The action verifies no
       # download, so that pin plus the cooldown is the control.
       - if: inputs.global-json-file != ''
@@ -83,6 +95,10 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode || 'none' }}
+          # The bundle this action commit ships. Unset, a server-side flag picks the CLI at run
+          # time, which the action pin and its cooldown never see.
+          tools: linked
+          queries: security-extended
       # The category keeps one language's results from replacing another's.
       - uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
