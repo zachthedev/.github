@@ -94,7 +94,7 @@ command. A row that a section owns names that section.
 | `docs/usage.md`                            | own       | every kind but `bun-tooling`; what `--help` and the README do not carry                                                                                                  |
 | `AGENTS.md`                                | shape     | Read first, Verify, Never, Deviations, Where the rest is; substance for the session, a link for the tree                                                                 |
 | `CLAUDE.md`                                | identical | one line, `@AGENTS.md`, below                                                                                                                                            |
-| `.claude/settings.json`                    | shape     | the read-only git allowlist plus what the repository adds, recorded in `CONTRIBUTING.md`                                                                                 |
+| `.claude/settings.json`                    | shape     | `git status` alone allowed, the `--output` and `--no-index` denies, plus what the repository adds, recorded in `CONTRIBUTING.md`                                         |
 | `.gitattributes`                           | shape     | `* text=auto eol=lf`, so a hook or script runs on every host, plus the stack's binary patterns                                                                           |
 | `.gitignore`                               | shape     | Authoring                                                                                                                                                                |
 | `.editorconfig`                            | shape     | Formatting                                                                                                                                                               |
@@ -146,6 +146,8 @@ command. A row that a section owns names that section.
   `.yaml` keeps the tool's name.
 - `.claude/` holds the settings file alone until a shared dotfiles repository assembles the owner's rules, hooks
   and skills into every repository.
+- The shared `.claude/settings.json` allows `git status` alone. A permission rule is a text match that quoting
+  evades, so a deny on an argument never makes a broader allow safe. An allow goes instead.
 
 ## Adapters
 
@@ -447,10 +449,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     xtask resolves each program with `which::which_global` and spawns the absolute path.
 - Bun's script runner puts the checkout's `node_modules/.bin` first on `PATH`, so under `bun run` a committed
   `node_modules/.bin/bun` would replace the gate itself. In a Bun repository CI therefore installs with
-  `bun install --frozen-lockfile --ignore-scripts`, and the gate's first row refuses any tracked path under
-  `node_modules`. `bun run check` stays the documented command. CI and the `pre-push` hook call the gate script
-  directly, as `bun scripts/check.ts`, because a bare `bun <file>` skips the script runner. The refusal therefore
-  runs before every merge.
+  `bun install --frozen-lockfile --ignore-scripts`, the shared `commits` job's install included, and the gate
+  refuses any tracked path under `node_modules` before its first row. `bun run check` stays the documented
+  command. CI and the `pre-push` hook call the gate script directly, as `bun scripts/check.ts`, because a bare
+  `bun <file>` skips the script runner. The refusal therefore runs before every merge.
 - A pull request controls its own gate code: `package.json` scripts, `check.ts`, `cake.cs`, an MSBuild `Exec`, a
   `build.rs`. No gate therefore makes running an untrusted pull request safe, in CI or on a contributor's
   machine. In CI, GitHub's approval for a fork's pull request and the gate job's read-only, tokenless shape
@@ -517,7 +519,13 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   ignore file hides a workflow from that input. It collects `dependabot.yml` and the composite actions under
   `.github/actions`, and it never walks `node_modules`, a worktree or a submodule. A composite action outside
   `.github` is named as a second file input, with the reason beside it.
-- zizmor's online audits run in the shared `workflows` job alone, on every pull request and weekly from
+- The shared `workflows` job runs beside the caller's gate, not after it, so a red gate stops nothing there.
+  Before any mise command reads the checkout, the job refuses what the gate refuses: another mise config, lock or
+  rc file, a root file named like a program a gate starts, and a link at the root or under `.config`, `.mise` or
+  `mise`. Its `Refused keys` step then reads `mise.toml` and `mise.lock` with Python's `tomllib` and refuses any
+  key outside the gate's allow-lists (Tools). A job holding a token loads no `mise.toml` whose keys are unchecked,
+  because mise evaluates exec templates on any load of a trusted config.
+- zizmor's online audits run in the shared `workflows` job alone, on every pull request and daily from
   `audit.yml`. That job is the one CI job whose steps name the job token: its zizmor step and its lockfile asset
   check under Tools. The one exception is a `mise install --locked` step for a tool mise's registry does not
   route, below.
@@ -538,11 +546,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   already sits in the job, and the unauthenticated limit of 60 requests an hour per runner address fails installs
   at random. The gate step itself stays tokenless.
 - A scheduled workflow's header states the requirement its section names and claims nothing tighter (Known
-  defects). `deps` runs at least once a day. `codeql` and the `audit.yml` job that calls `workflows` run weekly.
-  The advisory reports run on the clocks Advisories names.
-- After any edit to a scheduled workflow's cron line, the `if:` that names the cron changes with it, and the
-  owner confirms the failure notification still reaches a person (Known defects). A job gated on a cron string
-  its schedule no longer raises skips forever, green.
+  defects). `deps` and every `audit.yml` job run at least once a day, on one cron each. `codeql` runs weekly.
+- No job compares a cron string. A job gated on a string its schedule no longer raises skips forever, green, so a
+  workflow runs every job on its one clock.
+- After any edit to a scheduled workflow's cron line, the owner confirms the failure notification still reaches a
+  person (Known defects).
 
 ## CodeQL
 
@@ -610,8 +618,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   the gate.
 - A Go repository pins lefthook as a `go.mod` tool directive, because lefthook is a Go program and the stack
   leans on its native abilities. Its `package.json` carries commitlint and Prettier alone.
-- A hook resolves its tool with `bunx --no-install`, so the lockfile's pin runs (Updates). `bunx --no-install`
-  refuses a missing package while `node_modules` exists.
+- A hook job that runs a package resolves it with `bunx --no-install`, so the lockfile's pin runs (Updates).
+  `bunx --no-install` refuses a missing package while `node_modules` exists.
 - The hook script `lefthook install` writes fails open where lefthook itself resolves from `node_modules`: Bun,
   and any kind installing lefthook through `package.json`. With no lefthook binary found, it prints
   `Can't find lefthook in PATH` and exits 0, and the commit or push goes through unchecked.
@@ -670,7 +678,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - the `go-cli` preset types the `go` and `toolchain` lines `fix`, because they pick the standard library linked
     into the binary;
   - the `csharp-installer` preset types the .NET SDK in `global.json` `fix`, because the installer ships that
-    SDK's runtime (Tools).
+    SDK's runtime (Tools);
+  - the `rust-app` preset types a `rust-toolchain` bump `fix`, because std links into the shipped binary. The
+    `rust-crates` preset leaves it `chore`.
 - `zachthedev/.github` types a pin inside a reusable workflow `fix`, because callers run it.
 - A `zachthedev/**` bump's SHA is on `.github`'s `main`. The reviewer checks it with
   `gh api repos/zachthedev/.github/compare/main...<sha>`, reading `behind` or `identical`.
@@ -725,10 +735,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A tool-tree advisory with no fixed version is held by pinning the tool back, or by disabling `govulncheck tool`
   with a dated reason at its drift site until a fix ships. `CONTRIBUTING.md` says so.
 - Live whole-tree readers run as reports, never as checks: `bun audit` daily, `cargo deny check advisories`
-  weekly, `dotnet package list --vulnerable` weekly. They run from `audit.yml`, on its own clock. A repository
+  daily, `dotnet package list --vulnerable` daily. They run from `audit.yml`, on its own clock. A repository
   with an audit script or waivers runs that script in the daily job, not bare `bun audit`. GitHub's
-  database lacks RustSec entries that OSV carries, and the weekly report covers those. `audit.yml` also carries a
-  weekly job that calls the reusable `workflows` workflow, so zizmor's online audits of the pinned actions run
+  database lacks RustSec entries that OSV carries, and the daily report covers those. `audit.yml` also carries a
+  daily job that calls the reusable `workflows` workflow, so zizmor's online audits of the pinned actions run
   without a pull request. A red run is the report.
 - The advisory check sees direct npm packages only under Bun, no NuGet package under central package
   management, and full lockfiles under Cargo. `CONTRIBUTING.md` states which legs the check covers.
