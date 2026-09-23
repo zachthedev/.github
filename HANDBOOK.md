@@ -527,8 +527,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   because mise evaluates exec templates on any load of a trusted config.
 - zizmor's online audits run in the shared `workflows` job alone, on every pull request and daily from
   `audit.yml`. That job is the one CI job whose steps name the job token: its zizmor step and its lockfile asset
-  check under Tools. The one exception is a `mise install --locked` step for a tool mise's registry does not
-  route, below.
+  check under Tools. It installs taplo, ShellCheck, actionlint and zizmor alone, each routed by mise's registry,
+  so its install names no token. The one exception elsewhere is a caller job's `mise install --locked` step for a
+  tool mise's registry does not route, below.
 - In CI the gate runs zizmor with `--offline`, and the gate step holds no token. Locally the gate runs zizmor
   online when `gh auth token` answers, handing the token to zizmor's process alone, and passes `--offline`
   otherwise, never as a silent default. That token comes from gh's credential store, so an empty `GH_CONFIG_DIR`
@@ -546,7 +547,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   already sits in the job, and the unauthenticated limit of 60 requests an hour per runner address fails installs
   at random. The gate step itself stays tokenless.
 - A scheduled workflow's header states the requirement its section names and claims nothing tighter (Known
-  defects). `deps` and every `audit.yml` job run at least once a day, on one cron each. `codeql` runs weekly.
+  defects). `deps` runs at least once a day, and so does every `audit.yml` job, on that workflow's one cron.
+  `codeql` runs weekly.
 - No job compares a cron string. A job gated on a string its schedule no longer raises skips forever, green, so a
   workflow runs every job on its one clock.
 - After any edit to a scheduled workflow's cron line, the owner confirms the failure notification still reaches a
