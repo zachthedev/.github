@@ -45,8 +45,9 @@ jobs:
       # install: false and a pinned version it reads no repository file, and the bin directory it
       # puts on PATH lies outside the workspace the checkout cleans. The action verifies its own
       # download against the release's minisign-signed checksums. cache: false, so nothing is
-      # restored. github_token: '', because a locked install makes no GitHub API request, and
-      # the default exports the job token as MISE_GITHUB_TOKEN to every later step. env: false
+      # restored. github_token: '', because a locked install of a tool mise's registry routes, as
+      # the four this job installs are, makes no GitHub API request, and the default exports the
+      # job token as MISE_GITHUB_TOKEN to every later step. env: false
       # and export_path: false, because the defaults write the output of mise env --json to
       # GITHUB_ENV and mise's PATH entries to GITHUB_PATH. add_shims_to_path: false, so a bare
       # program name in a later step never resolves to a tool the caller's mise.toml pins. Every

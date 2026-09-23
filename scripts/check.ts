@@ -36,7 +36,8 @@ const BUN = process.execPath;
 // environment every row's processes inherit. gh's own two are kept aside for
 // `gh auth token` alone, so gh answers as it would from the contributor's
 // shell, and the workflows row hands its answer to zizmor alone. A locked mise
-// install makes no api.github.com request, so no row has a use for mise's.
+// install of a tool mise's registry routes, as every tool here is, makes no
+// api.github.com request, so no row has a use for mise's.
 // CI's gate step carries none of them, so there zizmor runs offline.
 const GH_ENVIRONMENT: Readonly<Record<string, string | undefined>> = {
   GH_TOKEN: process.env['GH_TOKEN'],
