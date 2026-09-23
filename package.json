@@ -7,8 +7,8 @@
   "scripts": {
     "check": "bun scripts/check.ts",
     "check:rows": "bun scripts/check.ts --rows",
-    "format": "bunx --bun --no-install prettier --write .",
-    "prepare": "lefthook install"
+    "format": "bunx --bun --no-install prettier --config .prettierrc --write .",
+    "prepare": "bunx --bun --no-install lefthook install"
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.2",
