@@ -560,6 +560,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   and it goes.
 - The `commits` workflow runs commitlint over the pull request range and over the subject the squash writes,
   with ` (#N)` appended.
+- The subject lint runs with every commitlint ignore off, the config's and commitlint's defaults alike, so a
+  header an ignore skips in the range is still checked where it lands. A pull request GitHub's revert button
+  opens, titled `Revert "..."`, fails it until it is retitled to the revert form (Commits).
 - Before its install, the `commits` workflow refuses any tracked path with a `node_modules` segment, nested ones
   included, without regard to case. `bun install` keeps a tracked package directory at the locked version, and
   `bunx` then runs that copy. The job runs beside every caller's gate, whatever the caller's stack, so it holds
