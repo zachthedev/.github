@@ -26,7 +26,16 @@ name: publish
 #   repository names a reviewer. Its deployment branch policy names the default branch. A
 #   rebuild dispatched on a tag ref needs the tag pattern in that policy too, and nothing else
 #   does.
-# - A user verifies an attached file with gh attestation verify <file> --repo <owner>/<repo>.
+# - The attestation is recorded through GitHub's attestations API, not attached as a release
+#   asset, and one attestation covers every attached file. This workflow signs it, so a user
+#   verifies an attached file with gh attestation verify <file> --repo <owner>/<repo>
+#   --signer-workflow zachthedev/.github/.github/workflows/publish.yml, which proves the source
+#   repository and the signer. --repo alone fails, because the signer is this repository's
+#   workflow. To bind the file to its tag as well, the user resolves the tag's commit and adds
+#   --source-digest <sha>. That binds, because this job refuses a tag that does not name the
+#   commit the run is for. --source-ref refs/tags/<tag> fails on every genuine file, because the
+#   caller's cd.yml runs on a push to the default branch and the certificate records that
+#   branch.
 # - A caller's uses: job grants permissions: contents: write, id-token: write, attestations: write.
 #   A called job can only lower what its caller passes, and a caller passing less is refused before
 #   any step runs.
