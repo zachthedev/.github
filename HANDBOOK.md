@@ -905,9 +905,13 @@ restates none of the specification's rules.
   under release-plz. No prose restates it or gives its reason.
 - Below `1.0.0` a breaking change bumps the minor: release-please through `bump-minor-pre-major`, release-plz by
   its own default. The changelog carries the break. Under release-plz a `feat` below `1.0.0` bumps the patch.
+- A Rust workspace releases in lockstep. Its released crates share one release-plz `version_group`, and
+  `release_commits` makes a release need a user-facing change (Releases). Every crate takes the shared
+  `[workspace.package]` version. `release_commits` without a `version_group` holds back a crate that saw no
+  user-facing change without rewriting its dependents' requirements, so a breaking release then fails
+  `cargo update`.
 - A prerelease is `-rc.N`. Everything that reads the tag admits it before the first one is cut.
-- Tags are `v`-prefixed: `v<version>`. A crate that versions on its own inside a workspace tags
-  `<crate>-v<version>`.
+- Tags are `v`-prefixed: `v<version>`. A workspace crate tagged on its own takes `<crate>-v<version>`.
 - An installer or an assembly carries the numeric core alone, so a prerelease is not an upgrade path.
   `docs/install.md` says so under Upgrade.
 
