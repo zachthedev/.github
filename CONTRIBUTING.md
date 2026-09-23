@@ -72,10 +72,10 @@ title and each commit as a bullet. Either subject lands with ` (#NNN)` appended,
 title within 65 characters. A body paragraph never opens with a bare type, because release-please reads it as a
 second change.
 
-A pull request's title takes the type of its most user-facing commit, and `!` when any commit breaks something a
-caller sees, because a squash of several commits lands the title's type alone. A squash whose title hid a
-user-facing change is corrected before the release pull request merges, with an override in the merged pull
-request's description that release-please reads in place of the landed message:
+A pull request's title takes the type of its most user-facing commit, and `!` when any commit breaks something
+users see. A squash of several commits lands the title alone, so without the `!` a break and its major bump are
+lost. A squash whose title hid a user-facing change is corrected before the release pull request merges, with an
+override in the merged pull request's description that release-please reads in place of the landed message:
 
 ```text
 BEGIN_COMMIT_OVERRIDE
