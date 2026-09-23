@@ -427,12 +427,24 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   before it is called done.
 - No gate row resolves a tool from the machine's `PATH`. The programs the gate expects on `PATH` are the
   prerequisites `docs/dev.md` names.
-- On Windows a bare program name resolves from the current directory before `PATH`. Every gate spawn therefore
-  goes through one place that resolves its program to an absolute path from `PATH` alone, never from the current
-  directory or an empty `PATH` entry. The Bun gate runs Bun itself as `process.execPath`.
-- The gate refuses a committed file named like a program it spawns, such as `gh`, `mise`, `bun` or `git` with a
-  Windows executable extension, so a red row fires before any spawn reaches one.
-- PLACEHOLDER, replaced before the pull request opens: the Go, Rust and C# mechanism for the two rules above.
+- A gate resolves every program it spawns to an absolute path from `PATH` alone, and spawns that path. It drops
+  empty and relative `PATH` entries and any entry inside the repository. It never runs a bare name, and it never
+  uses a directory the repository tracks or the process starts in as a lookup location. On Windows a bare name
+  can otherwise resolve from the current directory or a tracked tool directory before `PATH`.
+- Where a stack's spawn searches such a directory, the gate also refuses a committed file named like a program it
+  spawns, such as `gh`, `mise`, `bun` or `git`, with an executable extension or none. A red row then fires before
+  any spawn reaches one. Per stack:
+  - Bun: `Bun.spawnSync` searches the current directory first, in CreateProcess's order. `scripts/run.ts`
+    therefore resolves every program itself and runs Bun as `process.execPath`, and the gate refuses committed
+    tool-named files.
+  - C#: Cake's tool locator globs `./tools/**/<name>` before `PATH`. Each tool therefore resolves through a
+    `PATH`-only lookup passed to `WithToolPath`, and the gate refuses tool-named files under `tools/` and at the
+    root.
+  - Go: `os/exec` refuses a name resolved from the current directory (`exec.ErrDot`), and Task's interpreter
+    searches `PATH` alone, so the rule holds by construction. Task's `dotenv` loads `.env`, which can set `PATH`
+    or `GODEBUG`, so `.env` stays gitignored. Nothing sets `GODEBUG=execerrdot=0` or a `.` or empty `PATH` entry.
+  - Rust: `Command` searches the running binary's own directory, then `PATH`, and never the current directory.
+    xtask resolves each program with `which::which_global` and spawns the absolute path.
 - A pull request controls its own gate code: `package.json` scripts, `check.ts`, `cake.cs`, an MSBuild `Exec`, a
   `build.rs`. No gate therefore makes running an untrusted pull request safe, in CI or on a contributor's
   machine. In CI, GitHub's approval for a fork's pull request and the gate job's read-only, tokenless shape
@@ -949,6 +961,10 @@ bears on, the defect, and the condition that removes it.
   `continue` upstream.
 - wrangler (Gate): `wrangler types --check` compares a hash of the config inputs against the file's header and
   passes a hand-edited body. The gate regenerates the file and diffs it. Removed once the check reads the body.
+- Windows `NoDefaultCurrentDirectoryInExePath` (Gate): a shell that sets it hides the current-directory search of
+  CreateProcess and Bun. A probe run from such a shell reports no exposure where a runner or a maintainer's
+  terminal has one, so a probe sets its child's environment explicitly. Windows documents the variable, so the
+  entry stays.
 - gofmt (Gate): `gofmt -l` exits 0 with an unformatted file present. golangci-lint's formatter is the check.
   gofmt documents that exit code, so the entry stays.
 - codeql-action (CodeQL): falls back from `build-mode: none` to `autobuild` for C# and Java on a server-side
