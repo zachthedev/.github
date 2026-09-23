@@ -91,7 +91,11 @@ jobs:
       # and a longer one under the title, each with the pull request number appended. That string
       # reaches the default branch, so it is the one the header length rule reads. Every value
       # arrives through the environment and reaches commitlint on stdin, so none is ever a shell
-      # word.
+      # word. The caller's rules apply with every ignore off: its config's own ignores and
+      # commitlint's defaults (merge, revert, fixup and version subjects) each match text a
+      # contributor can type into a title or subject. The config that turns them off is written
+      # fresh at the root, over anything tracked there, since commitlint resolves a config's
+      # extends from the config's own directory.
       - name: Squash subject
         env:
           TITLE: ${{ github.event.pull_request.title }}
@@ -104,4 +108,8 @@ jobs:
           else
             subject=$TITLE
           fi
-          printf '%s (#%s)\n' "$subject" "$NUMBER" | bunx --bun --no-install commitlint --verbose
+          config=.commitlint-landing.mjs
+          rm -f -- "$config"
+          printf '%s\n' "import config from './commitlint.config.js';" \
+            'export default { ...config, ignores: [], defaultIgnores: false };' > "$config"
+          printf '%s (#%s)\n' "$subject" "$NUMBER" | bunx --bun --no-install commitlint --config "$config" --verbose
