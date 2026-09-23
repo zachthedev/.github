@@ -40,12 +40,25 @@ jobs:
       # runs that copy. A tracked .npmrc, at any depth, redirects the install's registry. A
       # package.json patchedDependencies entry is applied even by a frozen install without scripts,
       # so one naming an @commitlint package or a package commitlint.config.js imports is refused.
-      # Paths match without regard to case, as Windows and macOS open them. A failed git or jq call,
-      # a malformed package.json among them, stops the step.
+      # commitlint takes the first config it finds, and a package.json commitlint key, a
+      # package.yaml and a .commitlintrc file each come before commitlint.config.js in its search.
+      # So every commitlint config but the root commitlint.config.js is refused at any depth, a
+      # package.yaml whole, since the step reads no YAML, and every tracked package.json is read for
+      # the key. Paths match without regard to case, as Windows and macOS open them. A failed git or
+      # jq call, a malformed package.json among them, stops the step.
       - name: Refused paths
         run: |
           tracked=$(git ls-files)
           found=$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)node_modules/|(^"?|/)\.npmrc"?$' || true)
+          configs=$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)(\.commitlintrc[^/]*|commitlint\.config\.[^/]*|package\.yaml"?)$' | grep -vxF commitlint.config.js || true)
+          keyed=""
+          while IFS= read -r manifest; do
+            [ -n "$manifest" ] || continue
+            carries=$(jq 'if type == "object" then has("commitlint") else error("is not an object") end' "$manifest")
+            if [ "$carries" = true ]; then
+              keyed+="$manifest"$'\n'
+            fi
+          done <<< "$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)package\.json"?$' || true)"
           patched=$(jq -r '(.patchedDependencies // {}) | if type == "object" then keys[] else error("patchedDependencies is not an object") end' package.json)
           imported=""
           if [ -f commitlint.config.js ]; then
@@ -66,14 +79,20 @@ jobs:
                 ;;
             esac
           done <<< "$patched"
-          if [ -n "$found" ] || [ -n "$refused" ]; then
+          if [ -n "$found" ] || [ -n "$configs" ] || [ -n "$keyed" ] || [ -n "$refused" ]; then
             while IFS= read -r path; do
               [ -n "$path" ] && echo "::error::$(printf '%q' "$path") is tracked, and bun install would read it in place of what bun.lock names."
             done <<< "$found"
+            while IFS= read -r path; do
+              [ -n "$path" ] && echo "::error::$(printf '%q' "$path") can hold a commitlint config, and commitlint.config.js at the root is the one commitlint config."
+            done <<< "$configs"
+            while IFS= read -r path; do
+              [ -n "$path" ] && echo "::error::$(printf '%q' "$path") carries a commitlint key, and commitlint.config.js at the root is the one commitlint config."
+            done <<< "$keyed"
             while IFS= read -r entry; do
               [ -n "$entry" ] && echo "::error::package.json patches $(printf '%q' "$entry"), a package commitlint loads."
             done <<< "$refused"
-            echo "::error::Remove each path from the index and each patch named above."
+            echo "::error::Remove each path, commitlint key and patch named above."
             exit 1
           fi
       # --ignore-scripts, so no lifecycle script and no prepare script from the caller's tree
