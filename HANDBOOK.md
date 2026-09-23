@@ -452,8 +452,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `node_modules/.bin/bun` would replace the gate itself. In a Bun repository CI therefore installs with
   `bun install --frozen-lockfile --ignore-scripts`, the shared `commits` job's install included, and the gate
   refuses any tracked path with a `node_modules` segment, at any depth, before its first row. `bun run check` stays
-  the documented command. CI and the `pre-push` hook call the gate script directly, as `bun scripts/check.ts`, because a bare
-  `bun <file>` skips the script runner. The refusal therefore runs before every merge.
+  the documented command. CI and the `pre-push` hook call the gate script directly, as `bun scripts/check.ts`,
+  because a bare `bun <file>` skips the script runner. The refusal therefore runs before every merge.
 - A pull request controls its own gate code: `package.json` scripts, `check.ts`, `cake.cs`, an MSBuild `Exec`, a
   `build.rs`. No gate therefore makes running an untrusted pull request safe, in CI or on a contributor's
   machine. In CI, GitHub's approval for a fork's pull request and the gate job's read-only, tokenless shape
@@ -533,6 +533,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   included, without regard to case. `bun install` keeps a tracked package directory at the locked version, and
   `bunx` then runs that copy. The job runs beside every caller's gate, whatever the caller's stack, so it holds
   the refusal itself.
+- The same step refuses a tracked `.npmrc` at any depth, because it redirects the install's registry. It refuses a
+  `package.json` `patchedDependencies` entry for an `@commitlint` package or a package `commitlint.config.js`
+  imports, because a frozen install without scripts still applies it.
 - The `workflows` workflow runs actionlint and zizmor. The gate proves ShellCheck ran by writing a canary
   workflow with an unquoted variable and requiring the finding back. actionlint exits 0 with ShellCheck absent,
   and no flag changes that.
