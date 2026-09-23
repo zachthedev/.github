@@ -6,8 +6,8 @@ Install before committing. [docs/dev.md#prerequisites](docs/dev.md#prerequisites
 and `bun install` installs the dependencies and the git hooks. The commit hook checks every commit message
 before it is recorded, and the push hook runs the gate and refuses the push when it fails.
 
-Each hook job resolves its tool through `bunx --no-install`, which refuses a missing package and fetches nothing.
-The hook script `lefthook install` writes fails open. When it finds no lefthook binary, as in a checkout whose
+The commit hook runs commitlint through `bunx --no-install`, which refuses a missing package and fetches nothing,
+and the push hook runs `bun scripts/check.ts`. The hook script `lefthook install` writes fails open. When it finds no lefthook binary, as in a checkout whose
 `node_modules/` is gone, it prints `Can't find lefthook in PATH` and exits 0, and the commit or push goes through
 unchecked. A fresh clone runs no hook at all until `bun install` runs. CI's `commits` job and gate hold both
 cases.
@@ -32,8 +32,8 @@ run there.
 installing them.
 
 The `workflows` row runs zizmor online when `gh auth token` answers within its deadline, and hands that token to
-zizmor's process alone. Otherwise it runs zizmor offline, and the row's label says which. In CI the gate runs
-zizmor offline and holds no token. gh reads its token from the system credential store, so an empty
+zizmor's process alone. Otherwise it runs zizmor offline, and the row's label says which. `ZIZMOR_OFFLINE`, set to
+any value, forces offline. In CI the gate runs zizmor offline and holds no token. gh reads its token from the system credential store, so an empty
 `GH_CONFIG_DIR` leaves it reachable.
 
 A few checks run only in CI, each because it needs something a working machine does not have. The `commits`
@@ -43,7 +43,8 @@ repository, an advisory against a pinned action and a version comment naming the
 asset `mise.lock` names against GitHub's record of it. Both need the job token, and no gate job holds one. The
 `dependency-review` job compares the pull request's dependencies against its base through GitHub's dependency
 graph. That review sees the direct npm packages `package.json` names and nothing under `bun.lock`, which is the
-one leg it covers here. `codeql` is GitHub's analysis and runs on GitHub. Its `Analyze` checks are required, and
+one leg it covers here. `codeql` is GitHub's analysis, over the TypeScript gate every Bun repository copies and
+over the workflows, and it runs on GitHub. Its `Analyze` checks are required, and
 a code-scanning rule refuses a merge while an analysis is missing or still running
 ([What never happens](#what-never-happens)).
 
@@ -130,18 +131,21 @@ None. The gate's rows are the checks, and the break round in the alignment recor
 - Every process the gate starts goes through `scripts/run.ts`, so every one carries a deadline.
 - `scripts/run.ts` resolves every program to an absolute path from `PATH` alone, and Bun itself runs as
   `process.execPath`. On Windows a bare program name resolves from the current directory before `PATH`, so a
-  committed `gh.bat` would otherwise run in place of gh. The gate refuses a committed file named like a program
-  it spawns.
+  committed `gh.bat` would otherwise run in place of gh. The gate refuses a root file whose name before the first
+  dot is a program it or its hooks start, gh, bun, git or mise, whatever its extension. `bun.lock`, `mise.toml`
+  and `mise.lock` are the named exceptions.
 - The gate starts mise with an environment built from an allow-list, never the one it inherited, and refuses a
   tracked `.env` file, which Bun would load into the gate's environment. A template such as `.env.example`
   passes.
 - Bun's script runner puts `node_modules/.bin` first on `PATH`, so under `bun run` a committed
   `node_modules/.bin/bun` would replace the gate. CI installs with `bun install --frozen-lockfile --ignore-scripts`,
-  and the gate's first row refuses any tracked path under `node_modules`. CI and the push hook call
+  and before its first row the gate refuses any tracked path under `node_modules`. CI and the push hook call
   `bun scripts/check.ts` directly, which skips the script runner, so the refusal runs before every merge.
 - A row throws with the tool's own output, so a red row reads the same as running the tool by hand.
-- Every binary resolves through `mise which`, `bunx --no-install` or `bun node_modules/<package>/…`. Nothing
-  reads the machine's own installs.
+- Every package runs from its path under `node_modules`, and every tool `mise.toml` pins from the path
+  `mise which` prints. mise, gh and git each start from an absolute `PATH` entry outside the checkout.
+- ESLint lints and Prettier formats. An ESLint rule that is wrong for this code is turned off in
+  `eslint.config.ts` with its reason beside it.
 
 ## Dependencies
 
@@ -154,6 +158,12 @@ version the `deps` workflow runs.
 replaces Bun's built-in allow list, which would otherwise build a native addon Renovate lists as optional and
 never needs here.
 
+Two TypeScript compilers are installed on purpose. The `typecheck` row runs the native TypeScript 7 compiler from
+the `@typescript/native` alias, called by its path because `typescript` ships a `tsc` too. `typescript` stays on
+6.x for typescript-eslint, which reads types through the 6.x compiler API and declares a peer range below 6.1.0.
+A rule in `.github/renovate.json` holds it below 6.1.0. Once typescript-eslint supports TypeScript 7,
+`typescript` moves to 7.x, and the alias and the rule go.
+
 The advisory check sees the direct npm packages `package.json` names. A transitive advisory under `bun.lock`
 is fixed by hand from the alert with `bun audit fix`.
 
@@ -164,7 +174,8 @@ Each tool the gate runs, and how its bytes are held to their source:
 - ShellCheck and taplo: a checksum in a pinned tree, `mise.lock`. The `workflows` job also holds ShellCheck's
   checksum to the digest GitHub records for its asset. taplo's checksums were computed once from its release
   artifacts, as `mise.toml` records.
-- commitlint, Prettier, lefthook, TypeScript, zod and renovate: a checksum in a pinned tree, `bun.lock`.
+- commitlint, ESLint, typescript-eslint, Prettier, lefthook, TypeScript, zod and renovate: a checksum in a pinned
+  tree, `bun.lock`.
 - Bun itself: a version alone. `packageManager` plus the cooldown is the control, because the setup action
   verifies no download.
 
