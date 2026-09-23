@@ -523,8 +523,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   route, below.
 - In CI the gate runs zizmor with `--offline`, and the gate step holds no token. Locally the gate runs zizmor
   online when `gh auth token` answers, handing the token to zizmor's process alone, and passes `--offline`
-  otherwise, never as a silent default. That token comes from gh's credential store, so an empty `GH_CONFIG_DIR` leaves it
-  reachable.
+  otherwise, never as a silent default. That token comes from gh's credential store, so an empty `GH_CONFIG_DIR`
+  leaves it reachable.
 - `gh auth token` runs under a short deadline of its own, and a timeout reads as no token.
 - Every other process the gate starts runs without any token variable a gate tool reads, `GITHUB_API_TOKEN` and
   `MISE_GITHUB_ENTERPRISE_TOKEN` included.
