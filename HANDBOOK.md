@@ -547,8 +547,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   Commits specification's recommendation. git's own `Revert "..."` subject is never used: commitlint skips it,
   and release-please cannot parse it.
 - A pull request's title takes the type of its most user-facing commit, and `!` when any commit breaks something
-  users see. A squash of several commits lands the title alone, so without the `!` a break and its major bump are
-  lost.
+  users see. A squash of several commits lands the title as its header, so a `!` in a commit's own header is lost
+  unless the title carries it. A `BREAKING CHANGE:` footer in a commit's body survives the squash.
 - A body paragraph never opens with a bare type, because release-please reads it as a second change.
 
 ## Hooks

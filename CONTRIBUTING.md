@@ -73,9 +73,10 @@ title within 65 characters. A body paragraph never opens with a bare type, becau
 second change.
 
 A pull request's title takes the type of its most user-facing commit, and `!` when any commit breaks something
-users see. A squash of several commits lands the title alone, so without the `!` a break and its major bump are
-lost. A squash whose title hid a user-facing change is corrected before the release pull request merges, with an
-override in the merged pull request's description that release-please reads in place of the landed message:
+users see. A squash of several commits lands the title as its header, so a `!` in a commit's own header is lost
+unless the title carries it. A `BREAKING CHANGE:` footer in a commit's body survives the squash. A squash whose
+title hid a user-facing change is corrected before the release pull request merges, with an override in the
+merged pull request's description that release-please reads in place of the landed message:
 
 ```text
 BEGIN_COMMIT_OVERRIDE
