@@ -3,6 +3,7 @@
   "description": [
     "A Rust workspace that publishes crates to crates.io and ships a built artifact. Versions live in [workspace.dependencies], which mixes runtime and development crates. A workspace bump is therefore a fix, and the repository names its development-only crates as chore.",
     "The toolchain pin is exact, moves on its own branch and is a fix, by the rule below. The cargo manager's own commit topic is overridden, so a header reads bump serde, not bump Rust crate serde.",
+    "Lock file maintenance is a chore, as in every preset, so a refreshed transitive crate ships with the next release a user-facing change cuts. An advisory against one does not wait for it: the security update path opens its fix at once.",
     "osvVulnerabilityAlerts reads OSV, which carries RustSec entries GitHub's database lacks. Renovate marks the option experimental."
   ],
   "extends": ["./default"],
@@ -24,8 +25,5 @@
       "rangeStrategy": "pin",
       "semanticCommitType": "fix"
     }
-  ],
-  "lockFileMaintenance": {
-    "semanticCommitType": "fix"
-  }
+  ]
 }
