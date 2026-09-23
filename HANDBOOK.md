@@ -777,9 +777,14 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `MISE_OVERRIDE_TOOL_VERSIONS_FILENAMES=none`, `MISE_ENV=''` and `MISE_AUTO_ENV=false`. mise reads
   `.tool-versions` under the config override alone, and with auto env on it reads per-platform config files. The
   pins are the second layer behind the refusal above.
-- Every workflow that runs mise sets the four pins and the same map at workflow level. Every `jdx/mise-action`
-  step sets `env: false` and `export_path: false`, and a later step reaches a tool through its `mise which` path
-  or its shim. With `env` on, the action writes `mise env --json` into `GITHUB_ENV`, where a config's `[env]`
+- Every workflow that runs mise sets the four pins and the same map at workflow level. A called workflow does not
+  inherit its caller's workflow-level `env`, so each shared job sets its own. Every `jdx/mise-action` step sets
+  `env: false` and `export_path: false`, and a later step reaches a tool through its `mise which` path or its
+  shim.
+- Every job that runs `jdx/mise-action` runs it before `actions/checkout`. The action always runs
+  `mise --version` and `mise ls` and trusts the workspace, so a checked-out `mise.toml`'s `exec` templates would
+  run in that step, before any gate refusal. With `install: false` and a pinned mise version, the action needs no
+  repository file, and its bin directory stays on `PATH` through the checkout. With `env` on, the action writes `mise env --json` into `GITHUB_ENV`, where a config's `[env]`
   template renders with the runner's tokens in reach.
 - Every stack's gate starts mise with an environment built from an allow-list: what mise needs, plus the pins. It
   never passes an inherited environment through, so no `MISE_` name from a `.env` file, the shell or CI's exported
