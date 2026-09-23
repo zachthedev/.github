@@ -11,3 +11,10 @@ rules:
   # refuses $/ as a malformed call (rhysd/actionlint#711). Off until actionlint accepts $/.
   self-repository:
     disable: true
+  # An advisory published against an unchanged action pin turns every pull request's workflows
+  # check red until the pin moves. A waiver is one GHSA id per entry, with a comment beside it
+  # naming the advisory, what it blocks, why shipping is safer and the condition that removes it.
+  # No advisory is waived.
+  known-vulnerable-actions:
+    config:
+      allow: []
