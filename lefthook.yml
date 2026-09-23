@@ -1,8 +1,10 @@
 # Git hooks, installed by `lefthook install`, which the package.json prepare
 # script runs on every `bun install`.
 #
-# Every job resolves its tool with `bunx --no-install`, so the version that
-# runs is the one bun.lock pins and nothing is fetched at commit time. When
+# Every job resolves its tool with `bunx --bun --no-install`, so the version
+# that runs is the one bun.lock pins, nothing is fetched at commit time, and
+# the tool runs under Bun rather than a node on PATH, which bunx otherwise
+# picks for a bin whose shebang names node. When
 # lefthook runs and a job's package is missing, the job exits 1, a refusal.
 # When node_modules is gone, lefthook itself is missing: the installed hook
 # script exits 0 and the commit or push goes through. CI's commits job and
@@ -14,7 +16,7 @@ commit-msg:
     # Conventional Commits specification and the scopes from
     # .github/commit-scopes.json, both by way of commitlint.config.js.
     - name: commitlint
-      run: bunx --no-install commitlint --edit {1}
+      run: bunx --bun --no-install commitlint --edit {1}
 
 pre-push:
   jobs:

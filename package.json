@@ -7,7 +7,7 @@
   "scripts": {
     "check": "bun scripts/check.ts",
     "check:rows": "bun scripts/check.ts --rows",
-    "format": "prettier --write .",
+    "format": "bunx --bun --no-install prettier --write .",
     "prepare": "lefthook install"
   },
   "devDependencies": {
