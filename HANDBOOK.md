@@ -445,14 +445,18 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     or `GODEBUG`, so `.env` stays gitignored. Nothing sets `GODEBUG=execerrdot=0` or a `.` or empty `PATH` entry.
   - Rust: `Command` searches the running binary's own directory, then `PATH`, and never the current directory.
     xtask resolves each program with `which::which_global` and spawns the absolute path.
+- Bun's script runner puts the checkout's `node_modules/.bin` first on `PATH`, so a committed
+  `node_modules/.bin/bun` would replace the gate itself. In a Bun repository CI therefore installs with
+  `bun install --frozen-lockfile --ignore-scripts`, the gate's first row refuses any tracked path under
+  `node_modules`, and each check script starts the gate through `"$npm_execpath"`, never a bare `bun`.
 - A pull request controls its own gate code: `package.json` scripts, `check.ts`, `cake.cs`, an MSBuild `Exec`, a
   `build.rs`. No gate therefore makes running an untrusted pull request safe, in CI or on a contributor's
   machine. In CI, GitHub's approval for a fork's pull request and the gate job's read-only, tokenless shape
   contain one. On a contributor's machine, reading the diff before running anything contains one.
 - The file refusals, the program resolution, and the `mise.toml` and environment allow-lists under Tools do
   something narrower. They keep a code path from hiding in files that read as data, such as `mise.toml`, a
-  lockfile, a `.env` file, a stray config or a binary named like a tool, where a reviewer skimming a diff does not
-  look for one.
+  lockfile, a `.env` file, a stray config, a tracked `node_modules` path or a binary named like a tool, where a
+  reviewer skimming a diff does not look for one.
 - A Bun gate refuses a tracked env file Bun loads on its own, `.env` and its variants, because Bun loads it into
   the gate's environment (Known defects). A template such as `.env.example` passes.
 - A test or script that spawns git drops every inherited `GIT_*` variable for that process and names the
