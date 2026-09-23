@@ -12,16 +12,22 @@
  * running this file, every package runs from its path under node_modules,
  * every pinned tool resolves through `mise which`, and mise, gh and git start
  * from an absolute PATH entry outside the checkout alone. Before any row, the
- * gate refuses to run beside a tracked env file Bun loads or a tracked path
- * under node_modules.
+ * gate refuses to run beside a tracked env file Bun loads, a tracked `.npmrc`,
+ * a tracked path under node_modules, a Prettier config other than the root
+ * `.prettierrc` it expects, a bunfig.toml that holds anything but the install
+ * cooldown, or anything that would steer how Bun resolves the gate's own
+ * imports.
  */
 
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { styleText } from 'node:util';
+// Every module imported here reads Bun and node: built-ins alone, so nothing
+// under node_modules loads before the preflight in main() refuses a planted
+// package. tools.ts imports zod, so the rows that need it import it there.
 import { describe, run, trackedFindings } from './run';
-import { install, lockfileFindings, resolve } from './tools';
+import { startupFindings } from './startup';
 
 /** The deadline for one linter or formatter pass over the tree. */
 const TOOL_TIMEOUT_MS = 300_000;
@@ -66,11 +72,13 @@ const binaries = new Map<string, string>();
  *
  * @remarks
  * A single row run with `bun run check <row>` skips the `tools` row, so the
- * map is filled from `mise which` on first use. That resolves installed
- * binaries and checks their versions; it installs nothing.
+ * map is filled from `mise which` on first use. That asserts mise.toml and
+ * mise.lock first, resolves installed binaries and checks their versions; it
+ * installs nothing.
  */
 async function binary(key: string): Promise<string> {
   if (binaries.size === 0) {
+    const { resolve } = await import('./tools');
     for (const [tool, path] of await resolve()) {
       binaries.set(tool, path);
     }
@@ -103,12 +111,11 @@ function packaged(label: string, entry: string, ...args: string[]): () => undefi
 
 /* ///// tools ///// */
 
+// install() asserts the root, mise.toml and mise.lock before mise starts, as
+// every mise command the gate runs does.
 async function tools(): Promise<undefined> {
-  const found = await lockfileFindings();
-  if (found.length > 0) {
-    throw new Error(found.join('\n'));
-  }
-  install();
+  const { install, resolve } = await import('./tools');
+  await install();
   for (const [key, path] of await resolve()) {
     binaries.set(key, path);
   }
@@ -225,10 +232,11 @@ const rows: readonly Row[] = [
   },
   {
     name: 'typecheck',
-    checks: 'tsc --noEmit over the gate',
+    checks: 'tsc --noEmit over scripts with its own tsconfig.json',
     // The native TypeScript 7 compiler, called by its alias's path because the 6.x `typescript` package that
-    // typescript-eslint needs ships a tsc of its own.
-    check: packaged('tsc', '@typescript/native/bin/tsc', '--noEmit'),
+    // typescript-eslint needs ships a tsc of its own. The gate is the only TypeScript here, so scripts/ holds the
+    // one config, and a root config would have no inputs.
+    check: packaged('tsc', '@typescript/native/bin/tsc', '--noEmit', '--project', 'scripts'),
   },
   {
     name: 'lint',
@@ -237,8 +245,9 @@ const rows: readonly Row[] = [
   },
   {
     name: 'format',
-    checks: 'prettier --check over the tree',
-    check: packaged('prettier', 'prettier/bin/prettier.cjs', '--check', '.'),
+    checks: 'prettier --check over the tree, with .prettierrc as the one config',
+    // --config names the one config, so Prettier searches for no other file, and a config under a subdirectory never loads.
+    check: packaged('prettier', 'prettier/bin/prettier.cjs', '--check', '--config', '.prettierrc', '.'),
   },
   {
     name: 'toml',
@@ -291,14 +300,16 @@ async function main(): Promise<number> {
   console.log(dim('check'));
   console.log();
 
-  // Bun loaded any env file here into this process before it ran, and a file
-  // tracked under node_modules stands in for what bun install would put
-  // there, so no row runs beside either. This comes before any other process
-  // the gate starts.
-  const tracked = trackedFindings();
-  if (tracked.length > 0) {
-    console.log(`  ${glyph(false)} ${'tracked'.padEnd(width)}  ${dim('no row ran')}`);
-    console.log(`    ${tracked.join('\n    ')}`);
+  // Bun loaded any env file here into this process, ran any preload
+  // bunfig.toml names, and resolved this file's imports before this line. A
+  // tracked .npmrc steered the install, and a file tracked under node_modules
+  // stands in for what bun install would put there. So no row runs beside
+  // any of them. This comes before any other process the gate starts, and a
+  // single row run passes through it too.
+  const refused = [...trackedFindings(), ...(await startupFindings())];
+  if (refused.length > 0) {
+    console.log(`  ${glyph(false)} ${'preflight'.padEnd(width)}  ${dim('no row ran')}`);
+    console.log(`    ${refused.join('\n    ')}`);
     return 1;
   }
   const failures: string[] = [];

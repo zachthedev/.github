@@ -1,7 +1,7 @@
-import { accessSync, constants, readdirSync, realpathSync, statSync } from 'node:fs';
+import { accessSync, constants, readFileSync, realpathSync, statSync } from 'node:fs';
 import { delimiter, extname, isAbsolute, join, sep } from 'node:path';
 
-/** The deadline for the one git call the env-file check makes. */
+/** The deadline for the one git call the tracked-file check makes. */
 const GIT_TIMEOUT_MS = 60_000;
 
 /**
@@ -20,48 +20,141 @@ const BUN_ENV_FILES: readonly string[] = [
   '.env.test.local',
 ];
 
+/** The file bun install reads a registry and its scopes from, in the directory it starts in. */
+const NPMRC = '.npmrc';
+
+/**
+ * Every file name Prettier 3 searches for a config, beside the one
+ * `.prettierrc` the gate names with `--config`. A `.js`, `.ts`, `.mjs`,
+ * `.mts`, `.cjs` or `.cts` one runs as code, and any of them can name a
+ * plugin, which runs too.
+ */
+const PRETTIER_CONFIGS: readonly string[] = [
+  '.prettierrc',
+  '.prettierrc.json',
+  '.prettierrc.yml',
+  '.prettierrc.yaml',
+  '.prettierrc.json5',
+  '.prettierrc.js',
+  'prettier.config.js',
+  '.prettierrc.ts',
+  'prettier.config.ts',
+  '.prettierrc.mjs',
+  'prettier.config.mjs',
+  '.prettierrc.mts',
+  'prettier.config.mts',
+  '.prettierrc.cjs',
+  'prettier.config.cjs',
+  '.prettierrc.cts',
+  'prettier.config.cts',
+  '.prettierrc.toml',
+  'package.yaml',
+];
+
+/** The one Prettier config the gate reads, at the root. */
+export const PRETTIERRC = '.prettierrc';
+
 /** How many tracked paths under node_modules a finding names before it counts the rest. */
 const NODE_MODULES_SHOWN = 5;
 
+/** Characters that change how a line reads without printing: bidi controls, zero-width marks, line and paragraph separators, and interlinear annotation marks. */
+const INVISIBLE = /[\u061C\u200B-\u200F\u2028-\u202E\u2060-\u206F\uFEFF\uFFF9-\uFFFB]/g;
+
+/**
+ * `value`, read from a file the gate checks, for a finding: JSON-encoded, so a
+ * control character prints as an escape, with every {@link INVISIBLE}
+ * character escaped too, and cut short.
+ */
+export function quote(value: string): string {
+  return JSON.stringify(value.slice(0, 200)).replace(
+    INVISIBLE,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`,
+  );
+}
+
+/**
+ * Whether the `package.json` at `path` carries a top-level `prettier` key. A
+ * file that does not parse is read as carrying one, so it is refused rather
+ * than passed.
+ */
+function packageNamesPrettier(path: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    return typeof parsed === 'object' && parsed !== null && Object.hasOwn(parsed, 'prettier');
+  } catch {
+    // Unreadable or malformed: refused, since Prettier's reading of it is unknown.
+    return true;
+  }
+}
+
+/** The last segment of a `/`-separated path, lowercased. */
+function baseName(path: string): string {
+  return (path.split('/').pop() ?? path).toLowerCase();
+}
+
 /**
  * Every tracked file the gate refuses to run beside, as findings: an env file
- * Bun loads here, and any path under `node_modules`.
+ * Bun loads here, an `.npmrc`, any path under a `node_modules` directory at
+ * any depth, and every Prettier config but the root `.prettierrc`, a
+ * `package.json` `prettier` key included.
  *
  * @remarks
  * Bun loads an env file into the gate's environment before the gate runs, so
- * a committed one sets variables for every process the gate starts. `bun
- * install` keeps a committed file under `node_modules` in place of what it
- * would install, and `bun run` puts `node_modules/.bin` ahead of PATH. The
- * gate calls this before any other process, and before CI's install
- * matters. A contributor's own untracked env file passes. git starts with its
- * two config switches and nothing else, so no variable an env file set
- * reaches it.
+ * a committed one sets variables for every process the gate starts. bun
+ * install fetches from the registry an `.npmrc` names, and CI's install runs
+ * before the gate. `bun install` keeps a committed file under `node_modules`
+ * in place of what it would install, `bun run` puts `node_modules/.bin` ahead
+ * of PATH, and a nearer `node_modules` shadows the installed package for the
+ * files beside it. The format row and the commit hook pass `--config
+ * .prettierrc`, which stops Prettier's search, so another config loads only
+ * where Prettier runs without the flag. The gate calls this before any other
+ * process. A contributor's own untracked env file or `.npmrc` passes. git
+ * starts with its two config switches and nothing else, so no variable an env
+ * file set reaches it.
  */
 export function trackedFindings(): string[] {
-  const envFiles = readdirSync('.').filter((name) => BUN_ENV_FILES.includes(name.toLowerCase()));
+  // icase, because Bun on Windows and macOS opens `.ENV` as `.env`, and a
+  // literal pathspec matches case-sensitively even under core.ignorecase.
+  const startupFiles = [...BUN_ENV_FILES, NPMRC].map((name) => `:(icase,literal)${name}`);
+  const prettierFiles = [...PRETTIER_CONFIGS, 'package.json'].map((name) => `:(icase,glob)**/${name}`);
   const listed = run(
-    ['git', 'ls-files', '-z', '--', ':(icase)node_modules', ...envFiles.map((name) => `:(literal)${name}`)],
+    ['git', 'ls-files', '-z', '--', ':(icase,glob)**/node_modules/**', ...startupFiles, ...prettierFiles],
     GIT_TIMEOUT_MS,
     // /dev/null is the spelling Git for Windows reads as an empty file too.
     { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
     { inherit: false },
   );
   if (listed.exitCode !== 0) {
-    return [`git could not list the tracked env files and node_modules paths: it ${describe(listed)}`];
+    return [`git could not list the tracked files the gate refuses: it ${describe(listed)}`];
   }
   const paths = listed.stdout.split('\0').filter((path) => path.length > 0);
-  const modules = paths.filter((path) => path.toLowerCase().startsWith('node_modules/'));
-  const found = paths
-    .filter((path) => !modules.includes(path))
-    .map(
-      (path) =>
-        `${JSON.stringify(path)} is tracked, and Bun loads it into the environment of every bun run here. Remove it from the index: git rm --cached -- ${path}`,
-    );
+  const modules = paths.filter((path) => /(^|\/)node_modules\//i.test(path));
+  const found: string[] = [];
+  for (const path of paths.filter((entry) => !modules.includes(entry))) {
+    const name = baseName(path);
+    if (name === 'package.json') {
+      if (packageNamesPrettier(path)) {
+        found.push(`${quote(path)} carries a prettier key, and ${PRETTIERRC} is the one Prettier config`);
+      }
+    } else if (PRETTIER_CONFIGS.includes(name)) {
+      if (path.toLowerCase() !== PRETTIERRC) {
+        found.push(`${quote(path)} is a Prettier config, and ${PRETTIERRC} at the root is the one Prettier config`);
+      }
+    } else if (name === NPMRC) {
+      found.push(
+        `${quote(path)} is tracked, and bun install fetches from the registry it names. Remove it from the index: git rm --cached -- ${path}`,
+      );
+    } else {
+      found.push(
+        `${quote(path)} is tracked, and Bun loads it into the environment of every bun run here. Remove it from the index: git rm --cached -- ${path}`,
+      );
+    }
+  }
   if (modules.length > 0) {
-    const shown = modules.slice(0, NODE_MODULES_SHOWN).map((path) => JSON.stringify(path));
+    const shown = modules.slice(0, NODE_MODULES_SHOWN).map((path) => quote(path));
     const more = modules.length > NODE_MODULES_SHOWN ? ` and ${String(modules.length - NODE_MODULES_SHOWN)} more` : '';
     found.push(
-      `${shown.join(', ')}${more} ${modules.length === 1 ? 'is' : 'are'} tracked under node_modules, which bun install keeps and bun run puts ahead of PATH. Remove them from the index: git rm -r --cached -- node_modules`,
+      `${shown.join(', ')}${more} ${modules.length === 1 ? 'is' : 'are'} tracked under a node_modules directory. bun install keeps what it finds there, bun run puts node_modules/.bin ahead of PATH, and Bun resolves an import from the nearest node_modules first. Remove each from the index with git rm -r --cached`,
     );
   }
   return found;
@@ -74,9 +167,10 @@ export function trackedFindings(): string[] {
  * A file at the repository root named like one of these, with any extension
  * or none, is refused by the tools row. {@link resolveProgram} never reads
  * the working directory, so none of them can stand in for the program either
- * way. The gate starts gh, git and mise by name, and the hooks start bun.
+ * way. The gate starts gh, git and mise by name, the hooks start bun and
+ * bunx, and lefthook's install script starts node.
  */
-export const PROGRAM_NAMES: readonly string[] = ['bun', 'gh', 'git', 'mise'];
+export const PROGRAM_NAMES: readonly string[] = ['bun', 'bunx', 'gh', 'git', 'mise', 'node'];
 
 /**
  * Whether `name`'s part before its first dot, compared without regard to
