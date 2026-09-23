@@ -988,6 +988,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A Rust workspace:
   - `release-plz.toml` carries `git_release_draft = true` and `git_release_latest = false`.
   - A workspace publishing nothing adds `git_only = true` and marks `xtask` with `release = false`.
+  - A crate whose `Cargo.toml` says `publish = false` also carries `publish = false` in its `release-plz.toml`
+    entry, or the workspace sets it. release-plz's `release` refuses such a crate while its entry leaves `publish`
+    at the default, and `release = false` does not cover it. `update` and `release-pr` never check it, so the first
+    real release run is where it fails.
   - `release-update` computes the release. It runs in no environment, with a job token that reads and
     `MISE_ENV=semver`, and runs `release-plz update` with the semver check. The check builds rustdoc for each
     changed library and its published baseline, which runs every dependency's build script, so the job holds no
