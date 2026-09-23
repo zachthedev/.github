@@ -434,10 +434,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   carry Node. Every `bunx` therefore passes `--bun`, or the gate starts the tool through Bun by its path under
   `node_modules`.
 - A gate resolves every program it spawns to an absolute path from `PATH` alone, and spawns that path. It drops
-  empty and relative `PATH` entries and any entry inside the repository. Inside the repository compares file
-  identity, never spelling. It never runs a bare name, and it never uses a directory the repository tracks or the
-  process starts in as a lookup location. On Windows a bare name can otherwise resolve from the current directory
-  or a tracked tool directory before `PATH`.
+  empty and relative `PATH` entries, any entry inside the repository and any entry inside the running
+  executable's directory. Inside compares file identity, never spelling. It never runs a bare name, and it never
+  uses a directory the repository tracks or the process starts in as a lookup location. On Windows a bare name
+  can otherwise resolve from the current directory or a tracked tool directory before `PATH`.
+- Every gate hands its children a `PATH` with no entry inside the checkout, so a child resolving a bare name
+  cannot reach one either.
 - Where a stack's spawn searches such a directory, the gate also refuses a committed file named like a program it
   or its hooks start: `bun`, `bunx`, `gh`, `git`, `mise` or `node`, with an executable extension or none. A red row
   then fires before any spawn reaches one. Per stack:
@@ -451,7 +453,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     searches `PATH` alone, so the rule holds by construction. Task's `dotenv` loads `.env`, which can set `PATH`
     or `GODEBUG`, so `.env` stays gitignored. Nothing sets `GODEBUG=execerrdot=0` or a `.` or empty `PATH` entry.
   - Rust: `Command` searches the running binary's own directory, then `PATH`, and never the current directory.
-    xtask resolves each program with `which::which_global` and spawns the absolute path.
+    On Windows `cargo run`, and so `cargo xtask`, puts `target\debug` and `target\debug\deps` first on `PATH`,
+    and the `which` crate also accepts `.com`, `.bat`, `.cmd` and extensionless files. xtask therefore searches
+    only absolute, existing entries whose canonical path lies outside the running executable's directory and
+    outside the checkout, accepts `.exe` alone on Windows, and passes the same narrowed `PATH` to every child.
 - Bun's script runner puts the checkout's `node_modules/.bin` first on `PATH`, so under `bun run` a committed
   `node_modules/.bin/bun` would replace the gate itself. In a Bun repository CI therefore installs with
   `bun install --frozen-lockfile --ignore-scripts`, the shared `commits` job's install included, and the gate
@@ -482,6 +487,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     `--ignore-scripts` install still applies it;
   - a tracked `.npmrc`, because it redirects even the frozen, script-free install.
 - Those checks import only built-in modules, so no package loads before they pass.
+- Every row that walks the tree prints what it checked, the files or their count, and fails on zero. A row that
+  checked nothing reads green otherwise, as a taplo row over an emptied file list did.
+- Every ignore file a row reads, such as `.prettierignore` and the excludes in `.taplo.toml`, is compared whole
+  against a constant in that repository's gate. A change to what a row skips is then a gate change a reviewer
+  sees.
 - Where a runtime loads an env file before the gate starts, such as Task's `dotenv`, CI and the `pre-push` hook
   run the tracked-file refusal as their own step, before that runtime starts.
 - A test or script that spawns git drops every inherited `GIT_*` variable for that process and names the
@@ -571,10 +581,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every `jdx/mise-action` step takes an empty `github_token`, so the action exports no token to later steps.
 - A locked install reads a registry tool's attestations from mise's versions host. A tool mise's registry does not
   route queries the GitHub API on every install.
-- A job installing such a tool runs `mise install --locked` as its own step, before any step that runs repository
-  code. That step alone sets `MISE_GITHUB_TOKEN` to the job token, under the job's `contents: read`. The token
-  already sits in the job, and the unauthenticated limit of 60 requests an hour per runner address fails installs
-  at random. The gate step itself stays tokenless.
+- A job installing such a tool runs the gate's checks of `mise.toml` and `mise.lock` first. Then a step that runs
+  nothing but `mise install --locked` sets `MISE_GITHUB_TOKEN` to the job token, under the job's
+  `contents: read`, and that step alone names it. The token already sits in the job, and the unauthenticated
+  limit of 60 requests an hour per runner address fails installs at random. The gate step itself stays tokenless.
+- A step order inside one job is no boundary, since the token sits in the runner's memory. Installing before the
+  checks would run an unchecked `mise.toml`'s hooks in the token step.
 - A scheduled workflow's header states the requirement its section names and claims nothing tighter (Known
   defects). `deps` runs at least once a day, and so does every `audit.yml` job, on that workflow's one cron.
   `codeql` runs weekly.
@@ -848,6 +860,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every stack's gate starts mise with an environment built from an allow-list: what mise needs, plus the pins. It
   never passes an inherited environment through, so no `MISE_` name from a `.env` file, the shell or CI's exported
   environment reaches mise unless the gate sets it (Known defects).
+- What mise needs, measured on CI runners, is `MISE_TRUSTED_CONFIG_PATHS` naming the checkout and the proxy
+  variables in both cases, plus on Unix `HOME`, `TMPDIR`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` and `XDG_STATE_HOME`,
+  and on Windows `SYSTEMROOT`, `LOCALAPPDATA`, `TEMP` and `TMP`. `XDG_CONFIG_HOME` stays out.
 - Before setting a `MISE_` variable, the gate removes every case spelling of that name from the inherited
   environment. On Windows a differently cased inherited name wins over the one the gate sets.
 - Before any install, the gate reads `mise.lock` with the stack's TOML library, for every tool and every platform
