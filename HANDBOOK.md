@@ -489,6 +489,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     `--ignore-scripts` install still applies it;
   - a tracked `.npmrc`, because it redirects even the frozen, script-free install.
 - Those checks import only built-in modules, so no package loads before they pass.
+- Every gate refuses any commitlint config but the root `commitlint.config.js`: a `.commitlintrc*`, another
+  `commitlint.config.*` and a `package.json` `commitlint` key. commitlint searches those first, so one would
+  replace the shared config.
 - Every row that walks the tree prints what it checked, the files or their count, and fails on zero. A row that
   checked nothing reads green otherwise: taplo and Prettier each exit 0 on empty input.
   - The actionlint row names the workflow files. With no file argument actionlint also needs a `.git`, so it fails
@@ -560,9 +563,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   and it goes.
 - The `commits` workflow runs commitlint over the pull request range and over the subject the squash writes,
   with ` (#N)` appended.
-- The subject lint runs with every commitlint ignore off, the config's and commitlint's defaults alike, so a
-  header an ignore skips in the range is still checked where it lands. A pull request GitHub's revert button
-  opens, titled `Revert "..."`, fails it until it is retitled to the revert form (Commits).
+- The subject lint runs through a generated wrapper that turns every commitlint ignore off, the caller's and
+  commitlint's defaults alike, so a header an ignore skips in the range is still checked where it lands. The range
+  lint and the commit hook keep the caller's ignores. A `Revert "..."` or merge subject fails the subject lint.
+  The revert form (Commits) and squash-only merging make that right, and a pull request GitHub's revert button
+  opens passes once it is retitled.
+- The workflow refuses any other commitlint config before its install, as every gate does (Gate).
 - Before its install, the `commits` workflow refuses any tracked path with a `node_modules` segment, nested ones
   included, without regard to case. `bun install` keeps a tracked package directory at the locked version, and
   `bunx` then runs that copy. The job runs beside every caller's gate, whatever the caller's stack, so it holds
