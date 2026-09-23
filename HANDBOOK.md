@@ -813,6 +813,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A self-contained installer ships the runtime of the SDK that builds it, so a looser pin lets two builds of one
   commit ship different runtimes. The pin is the SDK carrying the newest runtime past the cooldown, never one
   behind what builds ship. Renovate bumps the SDK as `fix(deps)`, and the bump cuts a release (Updates).
+- A .NET Framework project references `Microsoft.NETFramework.ReferenceAssemblies` explicitly, with
+  `PrivateAssets="all"` and its version in `Directory.Packages.props`. The SDK adds that package only on a machine
+  lacking the framework's targeting pack, so a lock file written on one machine otherwise fails a locked restore
+  (`NU1004`) on another. A lock change is proven with `AutomaticallyUseReferenceAssemblyPackages=false` as well as
+  with the default.
 - A backend is chosen for integrity: the one whose entry reaches the higher tier, and `aqua:` on a tie. `cargo:`
   and `ubi:` record no lockfile integrity, so neither is used (Known defects).
 - Each tool's integrity tier is stated under Dependencies in `CONTRIBUTING.md`. The tiers: provenance, a
