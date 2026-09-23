@@ -437,9 +437,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `build.rs`. No gate therefore makes running an untrusted pull request safe, in CI or on a contributor's
   machine. In CI, GitHub's approval for a fork's pull request and the gate job's read-only, tokenless shape
   contain one. On a contributor's machine, reading the diff before running anything contains one.
-- The file refusals, the program resolution and the `mise.toml` allow-list under Tools do something narrower.
-  They keep a code path from hiding in files that read as data, such as `mise.toml`, a lockfile, a stray config or
-  a binary named like a tool, where a reviewer skimming a diff does not look for one.
+- The file refusals, the program resolution, and the `mise.toml` and environment allow-lists under Tools do
+  something narrower. They keep a code path from hiding in files that read as data, such as `mise.toml`, a
+  lockfile, a `.env` file, a stray config or a binary named like a tool, where a reviewer skimming a diff does not
+  look for one.
+- A Bun gate refuses a tracked env file Bun loads on its own, `.env` and its variants, because Bun loads it into
+  the gate's environment (Known defects). A template such as `.env.example` passes.
 - A test or script that spawns git drops every inherited `GIT_*` variable for that process and names the
   repository with `-C <root>`. git exports `GIT_DIR` and `GIT_INDEX_FILE` to a hook, so a gate the hook runs
   otherwise writes into the hook's own repository.
@@ -758,6 +761,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   step sets `env: false` and `export_path: false`, and a later step reaches a tool through its `mise which` path
   or its shim. With `env` on, the action writes `mise env --json` into `GITHUB_ENV`, where a config's `[env]`
   template renders with the runner's tokens in reach.
+- Every stack's gate starts mise with an environment built from an allow-list: what mise needs, plus the pins. It
+  never passes an inherited environment through, so no `MISE_` name from a `.env` file, the shell or CI's exported
+  environment reaches mise unless the gate sets it (Known defects).
 - Before setting a `MISE_` variable, the gate removes every case spelling of that name from the inherited
   environment. On Windows a differently cased inherited name wins over the one the gate sets.
 - Before any install, the gate reads `mise.lock` with the stack's TOML library, for every tool and every platform
@@ -975,6 +981,10 @@ bears on, the defect, and the condition that removes it.
   and `[vars]`, even from a home with no trust state, while `mise which` refuses an untrusted config.
   `MISE_NO_ENV` and `MISE_NO_HOOKS` leave `[vars]` running, so the `mise.toml` allow-list is the control, not an
   environment pin. Removed once `mise install` refuses an untrusted config as `mise which` does.
+- mise global config (Tools, Gate): Bun loads a committed `.env` into the gate's environment. That file can name
+  `MISE_GLOBAL_CONFIG_FILE`, which mise honors whatever the config-name pins say. `jdx/mise-action` trusts the
+  whole workspace, so a hook in any repository file then runs. The environment allow-list and the `.env` refusal
+  exist for this. Removed once mise holds `MISE_GLOBAL_CONFIG_FILE` to the config-name pins.
 - Immutable releases (Tags): an immutable release locks the tag with its assets. The cleanup in
   `gh release delete --cleanup-tag` is a ref deletion, so it is refused. A bad release leaves the tag on the
   wrong commit with the version spent. Removed once a fork of release-please tracks burned version tags and
