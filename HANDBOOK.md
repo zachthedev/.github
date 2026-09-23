@@ -376,6 +376,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - An app can hold several keys. A key is deleted only after every repository holding it moves. The owner loads
   each secret. A key never enters an agent's transcript.
 - Before changing an app, its key or its installation, list what uses it.
+- Converting the `zachthedev` account into an organization uninstalls every App, and it locks the crates.io owner
+  out, because crates.io signs in through GitHub. Before any conversion, every published crate gains a second
+  named crates.io owner. After it, both Apps are reinstalled and Actions is re-enabled.
 - The publish job uploads and flips the draft with the job token, `GITHUB_TOKEN`, and no app credential. An event
   that token raises starts no workflow run, and the token carries no tag ruleset bypass into a job that handles a
   caller's build output.
