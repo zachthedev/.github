@@ -1,10 +1,10 @@
 name: workflows
 
 # actionlint and zizmor over the caller's .github directory, at the versions the caller's
-# mise.toml pins and from the artifacts its mise.lock records. mise-action finds the lockfile and
-# runs mise install --locked, so the job installs the bytes the caller's gate installs. A run of
-# this job and a run of the gate read the same two files, and both prove ShellCheck ran before
-# they trust a clean actionlint run.
+# mise.toml pins and from the artifacts its mise.lock records. The job runs mise install --locked
+# over the checkout, so it installs the bytes the caller's gate installs. A run of this job and a
+# run of the gate read the same two files, and both prove ShellCheck ran before they trust a clean
+# actionlint run.
 #
 # The job token sits in this job and in no gate job. Inside a job a step's environment is not a
 # boundary, since any step can read the token from the runner, so the token goes to the job that
@@ -24,7 +24,7 @@ permissions: {}
 # install to any url. The names and values are the gate's own: no other config filename, no
 # .tool-versions, no environment-specific file, and the url_replacements rule that sends mise's
 # url_api fallback to a host that does not resolve. The environment outranks every file mise
-# reads, .miserc.toml included.
+# reads, .miserc.toml included. A called workflow inherits no caller's env, so these are set here.
 env:
   MISE_OVERRIDE_CONFIG_FILENAMES: mise.toml
   MISE_OVERRIDE_TOOL_VERSIONS_FILENAMES: none
@@ -39,6 +39,27 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Before the checkout, so no repository file exists while the action runs. It always runs
+      # mise --version and mise ls, and trusts the workspace, so a caller's mise.toml would have
+      # its [env] and [vars] exec templates evaluated here, ahead of every refusal below. With
+      # install: false and a pinned version it reads no repository file, and the bin directory it
+      # puts on PATH lies outside the workspace the checkout cleans. The action verifies its own
+      # download against the release's minisign-signed checksums. cache: false, so nothing is
+      # restored. github_token: '', because a locked install makes no GitHub API request, and
+      # the default exports the job token as MISE_GITHUB_TOKEN to every later step. env: false
+      # and export_path: false, because the defaults write the output of mise env --json to
+      # GITHUB_ENV and mise's PATH entries to GITHUB_PATH. add_shims_to_path: false, so a bare
+      # program name in a later step never resolves to a tool the caller's mise.toml pins. Every
+      # step reaches a pinned tool through the path mise which prints.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          version: 2026.9.11
+          install: false
+          cache: false
+          github_token: ''
+          env: false
+          export_path: false
+          add_shims_to_path: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -75,27 +96,58 @@ jobs:
             done <<< "$found"
             exit 1
           fi
-      # The action verifies its own download against the release's minisign-signed checksums.
-      # With mise.lock in the checkout it runs mise install --locked, which refuses a tool the
-      # lockfile does not pin for this platform. The caller's mise.toml settings apply, because
-      # the action trusts the checkout. cache: false, so every run installs cold and mise
-      # re-verifies each artifact and its provenance line. A restored cache would skip both.
-      # github_token: '', because a locked install makes no GitHub API request, and the default
-      # exports the job token as MISE_GITHUB_TOKEN to every later step. env: false and
-      # export_path: false, because the defaults write the output of mise env --json to
-      # GITHUB_ENV and mise's PATH entries to GITHUB_PATH, and a config's [env] template renders
-      # there with the action's own environment, runner tokens included. add_shims_to_path:
-      # false, so a bare program name in a later step never resolves to a tool the caller's
-      # mise.toml pins. Every step reaches a pinned tool through the path mise which prints, and
-      # mise stays on PATH either way.
-      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
-        with:
-          version: 2026.9.11
-          cache: false
-          github_token: ''
-          env: false
-          export_path: false
-          add_shims_to_path: false
+      # mise runs a config's hooks, [env] and [vars] exec templates and a tool entry's
+      # postinstall command whenever it loads the file, so mise.toml holds [tools], [tool_config]
+      # and [settings] alone, each with the keys the caller's gate reads, and mise.lock holds the
+      # keys mise writes. The caller's gate compares the values; this step refuses a key before
+      # the install below loads the file. A key reaches the log through repr, so a control or
+      # bidirectional character prints as an escape.
+      - name: Refused keys
+        run: |
+          python3 - <<'PY'
+          import sys, tomllib
+          SECTIONS = {
+              "tool_config": {"locked"},
+              "settings": {"locked", "lockfile", "locked_verify_provenance", "provenance_api_failures_fatal",
+                           "lockfile_platforms", "url_replacements"},
+          }
+          OPTIONS = {"version", "version_prefix"}
+          found = []
+          with open("mise.toml", "rb") as file:
+              pins = tomllib.load(file)
+          for key, value in pins.items():
+              if key == "tools" and isinstance(value, dict):
+                  for tool, entry in value.items():
+                      if isinstance(entry, dict):
+                          found += [f"mise.toml gives {tool!r} the option {option!r}" for option in entry if option not in OPTIONS]
+              elif key in SECTIONS and isinstance(value, dict):
+                  found += [f"mise.toml sets {name!r} under [{key}]" for name in value if name not in SECTIONS[key]]
+              elif key not in ("tools", *SECTIONS):
+                  found.append(f"mise.toml carries {key!r}")
+          with open("mise.lock", "rb") as file:
+              lock = tomllib.load(file)
+          found += [f"mise.lock carries {key!r}" for key in lock if key not in ("lockfile_version", "tools")]
+          for tool, entries in (lock.get("tools") or {}).items():
+              for entry in entries if isinstance(entries, list) else []:
+                  for key, value in (entry.items() if isinstance(entry, dict) else ()):
+                      if key.startswith("platforms."):
+                          fields = value if isinstance(value, dict) else {}
+                          found += [f"mise.lock gives {tool!r} on {key!r} the key {field!r}" for field in fields
+                                    if field not in ("checksum", "url", "url_api", "provenance")]
+                      elif key == "options":
+                          options = value if isinstance(value, dict) else {"(not a table)": None}
+                          found += [f"mise.lock gives {tool!r} the option {option!r}" for option in options if option not in OPTIONS]
+                      elif key not in ("version", "backend", "specifiers", "platforms"):
+                          found.append(f"mise.lock gives {tool!r} the key {key!r}")
+          for finding in found:
+              print(f"::error::{finding}, which no rule reads. Remove it.")
+          sys.exit(1 if found else 0)
+          PY
+      # With the refusals passed, the install mise-action would have run: locked, so a tool the
+      # lockfile does not pin for this platform is refused. mise re-verifies each artifact and its
+      # provenance line, since nothing was restored.
+      - name: mise install
+        run: mise install --locked
       # mise.lock names each artifact twice: the url mise downloads, and url_api, the same asset
       # by id. GitHub records each asset's download address, and its sha256 for an asset uploaded
       # since it began keeping digests. This step asks GitHub for every asset the lockfile names
