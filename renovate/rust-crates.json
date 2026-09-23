@@ -2,7 +2,7 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": [
     "A Rust workspace that publishes crates to crates.io and ships a built artifact. Versions live in [workspace.dependencies], which mixes runtime and development crates. A workspace bump is therefore a fix, and the repository names its development-only crates as chore.",
-    "The toolchain pin is exact and moves on its own branch. The cargo manager's own commit topic is overridden, so a header reads bump serde, not bump Rust crate serde.",
+    "The toolchain pin is exact, moves on its own branch and is a fix, by the rule below. The cargo manager's own commit topic is overridden, so a header reads bump serde, not bump Rust crate serde.",
     "osvVulnerabilityAlerts reads OSV, which carries RustSec entries GitHub's database lacks. Renovate marks the option experimental."
   ],
   "extends": ["./default"],
@@ -18,9 +18,11 @@
       "semanticCommitType": "fix"
     },
     {
+      "description": "The toolchain builds the artifact this workspace ships, and the standard library links into that binary, so a bump ships.",
       "matchManagers": ["rust-toolchain"],
       "matchDepTypes": ["toolchain"],
-      "rangeStrategy": "pin"
+      "rangeStrategy": "pin",
+      "semanticCommitType": "fix"
     }
   ],
   "lockFileMaintenance": {
