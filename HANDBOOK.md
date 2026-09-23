@@ -507,6 +507,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A test or script that spawns git drops every inherited `GIT_*` variable for that process and names the
   repository with `-C <root>`. git exports `GIT_DIR` and `GIT_INDEX_FILE` to a hook, so a gate the hook runs
   otherwise writes into the hook's own repository.
+- The gate's own `git` child starts with an empty environment plus `GIT_CONFIG_NOSYSTEM` and
+  `GIT_CONFIG_GLOBAL=/dev/null`, and `SystemRoot` on Windows where the stack's start of git needs it, as Go's does.
+  Listing tracked files needs no inherited name.
+- A Go gate compares tracked names through Unicode simple case folding in its own code, never through git's
+  `:(icase)` pathspec magic. git's `icase` folds ASCII alone, and an inherited `GIT_LITERAL_PATHSPECS` turns the
+  magic off without a word.
 - The stack's own runner drives the gate: Bun scripts in `package.json`, `xtask` for Rust, Cake for C#, go-task
   for Go. A `Makefile` is a violation.
 - `cargo xtask` is `cargo run --package xtask`, and the outer cargo resolves the workspace before any row runs.
@@ -879,8 +885,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   never passes an inherited environment through, so no `MISE_` name from a `.env` file, the shell or CI's exported
   environment reaches mise unless the gate sets it (Known defects).
 - What mise needs, measured on CI runners, is `MISE_TRUSTED_CONFIG_PATHS` naming the checkout and the proxy
-  variables in both cases, plus on Unix `HOME`, `TMPDIR`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` and `XDG_STATE_HOME`,
-  and on Windows `SYSTEMROOT`, `LOCALAPPDATA`, `TEMP` and `TMP`. `XDG_CONFIG_HOME` stays out.
+  variables in both cases, plus `HOME` and `TMPDIR` on Unix and `SYSTEMROOT`, `LOCALAPPDATA`, `TEMP` and `TMP` on
+  Windows. No `XDG_` variable reaches mise. An autoloaded env file could set `XDG_DATA_HOME`, `XDG_CACHE_HOME` or
+  `XDG_STATE_HOME` and point mise's data into the checkout, and mise falls back to defaults derived from `HOME`.
 - Before setting a `MISE_` variable, the gate removes every case spelling of that name from the inherited
   environment. On Windows a differently cased inherited name wins over the one the gate sets.
 - Before any install, the gate reads `mise.lock` with the stack's TOML library, for every tool and every platform
