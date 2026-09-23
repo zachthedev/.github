@@ -26,30 +26,30 @@ version: migrating later costs more than changing now.
 
 ## The checklist
 
-| Row          | Override | The rule                                                                                                |
-| ------------ | -------- | ------------------------------------------------------------------------------------------------------- |
-| Identity     | allowed  | MIT by default, one copyright line, the legal name, the first publication year, never updated           |
-| Authorship   | none     | the legal name only where a field is legally operative, `ZachTheDev` everywhere a user reads            |
-| Branch rules | none     | two default-branch rulesets: squash pull requests, then the checks and code scanning no merge bypasses  |
-| Actions      | none     | read-only default token, Actions cannot approve pull requests, SHA pinning required                     |
-| Environments | none     | a scope per credential, a tier per deployment, an approval per reviewed publish, each with a policy     |
-| Secrets      | none     | an identifier is a variable, only a value that grants access is a secret, held where it is used         |
-| Apps         | none     | release pull requests, tags and dependency updates run as GitHub Apps, never as a user                  |
-| Tags         | none     | one ruleset over every tag restricting creation, update and deletion, the releaser app its bypass       |
-| Dependabot   | none     | alerts on everywhere, security updates on in `rust-crates`, `rust-app` and `csharp-installer` alone     |
-| Gate         | none     | one command per stack, run locally and called by CI, named in the Adapters table                        |
-| Workflows    | none     | every action pinned by SHA with a version comment, linted and audited in CI                             |
-| CodeQL       | none     | a committed workflow, `security-extended`, over the repository's languages plus `actions`               |
-| Commits      | none     | conventional commits typed by their effect on users, scopes declared in a file, linted in a hook and CI |
-| Hooks        | none     | lefthook, `commit-msg` lints the message, `pre-push` runs the gate or its quick form                    |
-| Formatting   | none     | Prettier from one deviations-only config at one exact version, taplo for every TOML file                |
-| Updates      | none     | self-hosted Renovate from the shared presets, a three-day cooldown, one bot opening pull requests       |
-| Advisories   | none     | block on what a change introduces, never on what the world discovers about it                           |
-| Tools        | none     | stack tools pinned natively, cross-stack tools through mise, each tool's tier stated                    |
-| Releases     | none     | release-please, release-plz for Rust, user-facing changes alone, a draft, a publish job                 |
-| Versioning   | none     | semantic versioning, `0.x` until the interface settles, the release tool owning the number              |
-| Labels       | allowed  | the kickstart's label set, every label defined before a tool applies it                                 |
-| Authoring    | none     | template output first, library over hand-rolled code, no fact restated in prose                         |
+| Row          | Override | The rule                                                                                                   |
+| ------------ | -------- | ---------------------------------------------------------------------------------------------------------- |
+| Identity     | allowed  | MIT by default, one copyright line, the legal name, the first publication year, never updated              |
+| Authorship   | none     | the legal name only where a field is legally operative, `ZachTheDev` everywhere a user reads               |
+| Branch rules | none     | two default-branch rulesets: squash pull requests, then the checks and code scanning no merge bypasses     |
+| Actions      | none     | read-only default token, Actions cannot approve pull requests, SHA pinning required                        |
+| Environments | none     | a scope per credential, a tier per deployment, an approval per reviewed publish, each with a policy        |
+| Secrets      | none     | an identifier is a variable, only a value that grants access is a secret, held where it is used            |
+| Apps         | none     | release pull requests, tags and dependency updates run as GitHub Apps, never as a user                     |
+| Tags         | none     | one ruleset over every tag restricting creation, update and deletion, the releaser app its bypass          |
+| Dependabot   | none     | alerts on everywhere, security updates on in `rust-crates`, `rust-app` and `csharp-installer` alone        |
+| Gate         | none     | one command per stack, run locally and called by CI, named in the Adapters table                           |
+| Workflows    | none     | every action pinned by SHA with a version comment, linted and audited in CI                                |
+| CodeQL       | none     | a committed workflow, `security-extended`, over the repository's languages plus `actions`                  |
+| Commits      | none     | conventional commits typed by their effect on users, scopes declared in a file, linted in a hook and CI    |
+| Hooks        | none     | lefthook, `commit-msg` lints the message, `pre-push` runs the gate or its quick form                       |
+| Formatting   | none     | Prettier from one deviations-only config at one exact version, taplo for every TOML file                   |
+| Updates      | none     | self-hosted Renovate from the shared presets, a three-day cooldown, one bot opening pull requests          |
+| Advisories   | none     | block on what a change introduces, never on what the world discovers about it                              |
+| Tools        | none     | stack tools pinned natively, cross-stack tools through mise, each tool's tier stated                       |
+| Releases     | none     | release-please, release-plz for Rust, user-facing changes alone, a draft, a publish job                    |
+| Versioning   | none     | Semantic Versioning, the release tool owning the number, `v` tags, a break below `1.0.0` bumping the minor |
+| Labels       | allowed  | the kickstart's label set, every label defined before a tool applies it                                    |
+| Authoring    | none     | template output first, library over hand-rolled code, no fact restated in prose                            |
 
 ## Definitions
 
@@ -696,9 +696,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   commit ship different runtimes. Renovate bumps the SDK as `fix(deps)`, and the bump cuts a release (Updates).
 - A backend is chosen for integrity: `aqua:` where a registry entry exists, `github:` otherwise. `cargo:` and
   `ubi:` record no lockfile integrity, so neither is used (Known defects).
-- Each tool's integrity tier is stated in `CONTRIBUTING.md`. The tiers: provenance, a checksum in a pinned tree,
-  a checksum recorded by a third party, a checksum mise hashed at lock time, or a version alone. "Verified" is
-  never written for a hash check.
+- Each tool's integrity tier is stated under Dependencies in `CONTRIBUTING.md`. The tiers: provenance, a
+  checksum in a pinned tree, a checksum recorded by a third party, a checksum mise hashed at lock time, or a
+  version alone. "Verified" is never written for a hash check.
 - A `github:` backend records a checksum mise hashed at lock time. That binds every later install to the bytes
   the lock fetched, and nothing outside the lockfile vouches for those bytes.
 - The settings `locked`, `lockfile`, `locked_verify_provenance`, `provenance_api_failures_fatal`,
@@ -768,8 +768,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   the publish job flips the draft public is the repository's choice. The draft is not. `publish` called with no
   artifacts flips the draft alone, under the `release` reviewer. A service chains its deploy on that job.
 - release-please pairs the draft with forced tag creation, because GitHub creates no tag for a draft, and sets
-  `bump-minor-pre-major`, so a breaking change below `1.0.0` bumps the minor (Versioning). release-plz creates
-  the tag itself.
+  `bump-minor-pre-major` (Versioning). release-plz creates the tag itself.
 - The changelog carries user-facing changes alone (Commits). Under release-please, `changelog-sections` shows
   `feat`, `fix`, `perf` and `revert` and hides the rest, `build` included. Under release-plz,
   `[changelog] commit_parsers` shows the same four and skips the rest, with `protect_breaking_commits` on.
@@ -785,7 +784,6 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Under release-please, a squash whose title hid a user-facing change is corrected with `BEGIN_COMMIT_OVERRIDE`
   in the merged pull request's description, before the release pull request merges. That override is the
   sanctioned recovery, never a changelog hand edit.
-- Under release-plz a `feat` on `0.x` bumps patch.
 - The releaser app holds Contents and Pull requests write and no Issues. Nobody removes `autorelease: pending`
   by hand.
 - A package published to a registry is published once by hand, then through trusted publishing with no
@@ -831,12 +829,16 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 
 ## Versioning
 
-- Semantic versioning. The release tool owns the number. Nobody hand-edits a version or a changelog, apart from
-  the one reset a kickstart's marker orders (Kickstarts).
-- `0.x` while a repository is unreleased to users, starting at `0.1.0`. A repository whose interface is already
-  settled starts at `1.0.0`, and `CONTRIBUTING.md` says why.
-- Below `1.0.0` a breaking change is a minor bump, so the changelog carries the break. The README says `0.x`
-  promises no compatibility.
+Every version follows [Semantic Versioning](https://semver.org/). This section states the set's own choices and
+restates none of the specification's rules.
+
+- The release tool owns the number. Nobody hand-edits a version or a changelog, apart from the one reset a
+  kickstart's marker orders (Kickstarts).
+- The first version is `0.1.0`, or `1.0.0` where the interface is already settled. The release tool's
+  configuration is the one record of that start: `initial-version` under release-please, the crate's version
+  under release-plz. No prose restates it or gives its reason.
+- Below `1.0.0` a breaking change bumps the minor: release-please through `bump-minor-pre-major`, release-plz by
+  its own default. The changelog carries the break. Under release-plz a `feat` below `1.0.0` bumps the patch.
 - A prerelease is `-rc.N`. Everything that reads the tag admits it before the first one is cut.
 - Tags are `v`-prefixed: `v<version>`. A crate that versions on its own inside a workspace tags
   `<crate>-v<version>`.
