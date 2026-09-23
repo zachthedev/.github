@@ -54,9 +54,8 @@ preset reaches every repository on its next run. A change to a reusable workflow
 next release here and that caller's merged bump. The gate validates every preset and lints every workflow
 before a merge for that reason.
 
-This repository is itself aligned to the handbook as a `bun-tooling` repository. Its version is `0.x`, which
-promises no compatibility between releases. A caller pins a reusable workflow by commit and moves on its own
-schedule.
+This repository is itself aligned to the handbook as a `bun-tooling` repository. A caller pins a reusable
+workflow by commit and moves on its own schedule.
 
 ## License
 

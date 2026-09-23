@@ -166,9 +166,7 @@ hidden with the rest. A release needs a user-facing change or a break: release-p
 changelog is empty. release-please owns `CHANGELOG.md`, the version in `package.json` and
 `.release-please-manifest.json`.
 
-The version starts at `0.1.0`. Every caller pins a reusable workflow by commit, so nothing here is a
-compatibility promise until a caller asks for one. Nothing is published to a registry. The owner flips each
-draft public by hand.
+Nothing is published to a registry. The owner flips each draft public by hand.
 
 ## What never happens
 
