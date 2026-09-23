@@ -26,30 +26,30 @@ version: migrating later costs more than changing now.
 
 ## The checklist
 
-| Row          | Override | The rule                                                                                            |
-| ------------ | -------- | --------------------------------------------------------------------------------------------------- |
-| Identity     | allowed  | MIT by default, one copyright line, the legal name, the first publication year, never updated       |
-| Authorship   | none     | the legal name only where a field is legally operative, `ZachTheDev` everywhere a user reads        |
-| Branch rules | none     | one ruleset on the default branch, pull requests only, checks required by check-run name            |
-| Actions      | none     | read-only default token, Actions cannot approve pull requests, SHA pinning required                 |
-| Environments | none     | a scope per credential, a tier per deployment, an approval per reviewed publish, each with a policy |
-| Secrets      | none     | an identifier is a variable, only a value that grants access is a secret, held where it is used     |
-| Apps         | none     | releases and dependency updates run as GitHub Apps, never as a user or `GITHUB_TOKEN`               |
-| Tags         | none     | one ruleset over every tag restricting creation, update and deletion, the releaser app its bypass   |
-| Dependabot   | none     | alerts on everywhere, security updates on in `rust-crates`, `rust-app` and `csharp-installer` alone |
-| Gate         | none     | one command per stack, run locally and called by CI, named in the Adapters table                    |
-| Workflows    | none     | every action pinned by SHA with a version comment, linted and audited in CI                         |
-| CodeQL       | none     | a committed workflow over the shipped language plus `actions`, never default setup                  |
-| Commits      | none     | conventional commits, scopes declared in a file, enforced by a hook and in CI                       |
-| Hooks        | none     | lefthook, `commit-msg` lints the message, `pre-push` runs the gate or its quick form                |
-| Formatting   | none     | Prettier, one deviations-only config, one exact version across every repository                     |
-| Updates      | none     | self-hosted Renovate from the shared presets, a three-day cooldown, one bot opening pull requests   |
-| Advisories   | none     | block on what a change introduces, never on what the world discovers about it                       |
-| Tools        | none     | stack tools pinned natively, cross-stack tools through mise, each tool's tier stated                |
-| Releases     | none     | release-please, release-plz for Rust, a draft, a publish job in an environment                      |
-| Versioning   | none     | semantic versioning, `0.x` until the interface settles, the release tool owning the number          |
-| Labels       | allowed  | the kickstart's label set, every label defined before a tool applies it                             |
-| Authoring    | none     | template output first, library over hand-rolled code, no fact restated in prose                     |
+| Row          | Override | The rule                                                                                                |
+| ------------ | -------- | ------------------------------------------------------------------------------------------------------- |
+| Identity     | allowed  | MIT by default, one copyright line, the legal name, the first publication year, never updated           |
+| Authorship   | none     | the legal name only where a field is legally operative, `ZachTheDev` everywhere a user reads            |
+| Branch rules | none     | two default-branch rulesets: squash pull requests, then the checks and code scanning no merge bypasses  |
+| Actions      | none     | read-only default token, Actions cannot approve pull requests, SHA pinning required                     |
+| Environments | none     | a scope per credential, a tier per deployment, an approval per reviewed publish, each with a policy     |
+| Secrets      | none     | an identifier is a variable, only a value that grants access is a secret, held where it is used         |
+| Apps         | none     | release pull requests, tags and dependency updates run as GitHub Apps, never as a user                  |
+| Tags         | none     | one ruleset over every tag restricting creation, update and deletion, the releaser app its bypass       |
+| Dependabot   | none     | alerts on everywhere, security updates on in `rust-crates`, `rust-app` and `csharp-installer` alone     |
+| Gate         | none     | one command per stack, run locally and called by CI, named in the Adapters table                        |
+| Workflows    | none     | every action pinned by SHA with a version comment, linted and audited in CI                             |
+| CodeQL       | none     | a committed workflow, `security-extended`, over the repository's languages plus `actions`               |
+| Commits      | none     | conventional commits typed by their effect on users, scopes declared in a file, linted in a hook and CI |
+| Hooks        | none     | lefthook, `commit-msg` lints the message, `pre-push` runs the gate or its quick form                    |
+| Formatting   | none     | Prettier from one deviations-only config at one exact version, taplo for every TOML file                |
+| Updates      | none     | self-hosted Renovate from the shared presets, a three-day cooldown, one bot opening pull requests       |
+| Advisories   | none     | block on what a change introduces, never on what the world discovers about it                           |
+| Tools        | none     | stack tools pinned natively, cross-stack tools through mise, each tool's tier stated                    |
+| Releases     | none     | release-please, release-plz for Rust, user-facing changes alone, a draft, a publish job                 |
+| Versioning   | none     | semantic versioning, `0.x` until the interface settles, the release tool owning the number              |
+| Labels       | allowed  | the kickstart's label set, every label defined before a tool applies it                                 |
+| Authoring    | none     | template output first, library over hand-rolled code, no fact restated in prose                         |
 
 ## Definitions
 
@@ -80,47 +80,50 @@ Every boilerplate file a repository carries. The kickstart ships each one. The f
 slots the marker names. "Own" is the repository's, and only its existence is shared. "Generated" is written by a
 command. A row that a section owns names that section.
 
-| File                                       | Form      | Rule or section                                                                                                          |
-| ------------------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `LICENSE`                                  | shape     | Identity                                                                                                                 |
-| `README.md`                                | own       | what it is, how to get it in one line, the documentation table, the gate command, no copy of a printed list              |
-| `CONTRIBUTING.md`                          | shape     | Setup, The gate, Commit messages, Where code goes, Tests, Code, Dependencies, Releases, What never happens               |
-| `SECURITY.md`                              | shape     | Security, Reporting, What is supported, In scope, Out of scope, After a report, `hey@`                                   |
-| `CHANGELOG.md`                             | own       | written by the release tool alone, one per crate under release-plz                                                       |
-| `docs/dev.md`                              | shape     | Prerequisites, First run, Running it, Generated files, Tests that need a real thing                                      |
-| `docs/install.md`                          | shape     | `rust-crates`, `rust-app`, `csharp-installer`, `go-cli`; Requirements, Install, Check the download, Upgrade, Uninstall   |
-| `docs/deploy.md`                           | shape     | `bun-service`; Your own deployment, Releasing deploys, Operating it                                                      |
-| `docs/usage.md`                            | own       | every kind but `bun-tooling`; what `--help` and the README do not carry                                                  |
-| `AGENTS.md`                                | shape     | Read first, Verify, Never, Deviations, Where the rest is; substance for the session, a link for the tree                 |
-| `CLAUDE.md`                                | identical | one line, `@AGENTS.md`, below                                                                                            |
-| `.claude/settings.json`                    | shape     | the read-only git allowlist plus what the repository adds, recorded in `CONTRIBUTING.md`                                 |
-| `.gitattributes`                           | identical | `* text=auto eol=lf`, so a hook or script runs on every host, binaries marked per stack                                  |
-| `.gitignore`                               | shape     | Authoring                                                                                                                |
-| `.editorconfig`                            | shape     | Formatting                                                                                                               |
-| `.prettierrc`                              | identical | Formatting                                                                                                               |
-| `.prettierignore`                          | own       | Formatting; names `CHANGELOG.md` and `.release-please-manifest.json`, both release-please's output                       |
-| `package.json`, `bun.lock`, `bunfig.toml`  | shape     | commitlint, Prettier and lefthook pinned, `packageManager` set, the cooldown under Updates. Go pins lefthook in `go.mod` |
-| `commitlint.config.js`                     | identical | Commits                                                                                                                  |
-| `.github/commit-scopes.json`               | own       | Commits                                                                                                                  |
-| `lefthook.yml`                             | shape     | Hooks                                                                                                                    |
-| `mise.toml`, `mise.lock`                   | shape     | Tools                                                                                                                    |
-| `.cargo/config.toml`                       | shape     | `rust-crates` and `rust-app` alone, the cooldown under Updates                                                           |
-| `.github/CODEOWNERS`                       | identical | one comment line plus `* @zachthedev`                                                                                    |
-| `.github/PULL_REQUEST_TEMPLATE.md`         | shape     |                                                                                                                          |
-| `.github/ISSUE_TEMPLATE/config.yml`        | shape     | `blank_issues_enabled: false` plus the contact links                                                                     |
-| `.github/ISSUE_TEMPLATE/*.yml`             | own       | the forms, each naming its labels                                                                                        |
-| `.github/renovate.json`                    | shape     | Updates                                                                                                                  |
-| `.github/dependabot.yml`                   | shape     | `rust-crates`, `rust-app` and `csharp-installer` alone, Dependabot                                                       |
-| `.github/zizmor.yml`                       | shape     | `unpinned-uses` at hash-pin, `dependabot-cooldown` at three days in the kinds with `dependabot.yml`                      |
-| `.github/workflows/ci.yml`                 | shape     | Workflows                                                                                                                |
-| `.github/workflows/cd.yml`                 | shape     | Workflows                                                                                                                |
-| `.github/workflows/codeql.yml`             | shape     | CodeQL                                                                                                                   |
-| `.github/workflows/deps.yml`               | identical | Updates                                                                                                                  |
-| `.github/workflows/audit.yml`              | shape     | Advisories                                                                                                               |
-| `release-please-config.json`, its manifest | shape     | every stack but Rust, Releases                                                                                           |
-| `release-plz.toml`                         | shape     | Rust, Releases                                                                                                           |
-| `.worktreeinclude`                         | shape     | the gitignored files a new worktree is seeded with                                                                       |
-| `MARKERS.md`                               | generated | Kickstarts                                                                                                               |
+| File                                       | Form      | Rule or section                                                                                                                                                          |
+| ------------------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `LICENSE`                                  | shape     | Identity                                                                                                                                                                 |
+| `README.md`                                | own       | what it is, how to get it in one line, the documentation table, the gate command, no copy of a printed list                                                              |
+| `CONTRIBUTING.md`                          | shape     | Setup, The gate, Commit messages, Where code goes, Tests, Code, Dependencies, Releases, What never happens                                                               |
+| `SECURITY.md`                              | shape     | Security, Reporting, What is supported, In scope, Out of scope, After a report, `hey@`                                                                                   |
+| `CHANGELOG.md`                             | own       | written by the release tool alone, one per crate under release-plz                                                                                                       |
+| `docs/dev.md`                              | shape     | Prerequisites, First run, Running it, Generated files, Tests that need a real thing                                                                                      |
+| `docs/install.md`                          | shape     | `rust-crates`, `rust-app`, `csharp-installer`, `go-cli`; Requirements, Install, Check the download, Upgrade, Uninstall                                                   |
+| `docs/deploy.md`                           | shape     | `bun-service`; Your own deployment, Releasing deploys, Operating it                                                                                                      |
+| `docs/usage.md`                            | own       | every kind but `bun-tooling`; what `--help` and the README do not carry                                                                                                  |
+| `AGENTS.md`                                | shape     | Read first, Verify, Never, Deviations, Where the rest is; substance for the session, a link for the tree                                                                 |
+| `CLAUDE.md`                                | identical | one line, `@AGENTS.md`, below                                                                                                                                            |
+| `.claude/settings.json`                    | shape     | the read-only git allowlist plus what the repository adds, recorded in `CONTRIBUTING.md`                                                                                 |
+| `.gitattributes`                           | shape     | `* text=auto eol=lf`, so a hook or script runs on every host, plus the stack's binary patterns                                                                           |
+| `.gitignore`                               | shape     | Authoring                                                                                                                                                                |
+| `.editorconfig`                            | shape     | Formatting                                                                                                                                                               |
+| `.prettierrc`                              | identical | Formatting                                                                                                                                                               |
+| `.prettierignore`                          | own       | Formatting; the release tool's output: `CHANGELOG.md` under both tools, `.release-please-manifest.json` under release-please                                             |
+| `.taplo.toml`                              | shape     | Formatting; excludes `node_modules/**`, `.claude/worktrees/**` and the stack's build output                                                                              |
+| `package.json`, `bun.lock`, `bunfig.toml`  | shape     | commitlint, Prettier and lefthook pinned, `packageManager` set, the cooldown under Updates. Go pins lefthook in `go.mod`                                                 |
+| `eslint.config.ts`                         | shape     | `bun-service` and `bun-tooling` alone, Gate                                                                                                                              |
+| `commitlint.config.js`                     | identical | Commits                                                                                                                                                                  |
+| `.github/commit-scopes.json`               | own       | Commits                                                                                                                                                                  |
+| `lefthook.yml`                             | shape     | Hooks                                                                                                                                                                    |
+| `mise.toml`, `mise.lock`                   | shape     | Tools                                                                                                                                                                    |
+| `mise.semver.toml`, `mise.semver.lock`     | shape     | `rust-crates` and `rust-app` alone, Releases                                                                                                                             |
+| `.cargo/config.toml`                       | shape     | `rust-crates` and `rust-app` alone, the `xtask` alias under Gate, the cooldown under Updates                                                                             |
+| `.github/CODEOWNERS`                       | identical | one comment line plus `* @zachthedev`                                                                                                                                    |
+| `.github/PULL_REQUEST_TEMPLATE.md`         | shape     |                                                                                                                                                                          |
+| `.github/ISSUE_TEMPLATE/config.yml`        | shape     | `blank_issues_enabled: false` plus the contact links                                                                                                                     |
+| `.github/ISSUE_TEMPLATE/*.yml`             | own       | the forms, each naming its labels                                                                                                                                        |
+| `.github/renovate.json`                    | shape     | Updates                                                                                                                                                                  |
+| `.github/dependabot.yml`                   | shape     | `rust-crates`, `rust-app` and `csharp-installer` alone, Dependabot                                                                                                       |
+| `.github/zizmor.yml`                       | shape     | `unpinned-uses` at hash-pin, `dependabot-cooldown` at three days in the kinds with `dependabot.yml` (Dependabot), the `known-vulnerable-actions` allow list (Advisories) |
+| `.github/workflows/ci.yml`                 | shape     | Workflows                                                                                                                                                                |
+| `.github/workflows/cd.yml`                 | shape     | Workflows                                                                                                                                                                |
+| `.github/workflows/codeql.yml`             | shape     | CodeQL                                                                                                                                                                   |
+| `.github/workflows/deps.yml`               | identical | Updates                                                                                                                                                                  |
+| `.github/workflows/audit.yml`              | shape     | Advisories                                                                                                                                                               |
+| `release-please-config.json`, its manifest | shape     | every stack but Rust, Releases                                                                                                                                           |
+| `release-plz.toml`                         | shape     | Rust, Releases                                                                                                                                                           |
+| `.worktreeinclude`                         | shape     | the gitignored files a new worktree is seeded with                                                                                                                       |
+| `MARKERS.md`                               | generated | Kickstarts                                                                                                                                                               |
 
 - `CODE_OF_CONDUCT.md`, `SUPPORT.md` and `FUNDING.yml` live once in `zachthedev/.github`, which GitHub serves as
   every repository's default. A repository carries its own only to differ.
@@ -133,9 +136,13 @@ command. A row that a section owns names that section.
   `CONTRIBUTING.md#what-never-happens` and no reason.
 - `CLAUDE.md` is one line, `@AGENTS.md`. Claude Code expands the import, so the same file is read once in every
   session, on every platform.
-- `docs/` is flat. `docs/dev.md` is in every repository. A kind adds the files its Files rows name. Any other file
-  under `docs/` is the repository's own. `README.md` indexes every document. A workspace member's own
-  documentation sits beside it and the index reaches it.
+- `docs/` is flat, apart from `docs/images/` for the images a document shows. `docs/dev.md` is in every
+  repository. A kind adds the files its Files rows name. Any other file under `docs/` is the repository's own.
+  `README.md` indexes every document. A workspace member's own documentation sits beside it and the index reaches
+  it.
+- A YAML file takes `.yml`. GitHub documents that spelling for every file it reads. It reads the issue chooser's
+  configuration only as `config.yml`, so a `.yaml` rule cannot hold everywhere. A file whose tool reads only
+  `.yaml` keeps the tool's name.
 - `.claude/` holds the settings file alone until a shared dotfiles repository assembles the owner's rules, hooks
   and skills into every repository.
 
@@ -159,8 +166,20 @@ Each stack has a template repository, flagged as a GitHub template, with a clean
 `kickstart` is the Bun base, and every other kickstart duplicates it and adds its stack. A new repository starts
 from its kickstart. An existing repository is aligned by matching its kickstart.
 
-- Every place a clone must act carries a `TODO(kickstart):` marker. A generated `MARKERS.md` lists them. One
-  command proves the template is absorbed: `git grep` for the marker exits non-zero.
+- `kickstart` ships the Bun tooling base alone: kind `bun-tooling` plus `template`, with no service parts. A
+  service repository generates its Worker boilerplate with the Cloudflare CLI, `bun create cloudflare`, and merges
+  it into the template, because template output comes first (Authoring). It then adds the deploy job,
+  `docs/deploy.md` and `docs/usage.md`.
+- Every place a clone must act carries a `TODO(kickstart):` marker. A generated `MARKERS.md` lists them. The
+  template's gate regenerates `MARKERS.md` and diffs it.
+- `MARKERS.md` prints the one command that proves the template is absorbed. It stays a printed command and never
+  becomes a gate row, because a row failing on any marker keeps the template itself red.
+- That command's standard is its form. It anchors at the top of the repository with `git -C "$top"`, because
+  `git grep` with no path searches the current directory alone. It matches the marker with `-F`. It reads exit 1
+  alone as absorbed, so a git error never does. Each generator prints the exclude pathspecs its own scanner skips.
+- A kickstart's `cd.yml` carries a marker telling a clone to reset `CHANGELOG.md`, the release tool's manifest and
+  any version file before its first release. That reset is the one sanctioned hand edit of those files
+  (Versioning), and the clone's `AGENTS.md` and `CONTRIBUTING.md#what-never-happens` say so.
 - The README points at the Files table for what is copied verbatim and what has slots. It tells a clone to trim
   what it does not need and record the deviation at the drift site.
 - Each kickstart README links to this handbook.
@@ -192,43 +211,104 @@ These live in GitHub's settings, so they are written here and read back through 
 
 ### Branch rules
 
-One active ruleset on the default branch, classic branch protection off. Rules: `deletion`, `non_fast_forward`,
-`pull_request`, `required_status_checks`.
+Two active rulesets on the default branch, classic branch protection off. `default-branch` holds `deletion`,
+`non_fast_forward` and `pull_request`. `default-branch checks` holds `required_status_checks` and `code_scanning`.
 
-| Parameter                                         | Value                                                           |
-| ------------------------------------------------- | --------------------------------------------------------------- |
-| `required_approving_review_count`                 | 1                                                               |
-| `require_code_owner_review`                       | true                                                            |
-| Bypass actor                                      | the repository-admin role, mode `pull_request`                  |
-| `require_last_push_approval`                      | false                                                           |
-| `required_review_thread_resolution`               | true                                                            |
-| `dismiss_stale_reviews_on_push`                   | true                                                            |
-| `require_extra_approval_for_unattributed_changes` | true                                                            |
-| `required_status_checks`                          | each check run named directly with its source app, `strict` off |
+| Parameter                                         | Ruleset                 | Value                                                                                    |
+| ------------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------- |
+| `required_approving_review_count`                 | `default-branch`        | 1                                                                                        |
+| `require_code_owner_review`                       | `default-branch`        | true                                                                                     |
+| `require_last_push_approval`                      | `default-branch`        | false                                                                                    |
+| `required_review_thread_resolution`               | `default-branch`        | true                                                                                     |
+| `dismiss_stale_reviews_on_push`                   | `default-branch`        | true                                                                                     |
+| `require_extra_approval_for_unattributed_changes` | `default-branch`        | true                                                                                     |
+| `allowed_merge_methods`                           | `default-branch`        | `squash`                                                                                 |
+| Bypass actor                                      | `default-branch`        | the repository-admin role, mode `pull_request`                                           |
+| Bypass actor                                      | `default-branch checks` | none                                                                                     |
+| `required_status_checks`                          | `default-branch checks` | each check run named directly with its source app, `strict` off                          |
+| `code_scanning`                                   | `default-branch checks` | tool `CodeQL`, `security_alerts_threshold` `high_or_higher`, `alerts_threshold` `errors` |
 
-- The role's bypass mode is never `always`. Every change is a pull request, and the bypass waives the approval
-  alone.
-- GitHub refuses self-approval, so a sole maintainer merges with `gh pr merge --admin`. The friction is
-  deliberate: every repository is shaped for more than one contributor.
-- Stacked pull requests are fine. Each is merged on its own with `--admin`.
-- A deploy key is the only other bypass actor, only where an unattended job must push. Its bypass mode is
-  `always`, because a push is not a pull request. A `DeployKey` actor stores no actor id and covers every deploy
-  key on the repository. Such a repository therefore keeps exactly one key, named in a comment beside the step
-  that pushes.
+- The role's bypass mode is never `always`. Every change is a pull request. The bypass sits on `default-branch`
+  alone, so `gh pr merge --admin` waives the approval and nothing else.
+- GitHub refuses self-approval, so a sole maintainer's own pull request merges with `gh pr merge --admin`. The
+  friction is deliberate: every repository is shaped for more than one contributor.
+- A bot-authored pull request, a release or a dependency update, needs no self-approval. The owner approves it as
+  code owner and merges it without `--admin`, so its rule suite records no bypass. That is practice, not the
+  check control: `default-branch checks` binds the checks on either path.
+- Every merge waits on the checks first: `gh pr checks <n> --required --watch`, then `gh pr merge <n> --squash`,
+  chained so a red check ends the chain. `mergeStateStatus` never reports the checks on their own, so the wait
+  reads them directly. The `Analyze (<language>)` checks stay required as that wait's handle, and a failed
+  analysis shows its log under a named check.
+- A deploy key is the only other bypass actor, only where an unattended job must push. It sits on both rulesets
+  in mode `always`, because a push is not a pull request and carries no check run. A `DeployKey` actor stores no
+  actor id and covers every deploy key on the repository. Such a repository therefore keeps exactly one key,
+  named in a comment beside the step that pushes.
 - A check becomes required only after it reports on a pull request the releaser app opened. A check nothing
   reports blocks every pull request.
 - Every required check records its source app. A workflow job's check run, the `Analyze (<language>)` entries
-  included, is posted by GitHub Actions, `integration_id` 15368. The check named `CodeQL` on a pull request
-  head is posted by GitHub Advanced Security, `integration_id` 57789. The ruleset requires the
-  `Analyze (<language>)` entries under 15368 and, where the repository wants the code-scanning gate, the
-  `CodeQL` entry under 57789. A token with `checks: write` therefore cannot satisfy a check under the same
-  name.
-- A red release pull request is never merged with `--admin`, because the bypass also skips the required checks.
+  included, is posted by GitHub Actions, `integration_id` 15368. A token with `checks: write` therefore cannot
+  satisfy a check under the same name.
+- No required check names GitHub Advanced Security, `integration_id` 57789. Its `CodeQL` check concludes
+  `neutral` when an analysis is missing, and a required check passes on `neutral`. It also concludes on the first
+  analysis a commit uploads.
+- The `code_scanning` rule takes GitHub's own failure levels. It refuses a merge while an analysis the default
+  branch carries is missing or still running on the pull request's commit.
+- An `--admin` merge that `default-branch checks` refuses names the rule the admin cannot bypass and leaves out
+  the approval it waived:
+  - a running check: `Required status check "<name>" is in progress.`
+  - a missing analysis: `Waiting for Code Scanning results. Code Scanning may not be configured for the target branch.`
+- Every `--admin` merge leaves a rule suite with result `bypass`, naming the rule it waived.
+- `default-branch checks` goes active only once the default branch carries a CodeQL analysis for every configured
+  language. GitHub accepts a `code_scanning` rule with none, then refuses every merge until the ruleset is
+  disabled.
+- A check that cannot report, or a platform outage, is cleared by setting `default-branch checks` to `disabled`,
+  merging, and setting it back to `active`. Each change is a settings write the audit log records.
+- The pair reads back through `current_user_can_bypass`: `pull_requests_only` on `default-branch` and `never` on
+  `default-branch checks`.
 - A repository not yet on GitHub is created in this order: the repository, its environments with their values,
-  its labels from the kickstart, the Actions settings, private vulnerability reporting on, the wiki and projects
-  off, the first push, the first green run, then the rulesets.
-  A workflow that names an environment holding no values fails on its first run, and a ruleset that requires a
-  check nothing has reported blocks the first pull request.
+  its labels from the kickstart, the Actions settings, private vulnerability reporting on, the merge settings with
+  the wiki and projects off, the first push, the first green run, then the rulesets. The merge settings and the
+  wiki and projects switches share one `PATCH` of the repository. A workflow that names an environment holding no
+  values fails on its first run, and a ruleset that requires a check nothing has reported blocks the first pull
+  request.
+- `default-branch checks` goes on first and reads back active before `default-branch` goes on. The ruleset with
+  no admin bypass is then in force before the one carrying it.
+
+### Merge settings
+
+| Setting                       | Value                |
+| ----------------------------- | -------------------- |
+| `allow_squash_merge`          | true                 |
+| `allow_merge_commit`          | false                |
+| `allow_rebase_merge`          | false                |
+| `squash_merge_commit_title`   | `COMMIT_OR_PR_TITLE` |
+| `squash_merge_commit_message` | `COMMIT_MESSAGES`    |
+| `delete_branch_on_merge`      | true                 |
+| `allow_update_branch`         | false                |
+| `allow_auto_merge`            | false                |
+| `web_commit_signoff_required` | false                |
+
+- A pull request merges by squash, the one method the repository allows. A merge commit breaks release-plz,
+  which then tags the pull request's last commit. A rebase lands every commit as its own change.
+- The repository setting binds every actor, an `--admin` merge included. `allowed_merge_methods` in
+  `default-branch` holds the method if the setting drifts.
+- The squash takes GitHub's default message pair, the two squash keys above, written explicitly. A one-commit
+  pull request lands its commit's subject and body. A longer one lands its title and each commit as a bullet.
+- `PR_TITLE` is never set. For one commit it writes the commit's subject into the body, and release-please
+  counts that subject as a second change.
+- `delete_branch_on_merge` is on. GitHub then retargets the next layer of a stack onto the default branch.
+  Stacked pull requests are fine: each layer merges on its own, and the next is rebased onto the default branch
+  before it merges.
+- `allow_update_branch` is off. Its button offers the one action that stops Renovate and Dependabot maintaining a
+  branch, a pushed commit. A stale bot pull request is refreshed by its bot.
+- A stale release pull request, red for a reason the default branch has since fixed, is refreshed with
+  `gh pr update-branch`, which works with `allow_update_branch` off. release-please force-pushes nothing while the
+  version is unchanged, so the stale run otherwise stays red. A landing names the refresh as a conditional step,
+  never a routine one.
+- `allow_auto_merge` is off. Renovate's automerge rides on it, and automerge is off (Updates).
+- `web_commit_signoff_required` is off. No repository requires a sign-off.
+- No ruleset carries `required_linear_history`. Merge commits are off, and `pull_request` refuses a direct push
+  from anyone without a bypass.
 
 ### Actions
 
@@ -246,10 +326,12 @@ An environment has one of three purposes, and its name says which.
   kebab-case (`deps` for `deps.yml`), or for a capability several workflows share (`release-pr`,
   `archive-write`). It sets `deployment: false`. It takes a reviewer only where a human approves. A scheduled
   run takes none.
-- A publish approval holds a human approval and nothing else, and is named for the act: `release`.
+- A publish approval holds a human approval and nothing else, and is named for the act: `release`. A Rust
+  repository's `release` also holds the releaser pair, because its release job creates the tags (Releases).
 
 Every environment carries a custom deployment branch policy naming the refs its workflow accepts. Every
-environment sets `prevent_self_review: false`, because a sole reviewer otherwise deadlocks.
+environment with a reviewer sets `prevent_self_review: false`, because a sole reviewer otherwise deadlocks. The
+API reports the value only on a `required_reviewers` rule.
 
 ### Secrets
 
@@ -257,13 +339,15 @@ environment sets `prevent_self_review: false`, because a sole reviewer otherwise
   id. Only a value that grants access is a secret. Variables print unmasked in run logs.
 - A credential belongs to the environment that uses it. A repository-level secret is the exception, and the
   workflow that consumes it says why in a comment beside the read.
-- A `uses:` job takes the called workflow's job-level environment. The caller passes nothing through.
+- A `uses:` job takes the called workflow's job-level environment. The caller runs in no environment, so it
+  cannot name an environment secret. A caller whose called workflow reads one passes `secrets: inherit`, with
+  zizmor's `secrets-inherit` audit ignored on that line. Every other caller passes nothing through.
 
 ### Apps
 
 Two private GitHub Apps, one per role, named for the role so a change of tool renames nothing.
-`zachthedev-releaser` opens release pull requests and publishes. `zachthedev-updater` opens dependency-update
-pull requests.
+`zachthedev-releaser` opens release pull requests and creates the tags and the draft releases.
+`zachthedev-updater` opens dependency-update pull requests.
 
 - One app per role, because a ruleset bypass and a leaked key are each granted per app. The releaser alone
   bypasses the tag ruleset. The updater's key, held by an unattended job running a third-party image, opens
@@ -276,6 +360,9 @@ pull requests.
 - An app can hold several keys. A key is deleted only after every repository holding it moves. The owner loads
   each secret. A key never enters an agent's transcript.
 - Before changing an app, its key or its installation, list what uses it.
+- The publish job uploads and flips the draft with the job token, `GITHUB_TOKEN`, and no app credential. An event
+  that token raises starts no workflow run, and the token carries no tag ruleset bypass into a job that handles a
+  caller's build output.
 
 ### Tags
 
@@ -298,6 +385,8 @@ pull requests.
   direct advisory gets a pull request from each bot, and the second closes itself after the first merges.
 - The `github-actions` entry ignores every dependency, because the security-updates switch is repository-wide
   and Renovate owns action advisories.
+- zizmor's `dependabot-cooldown` audit expects seven days unless configured. `.github/zizmor.yml` sets `days: 3`
+  in every kind with `dependabot.yml`, so the audit holds the three-day cooldown under Updates.
 - A Dependabot pull request carries `fix(deps)`, `dependencies` and `security`. It runs CI on `pull_request`
   with a read-only token and no Actions secret, and needs no bypass actor.
 
@@ -315,8 +404,24 @@ pull requests.
   minutes.
 - Wherever the code can be cross-platform, CI runs the gate on windows, darwin and linux. A narrower matrix is
   recorded at the drift site, a comment beside the matrix in `ci.yml`.
+- A local run proves one operating system, and CI proves the others. A template therefore runs its first CI
+  before it is called done.
+- No gate row resolves a tool from the machine's `PATH`. The programs the gate expects on `PATH` are the
+  prerequisites `docs/dev.md` names.
+- On Windows a bare program name resolves from the current directory before `PATH`. Every gate spawn therefore
+  goes through one place that resolves its program to an absolute path from `PATH` alone, never from the current
+  directory or an empty `PATH` entry. The Bun gate runs Bun itself as `process.execPath`.
+- The gate refuses a committed file named like a program it spawns, such as `gh`, `mise`, `bun` or `git` with a
+  Windows executable extension, so a red row fires before any spawn reaches one.
+- PLACEHOLDER, replaced before the pull request opens: the Go, Rust and C# mechanism for the two rules above.
+- A test or script that spawns git drops every inherited `GIT_*` variable for that process and names the
+  repository with `-C <root>`. git exports `GIT_DIR` and `GIT_INDEX_FILE` to a hook, so a gate the hook runs
+  otherwise writes into the hook's own repository.
 - The stack's own runner drives the gate: Bun scripts in `package.json`, `xtask` for Rust, Cake for C#, go-task
   for Go. A `Makefile` is a violation.
+- `cargo xtask` is `cargo run --package xtask`, and the outer cargo resolves the workspace before any row runs.
+  The alias in `.cargo/config.toml` therefore carries `--locked`: `run --locked --package xtask --quiet --`.
+- The Bun linter is ESLint with typescript-eslint, configured in `eslint.config.ts` (Known defects).
 - `check` is the whole gate. A `check:quick` without the slow rows, such as the tests, is allowed for the
   `pre-push` hook, per stack: `task check:quick`, `cargo xtask check --quick`, a Cake target.
 - One gate task lists the gate's rows, and `bun run` with no arguments counts. Documentation names that task
@@ -347,32 +452,69 @@ pull requests.
   runs from mise, installed by mise's official action. A per-tool action is not used. Each one runs on Linux
   alone, records a lower integrity tier, or resolves its own version at run time. None gives a contributor the
   same tool locally.
-- Each hand-rolled step is under a screen and names its gap in a comment. The steps: the mise lockfile
-  assertions under Tools and the ShellCheck canary below.
+- release-plz runs from its mise pin, not from `release-plz/action`. The action has no command that runs the
+  semver check alone, and it installs cargo-semver-checks in the job that holds the releaser token. `cd.yml`
+  records the deviation.
+- A hand-rolled step closes a gap no tool closes and names that gap in a comment. Examples: the mise lockfile
+  assertions and the unattested-tool cross-check under Tools, and the ShellCheck canary below.
 - No repository test reads a workflow file. actionlint and zizmor are the readers of workflow YAML. A property
   neither checks (a step order, a trigger set, a matrix, a permission) is held by construction. The reusable
   workflow or the one gate task that sequences it holds it. A test that parses `ci.yml` for its shape is glue,
   and it goes.
-- The `commits` workflow runs commitlint over the pull request range and its title.
-- The `workflows` workflow runs actionlint and zizmor. zizmor runs with `--strict-collection` always and online
-  in CI. In the gate it runs online when `gh auth token` succeeds and offline otherwise. The gate proves
-  ShellCheck ran by writing a canary workflow with an unquoted variable and requiring the finding back.
-  actionlint exits 0 with ShellCheck absent, and no flag changes that.
-- A scheduled workflow's requirement reads "at least once a day", and its header claims nothing tighter (Known
-  defects).
+- The `commits` workflow runs commitlint over the pull request range and over the subject the squash writes,
+  with ` (#N)` appended.
+- The `workflows` workflow runs actionlint and zizmor. The gate proves ShellCheck ran by writing a canary
+  workflow with an unquoted variable and requiring the finding back. actionlint exits 0 with ShellCheck absent,
+  and no flag changes that.
+- zizmor reads `--collect=all .github`, with `--strict-collection`, in every gate row and in the shared job. No
+  ignore file hides a workflow from that input. It collects `dependabot.yml` and the composite actions under
+  `.github/actions`, and it never walks `node_modules`, a worktree or a submodule. A composite action outside
+  `.github` is named as a second file input, with the reason beside it.
+- zizmor's online audits run in the shared `workflows` job alone, on every pull request and weekly from
+  `audit.yml`. That job is the one CI job whose steps name the job token: its zizmor step and its lockfile asset
+  check under Tools.
+- In CI the gate runs zizmor with `--offline` and holds no token. Locally the gate runs zizmor online when
+  `gh auth token` answers, handing the token to zizmor's process alone, and passes `--offline` otherwise, never
+  as a silent default. That token comes from gh's credential store, so an empty `GH_CONFIG_DIR` leaves it
+  reachable.
+- `gh auth token` runs under a short deadline of its own, and a timeout reads as no token.
+- Every other process the gate starts runs without any token variable a gate tool reads, `GITHUB_API_TOKEN` and
+  `MISE_GITHUB_ENTERPRISE_TOKEN` included.
+- Inside a job, a step's environment is not a boundary: any step can read the job token from the runner. The
+  job is the boundary, so the token goes to the job that installs no dependencies and runs no build or test.
+- A gate job gives `jdx/mise-action` an empty `github_token`. A locked install makes no GitHub API request, so
+  the job token has no use there.
+- A scheduled workflow's header states the requirement its section names and claims nothing tighter (Known
+  defects). `deps` runs at least once a day. `codeql` and the `audit.yml` job that calls `workflows` run weekly.
+  The advisory reports run on the clocks Advisories names.
 - After any edit to a scheduled workflow's cron line, the `if:` that names the cron changes with it, and the
   owner confirms the failure notification still reaches a person (Known defects). A job gated on a cron string
   its schedule no longer raises skips forever, green.
 
 ## CodeQL
 
-- A committed `codeql.yml`, never default setup. Default setup pins nothing and names checks the repository does
-  not control.
-- The job carries an explicit `name: Analyze (<language>)`, so the check name is stable. Its check run is a
-  workflow job's, under GitHub Actions. The `CodeQL` check GitHub Advanced Security posts on a pull request head
-  is a second check, and Branch rules says which the ruleset requires.
-- The languages are the shipped language plus `actions`. The `actions` analysis runs beside zizmor. Neither
-  replaces the other.
+- A committed `codeql.yml` calls the shared `codeql` workflow, never default setup. Default setup pins nothing
+  and names checks the repository does not control.
+- The caller's job is `codeql`, and the shared job is named `Analyze (<language>)`. Each check run is therefore
+  `codeql / Analyze (<language>)`, a workflow job's check run under GitHub Actions.
+- The languages are every language the repository's own code is written in, plus `actions`. A configuration
+  file a tool reads is not the repository's code. The caller passes every language, `actions` included, and the
+  shared workflow adds none. The `actions` analysis runs beside zizmor. Neither replaces the other.
+- Every analysis runs the `security-extended` suite on the CodeQL bundle the pinned action ships, `tools: linked`.
+  Without it, a server-side flag picks the bundle at run time, and no pin or cooldown sees the change.
+- The build mode is `none` wherever the extractor supports it and `autobuild` for Go, whose extractor refuses
+  `none`. A Go caller passes `build-mode: autobuild` in its language's entry.
+- The triggers are a push to the default branch, every pull request and a weekly schedule, with no path filter.
+  A filtered run leaves a required check pending and the `code_scanning` rule without a result.
+- The category is `/language:<language>` and never changes. Renaming `codeql.yml`, its job id or the category
+  leaves a stale configuration on the default branch. The `CodeQL` check then concludes `neutral` on every pull
+  request, which passes, until that configuration is deleted on the tool status page.
+- Removing a language includes deleting its configuration from the default branch, because the `code_scanning`
+  rule waits on every pull request for a result nothing uploads.
+- An alert is fixed or dismissed. A dismissal names its reason and carries a comment saying why the alert does
+  not apply. The API takes `dismissed_comment` only in the dismissing call, so the rule binds a dismissal as it is
+  made, and an existing dismissal keeps whatever comment it carries.
+- Code scanning runs in a public repository. Under a personal account a private repository cannot run it.
 
 ## Commits
 
@@ -381,7 +523,32 @@ pull requests.
   which `commitlint.config.js` reads and `CONTRIBUTING.md` points at.
 - The header is at most 72 characters. Renovate's headers are shortened by the presets' `commitMessageAction`
   and `commitMessageTopic`, never by exempting the bot.
-- A tooling change is `chore` or `ci`, never `fix`.
+- The shared `commitlint.config.js` ignores a message signed off by `dependabot[bot]`, because its body carries
+  release notes past the line limit. The pull request title and the landed-subject lint still check its header.
+- A commit's type names its effect on the people who use what the repository ships.
+- `feat`, `fix`, `perf` and `revert` are user-facing. Every other type is hidden from the changelog (Releases).
+- A gate, hook or tooling change is `chore`, and a change to the repository's own workflows is `ci`, because
+  users never run either.
+- In `zachthedev/.github` a reusable workflow or preset change is `feat` or `fix`, because callers run it.
+- In a template, a change to a file a clone copies is `feat` or `fix`, a copied document included, so an
+  aligning repository learns to copy it. A document no clone copies stays `docs`. A pin bump stays `chore`,
+  because the clone's own Renovate moves it.
+- `build` covers how the artifact is built when users see no difference. A build change users see is `feat` or
+  `fix`.
+- `docs` is hidden in every kind, because a document reaches its readers from the default branch. A template's
+  copied document takes `feat` or `fix` instead, as above.
+- A dependency whose code runs where users are is `fix(deps)`. One that only builds, checks or tests is
+  `chore(deps)`.
+- `!` and `BREAKING CHANGE:` mark a break users see. A contributor-only break carries neither, because either
+  cuts a release.
+- A revert is `revert(<scope>): <what is undone, in fresh words>`, with a `Refs: <sha>` footer naming each
+  reverted commit. The scope follows the scope rules above and is omitted when none applies. A `revert:` prefix
+  on the reverted header overflows the header limit, and this form fits by construction. It is the Conventional
+  Commits specification's recommendation. git's own `Revert "..."` subject is never used: commitlint skips it,
+  and release-please cannot parse it.
+- A pull request's title takes the type of its most user-facing commit, and `!` when any commit breaks something
+  users see. A squash of several commits lands the title's type alone.
+- A body paragraph never opens with a bare type, because release-please reads it as a second change.
 
 ## Hooks
 
@@ -389,8 +556,18 @@ pull requests.
   the gate.
 - A Go repository pins lefthook as a `go.mod` tool directive, because lefthook is a Go program and the stack
   leans on its native abilities. Its `package.json` carries commitlint and Prettier alone.
-- A hook resolves its tool with `bunx --no-install`, so the lockfile's pin runs (Updates).
-- The hooks fail closed on a clone with no dependencies installed, so `CONTRIBUTING.md` says to install first.
+- A hook resolves its tool with `bunx --no-install`, so the lockfile's pin runs (Updates). `bunx --no-install`
+  refuses a missing package while `node_modules` exists.
+- The hook script `lefthook install` writes fails open where lefthook itself resolves from `node_modules`: Bun,
+  and any kind installing lefthook through `package.json`. With no lefthook binary found, it prints
+  `Can't find lefthook in PATH` and exits 0, and the commit or push goes through unchecked.
+- That script hard-codes the installing checkout's `node_modules` path. A linked worktree with no `node_modules`
+  of its own therefore runs the installing checkout's lefthook.
+- A fresh clone has no hook until its install runs `lefthook install`.
+- A Go repository's hook runs lefthook through `go tool`, which refuses when lefthook cannot run.
+- lefthook skips `pre-push` on the first push of a new branch to an empty remote. A first push therefore rests on
+  the gate run before it.
+- CI's `commits` job and gate are the control, and `CONTRIBUTING.md` says so.
 - No `.githooks/`.
 
 ## Formatting
@@ -404,6 +581,12 @@ pull requests.
 - `prettier --check .` runs with no glob and no ignore flags. A generated file the owning tool formats goes in
   `.prettierignore`.
 - C# is formatted by CSharpier at the same width.
+- taplo formats every TOML file in every kind, from `.taplo.toml`. A repository carrying TOML pins taplo in
+  `mise.toml` and runs it as a gate row.
+- The taplo row checks what `.taplo.toml` includes, never a list of files by name. It passes
+  `--config .taplo.toml`, because a bare `taplo fmt --check` checks zero files and exits 0 when `TAPLO_CONFIG`
+  names a config matching nothing.
+- taplo reads no `.gitignore`, so the exclude list in `.taplo.toml` is the one control over what it walks.
 - A repository joining the standard pays one formatting-only commit touching every file Prettier owns.
 
 ## Updates
@@ -426,6 +609,11 @@ pull requests.
   - a branch rebased only on conflict
   - commit types derived: `fix` for a runtime dependency, `chore` for tooling, `ci` for a workflow, scope `deps`
   - labels: `dependencies` on every pull request, `ci` on a workflow bump, `security` on a fix
+- A Renovate group takes the highest type among its members, lowest first `chore`, `ci`, `build`, `fix`, `feat`.
+  A group holding anything that ships therefore lands `fix(deps)`. A group rule sets no `semanticCommitType`.
+- Where a derived type misses what ships, the preset or the repository file types it by the Commits rule. The
+  `go-cli` preset types the `go` and `toolchain` lines `fix`, because they pick the standard library linked into
+  the binary. `zachthedev/.github` types a pin inside a reusable workflow `fix`, because callers run it.
 - A `zachthedev/**` bump's SHA is on `.github`'s `main`. The reviewer checks it with
   `gh api repos/zachthedev/.github/compare/main...<sha>`, reading `behind` or `identical`.
 - The Monday window's own pull requests keep a quiet repository active, so its scheduled workflows stay
@@ -469,44 +657,97 @@ pull requests.
   recovered under Tags. A service deploys through an advisory and rolls back natively. A library or installer
   publishes through an advisory. Users hold the old version until the next one.
 - The waiver is `allow-ghsas` with a comment naming the advisory, what it blocks, why shipping is safer and the
-  removal condition. A red advisory check is never merged past with `--admin`.
-- Go adds `govulncheck` beside both advisory checks, because it blocks only on a reachable call.
+  removal condition. A red advisory check blocks the merge like every required check, an `--admin` merge
+  included (Branch rules).
+- A known advisory against an unchanged action pin is waived per advisory in `.github/zizmor.yml` under
+  `rules.known-vulnerable-actions.config.allow`, with the four-part comment `allow-ghsas` needs.
+- Go adds `govulncheck` beside both advisory checks, because it blocks only on a reachable call. The Go gate runs
+  `govulncheck ./...` and `govulncheck tool`, because `./...` never reads the modules behind `go.mod` tool
+  directives.
+- A tool-tree advisory with no fixed version is held by pinning the tool back, or by disabling `govulncheck tool`
+  with a dated reason at its drift site until a fix ships. `CONTRIBUTING.md` says so.
 - Live whole-tree readers run as reports, never as checks: `bun audit` daily, `cargo deny check advisories`
-  weekly, `dotnet package list --vulnerable` weekly. They run from `audit.yml`, on its own clock. GitHub's
+  weekly, `dotnet package list --vulnerable` weekly. They run from `audit.yml`, on its own clock. A repository
+  with an audit script or waivers runs that script in the daily job, not bare `bun audit`. GitHub's
   database lacks RustSec entries that OSV carries, and the weekly report covers those. `audit.yml` also carries a
   weekly job that calls the reusable `workflows` workflow, so zizmor's online audits of the pinned actions run
   without a pull request. A red run is the report.
 - The advisory check sees direct npm packages only under Bun, no NuGet package under central package
-  management, and full lockfiles under Cargo. `CONTRIBUTING.md` states which legs the check covers. A C# repository
-  submits a dependency snapshot from the restored graph on every pull request head (Known defects). The
-  snapshot counts as coverage only once a compare shows real versions.
+  management, and full lockfiles under Cargo. `CONTRIBUTING.md` states which legs the check covers.
+- A C# repository submits a dependency snapshot on every pull request head and every push to the default branch
+  (Known defects). The snapshot is generated by `Microsoft.Sbom.DotNetTool` from `dotnet-tools.json` over the
+  restored tree and submitted by the SPDX dependency submission action, pinned by commit, which downloads
+  nothing. A submitter that fetches its scanner at run time is not used. The snapshot counts as coverage only
+  once a compare shows real versions.
 - A template repository's alerts are fixed first, because its pins are copied into every new repository.
 
 ## Tools
 
 - A tool the stack owns is pinned the stack's way: `go.mod` tool directives, `dotnet-tools.json`, cargo for
-  xtask dependencies. Tools no stack owns, actionlint, zizmor, ShellCheck and taplo, are pinned in `mise.toml`
-  with `mise.lock`. `mise.lock` is excluded from the formatter.
+  xtask dependencies. A tool no stack owns, such as actionlint, zizmor, ShellCheck and taplo, is pinned in
+  `mise.toml` with `mise.lock`. `mise.lock` is excluded from the formatter.
 - A backend is chosen for integrity: `aqua:` where a registry entry exists, `github:` otherwise. `cargo:` and
   `ubi:` record no lockfile integrity, so neither is used (Known defects).
-- Each tool's integrity tier is stated in the repository. The tiers: provenance, a checksum in a pinned tree, a
-  checksum recorded by a third party, or a version alone. "Verified" is never written for a hash check.
+- Each tool's integrity tier is stated in `CONTRIBUTING.md`. The tiers: provenance, a checksum in a pinned tree,
+  a checksum recorded by a third party, a checksum mise hashed at lock time, or a version alone. "Verified" is
+  never written for a hash check.
+- A `github:` backend records a checksum mise hashed at lock time. That binds every later install to the bytes
+  the lock fetched, and nothing outside the lockfile vouches for those bytes.
 - The settings `locked`, `lockfile`, `locked_verify_provenance`, `provenance_api_failures_fatal`,
   `github_attestations` and `aqua.github_attestations` are set. `lockfile_platforms` names the platforms the
   lockfile pins. `[tool_config] locked` is set, because no environment variable reaches it.
 - mise refuses a version disagreement and a missing platform entry. `mise install --locked --dry-run` proves it.
-- The gate asserts the checksum, the backend, the url host and path, the url_api host and the provenance line
-  (Known defects). It asserts them for every tool, per pinned platform, against constants in source, with the
-  stack's TOML library. This is a named hand-rolled check, because nothing else reads the lockfile against
-  expectations outside it.
+- `mise.toml` and `mise.lock` are the one mise config and lockfile in the tree. mise merges the sibling lockfile
+  of every config file it discovers, highest precedence first (Known defects). The gate therefore refuses
+  `mise.local.toml`, `.mise.toml`, `.mise.local.toml`, `mise.*.toml` and `mise.*.lock`, `.mise.<env>.toml`,
+  `.config/mise*`, `.config/mise/**`, `.config/miserc.toml`, `.mise/**`, a `mise/` directory, `.miserc.toml` and
+  `.tool-versions`. The Rust repositories keep `mise.semver.toml` and `mise.semver.lock` as the named exception
+  (Releases).
+- Every mise call the gate makes, `install`, `which` and `exec`, carries four pins beside
+  `MISE_URL_REPLACEMENTS`: `MISE_OVERRIDE_CONFIG_FILENAMES=mise.toml`,
+  `MISE_OVERRIDE_TOOL_VERSIONS_FILENAMES=none`, `MISE_ENV=''` and `MISE_AUTO_ENV=false`. mise reads
+  `.tool-versions` under the config override alone, and with auto env on it reads per-platform config files. The
+  pins are the second layer behind the refusal above.
+- The shared `workflows` job carries the same four pins and the same map. Its `jdx/mise-action` step also sets
+  `env: false`. The action otherwise writes `mise env --json` into `GITHUB_ENV`, where a config's `[env]`
+  template renders with the runner's tokens in reach.
+- Before setting a `MISE_` variable, the gate removes every case spelling of that name from the inherited
+  environment. On Windows a differently cased inherited name wins over the one the gate sets.
+- Before any install, the gate reads `mise.lock` with the stack's TOML library, for every tool and every platform
+  `lockfile_platforms` names (Known defects). This is a named hand-rolled check, because nothing else reads the
+  lockfile against expectations outside it. It asserts:
+  - the checksum, the backend and the provenance line;
+  - that the pin's version and the lock's version match the tool's version pattern, ASCII digits and dots,
+    before any url is built, because the version is substituted into the url;
+  - that `url` equals, byte for byte, the download url built from constants in source: owner, repository, tag
+    prefix and one asset name per platform. No url parser reads it;
+  - that `url_api` is the repository's asset prefix,
+    `https://api.github.com/repos/<owner>/<repository>/releases/assets/`, followed by ASCII digits alone;
+  - that every platform has an asset constant and every asset constant has a platform;
+  - that no entry carries a nested `platforms` table, and no quoted `"platforms.<name>"` table names a platform
+    `lockfile_platforms` leaves out. mise reads both spellings.
+- A finding quotes every lockfile value it prints.
+- `mise.toml` carries a `url_replacements` rule that sends the GitHub asset API to an unreachable host, and the
+  gate asserts the rule equals a constant. Every install the gate or CI runs carries the same map in
+  `MISE_URL_REPLACEMENTS`, because a committed higher-precedence config file lifts a rule `mise.toml` alone
+  holds.
 - A release whose GitHub assets carry no digest and whose aqua entry names no checksum file gets no checksum
   from `mise lock`. Its checksum is the sha256 of the artifact at the recorded url, computed once and written
   into `mise.lock`, and mise verifies it on install. The comment in `mise.toml` records how it was produced.
+- Those hand-written lines survive a relock at the same version and vanish on a bump, so a bump recomputes them.
+  No mise command writes them.
+- A mise-pinned tool without attestations gets a second source. The shared `workflows` job resolves each
+  lockfile asset id through GitHub's API. It requires `browser_download_url` to equal the lockfile url, and
+  `digest` to equal the checksum where GitHub records one. A tool with neither attestation nor digest stays on
+  its hand-computed checksum.
 - `locked_verify_provenance` verifies against the coordinate the lockfile itself supplies. It arms the downgrade
   refusal for an entry that claims provenance and replaces none of the assertions.
+- mise fetches attestation bundles from its own versions host, `mise-versions.jdx.dev`, and verifies them
+  locally. A release's provenance check therefore depends on that host being reachable, token or no token.
 - The assertions run before the install, held by construction: one task asserts, then installs.
 - The gate resolves a binary through `mise which` and invokes that path. A human activates mise in the shell.
-- `MISE_BACKENDS_<TOOL>` overrides a backend from the environment and no setting reports it. The gap is named.
+- `MISE_BACKENDS_<TOOL>` overrides a backend from the environment and no setting reports it. The tier statement
+  in `CONTRIBUTING.md` names that gap.
 
 ## Releases
 
@@ -521,28 +762,69 @@ pull requests.
 - release-please pairs the draft with forced tag creation, because GitHub creates no tag for a draft, and sets
   `bump-minor-pre-major`, so a breaking change below `1.0.0` bumps the minor (Versioning). release-plz creates
   the tag itself.
-- Under release-please the changelog shows `feat`, `fix`, `perf`, `revert` and `build`, and hides `chore`,
-  `ci`, `docs`, `style`, `refactor` and `test`. A visible type cuts a release on its own. The set is the
-  repository's choice. `release-please-config.json` has no comment syntax, so the drift site is
-  `CONTRIBUTING.md`, naming the config key.
-- Under release-plz the release decision is content-based: any commit that changes a crate's packaged files
-  releases it. The commit type sets the changelog section and the bump size alone. A `feat` on `0.x` bumps
-  patch.
+- The changelog carries user-facing changes alone (Commits). Under release-please, `changelog-sections` shows
+  `feat`, `fix`, `perf` and `revert` and hides the rest, `build` included. Under release-plz,
+  `[changelog] commit_parsers` shows the same four and skips the rest, with `protect_breaking_commits` on.
+- Every repository takes the one changelog block its kickstart carries. A hidden type keeps its section name,
+  because a break on a hidden type prints that heading.
+- A release needs a user-facing change or a break, under both tools. release-please applies that itself: it cuts
+  no release whose changelog is empty. release-plz applies it through `release_commits`.
+- Every version heading links GitHub's compare view from the previous tag. The view lists every change in the
+  release, hidden types included. `git log <previous tag>..<tag>` lists the same. A first release has no
+  previous tag, and `git log <tag>` lists it.
+- In a Rust repository `git_release_generate_notes` appends GitHub's generated notes to the draft release, below
+  the changelog.
+- Under release-please, a squash whose title hid a user-facing change is corrected with `BEGIN_COMMIT_OVERRIDE`
+  in the merged pull request's description, before the release pull request merges. That override is the
+  sanctioned recovery, never a changelog hand edit.
+- Under release-plz a `feat` on `0.x` bumps patch.
 - The releaser app holds Contents and Pull requests write and no Issues. Nobody removes `autorelease: pending`
   by hand.
 - A package published to a registry is published once by hand, then through trusted publishing with no
   long-lived token. An installer is attached to the release, attested, then the draft flips.
+- An artifact repository ships a build attestation and `SHA256SUMS` beside its artifacts, and `docs/install.md`
+  names both routes. The attestation is recorded through the attestations API, not attached as a release asset.
+  One attestation covers the artifacts and `SHA256SUMS`.
+- `docs/install.md` shows two verification forms. The first proves the source repository and the signer:
+
+  ```sh
+  gh attestation verify <file> --repo zachthedev/<repo> \
+    --signer-workflow zachthedev/.github/.github/workflows/publish.yml
+  ```
+
+  `--repo` alone fails, because the reusable `publish.yml` signs the attestation. The second form binds the tag:
+  resolve the tag's commit, then add `--source-digest <sha>`. It binds because `publish.yml` refuses a tag that
+  does not name `GITHUB_SHA`.
+
+- `--source-ref refs/tags/...` is never used. `cd.yml` runs on a push to the default branch, so the certificate
+  records `refs/heads/main`, and every genuine asset fails the tag form.
 - A Rust workspace:
   - `release-plz.toml` carries `git_release_draft = true` and `git_release_latest = false`.
   - A workspace publishing nothing adds `git_only = true` and marks `xtask` with `release = false`.
+  - `release-update` computes the release. It runs in no environment, with a job token that reads and
+    `MISE_ENV=semver`, and runs `release-plz update` with the semver check. The check builds rustdoc for each
+    changed library and its published baseline, which runs every dependency's build script, so the job holds no
+    credential. It uploads the change it computed.
+  - `release-pr` runs in `release-pr`. It applies only the `Cargo.lock`, `*Cargo.toml` and `*CHANGELOG.md`
+    hunks, mints the releaser token last, and runs `release-plz release-pr --allow-dirty`.
+  - That handoff refuses any summary line but a 100644 create of a `CHANGELOG.md`, any binary hunk, and any
+    symlink after the apply, because `git apply --include` filters by path alone.
+  - cargo-semver-checks lives in `mise.semver.toml` alone, with `mise.semver.lock`, because a mise shim installs
+    any configured tool when another tool's shim runs. `MISE_ENV=semver` layers that file over `mise.toml`,
+    whose `[tool_config] locked` binds it too.
   - The release job runs under `release` with `id-token: write` and no registry token. release-plz exchanges
     the OIDC token itself.
-  - The crates.io trusted-publishing configuration names the repository's own workflow file, so the reusable
-    publish workflow works.
+  - The release job carries `if: startsWith(github.event.head_commit.message, 'chore: release')`, so it queues
+    an approval only on the release merge. `release-plz.toml` pins `pr_name`, so the title and the `if:` cannot
+    drift.
+  - release-plz creates the tags in the release job, under the releaser app. `release` therefore also holds
+    `RELEASER_CLIENT_ID` and `RELEASER_PRIVATE_KEY`, and `release-pr` holds the same pair.
+  - The crates.io trusted-publishing configuration names `cd.yml` and the environment `release`.
 
 ## Versioning
 
-- Semantic versioning. The release tool owns the number. Nobody hand-edits a version or a changelog.
+- Semantic versioning. The release tool owns the number. Nobody hand-edits a version or a changelog, apart from
+  the one reset a kickstart's marker orders (Kickstarts).
 - `0.x` while a repository is unreleased to users, starting at `0.1.0`. A repository whose interface is already
   settled starts at `1.0.0`, and `CONTRIBUTING.md` says why.
 - Below `1.0.0` a breaking change is a minor bump, so the changelog carries the break. The README says `0.x`
@@ -550,14 +832,14 @@ pull requests.
 - A prerelease is `-rc.N`. Everything that reads the tag admits it before the first one is cut.
 - Tags are `v`-prefixed: `v<version>`. A crate that versions on its own inside a workspace tags
   `<crate>-v<version>`.
-- An installer or an assembly carries the numeric core alone, so a prerelease is not an upgrade path. The
-  README says so.
+- An installer or an assembly carries the numeric core alone, so a prerelease is not an upgrade path.
+  `docs/install.md` says so under Upgrade.
 
 ## Labels
 
 - The kickstart ships one label set with colors and descriptions. Labels are created at repository creation with
   `gh label clone` from the kickstart, so no repository defines them by hand.
-- The base set is thirteen labels: GitHub's ten defaults without `good first issue` and `question`, plus
+- The base set is GitHub's defaults, `accessibility` among them, without `good first issue` and `question`, plus
   `dependencies`, `ci`, `security`, `autorelease: pending` and `autorelease: tagged`. GitHub creates its
   defaults at repository creation, so a new repository deletes those two after the clone.
 - A repository whose label set differs records why at the drift site, the file that names the label.
@@ -565,6 +847,9 @@ pull requests.
   and no description. That is how a set drifts.
 - Label names are written only where a tool reads them: the issue forms' `labels:` lines, the Renovate presets,
   and `dependabot.yml` under Dependabot. The release tool owns `autorelease: pending` and `autorelease: tagged`.
+- A release-plz repository sets `pr_labels = ["autorelease: pending"]`. After the release, a step with a
+  pull-requests-write token of its own moves the merged pull request to `autorelease: tagged`, with
+  `continue-on-error`, so a failed label move never fails a release.
 
 ## Authoring
 
@@ -585,12 +870,16 @@ A reviewer holds this row, except where a bullet names a check.
   imperative.
 - A committed generated file is checked by regenerating it in the tree and `git diff --exit-code`. A stale index
   fails on purpose.
+- Two kinds of generated file are exempt. A file whose generator reads machine state, such as an installed
+  tool's output, names its exemption at its drift site. A tool's own record, `mise.lock`, `CHANGELOG.md` or the
+  release manifest, is held by the tool that writes it.
 - A prose rule that survives takes Vale as its mechanism, run as one gate step.
 - A comment states what the code guarantees now. What changed goes in the commit message.
 - `.gitignore` starts from the `github/gitignore` template for the stack, below one marker naming the template
   path and the commit it came from. Repository entries sit above the marker, and `.claude/worktrees/` and
-  `.claude/settings.local.json` are among them, because Claude Code writes both locally. The template block can
-  be edited in place. A terse note above it says what changed, so a refresh knows what to carry.
+  `.claude/settings.local.json` are among them, because Claude Code writes both locally. A change to the
+  template block, a negation included, is edited into the block in place, and no overrides block trails it. The
+  terse note at the top of the template section says what changed, so a refresh knows what to carry.
 
 ## Known defects
 
@@ -604,8 +893,12 @@ bears on, the defect, and the condition that removes it.
   passes a hand-edited body. The gate regenerates the file and diffs it. Removed once the check reads the body.
 - gofmt (Gate): `gofmt -l` exits 0 with an unformatted file present. golangci-lint's formatter is the check.
   gofmt documents that exit code, so the entry stays.
-- codeql-action (CodeQL): falls back from `build-mode: none` to autobuild on a server-side flag and logs it. A
-  first run's log is read, and its conclusion alone is not trusted. Removed once the fallback fails the run.
+- codeql-action (CodeQL): falls back from `build-mode: none` to `autobuild` for C# and Java on a server-side
+  flag, and logs it as a warning. A C# repository reads its first run's log, and the conclusion alone is not
+  trusted. Removed once the fallback fails the run.
+- typescript-eslint (Gate): reads types through the TypeScript 6 compiler API. A Bun repository therefore keeps
+  `typescript` on 6.x beside the native TypeScript 7 compiler, installed under an alias, and a Renovate rule
+  holds the major. Removed once typescript-eslint supports TypeScript 7.
 - GitHub dependency graph (Advisories): reads `.csproj` alone and never `Directory.Packages.props`, so under
   central package management a NuGet bump produces an empty diff for `dependency-review-action`. The submitted
   snapshot under Advisories is what makes that leg real. Removed once the graph reads
@@ -616,8 +909,17 @@ bears on, the defect, and the condition that removes it.
 - mise `cargo:` backend (Tools): writes no checksum, no platform table and no URL to the lockfile, and
   `mise lock` reports success over it. Removed once the backend writes them.
 - mise lockfile (Tools): mise accepts a lockfile entry with its checksum removed, its backend rewritten, or its
-  url host swapped. A deleted provenance line disarms the downgrade refusal. The gate's assertions under Tools
-  exist for this. Removed once mise refuses each.
+  url host swapped. A deleted provenance line disarms the downgrade refusal. mise falls back to `url_api` on any
+  failed HEAD of `url`, and no setting turns the fallback off. It reads a nested `platforms` table for any
+  platform, and it reads `url_replacements` from every config file. The gate's assertions and the pinned
+  `MISE_URL_REPLACEMENTS` under Tools exist for these. Removed once mise refuses each.
+- mise config discovery (Tools): mise merges the sibling lockfile of every config file it discovers, highest
+  precedence first. A committed `mise.local.toml` with `mise.local.lock`, or a `.miserc.toml` choosing an env
+  with `mise.<env>.toml` and its lock, then redirects `mise install --locked` to any url with any checksum. A
+  gate reading `mise.toml` and `mise.lock` alone stays green and runs the binary. mise reads `.tool-versions`
+  even under `MISE_OVERRIDE_CONFIG_FILENAMES`. With auto env on, set by a miserc or `MISE_AUTO_ENV`, it reads
+  per-platform `mise.<platform>.toml` files under that override too. The refusal and the four pins under Tools
+  exist for this. Removed once a locked install reads one named config and its lockfile alone.
 - Immutable releases (Tags): an immutable release locks the tag with its assets. The cleanup in
   `gh release delete --cleanup-tag` is a ref deletion, so it is refused. A bad release leaves the tag on the
   wrong commit with the version spent. Removed once a fork of release-please tracks burned version tags and
