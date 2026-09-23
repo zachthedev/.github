@@ -7,7 +7,8 @@ and `bun install` installs the dependencies and the git hooks. The commit hook c
 before it is recorded, and the push hook runs the gate and refuses the push when it fails.
 
 The commit hook runs commitlint through `bunx --bun --no-install`, which refuses a missing package, fetches
-nothing and runs commitlint under Bun rather than a `node` on `PATH`. The push hook runs `bun scripts/check.ts`.
+nothing and runs commitlint under Bun rather than a `node` on `PATH`. The `format` and `prepare` scripts start
+their tools the same way. The push hook runs `bun scripts/check.ts`.
 The hook script `lefthook install` writes fails open. When it finds no lefthook binary, as in a checkout whose
 `node_modules/` is gone, it prints `Can't find lefthook in PATH` and exits 0, and the commit or push goes through
 unchecked. A fresh clone runs no hook at all until `bun install` runs. CI's `commits` job and gate hold both
@@ -16,8 +17,12 @@ cases.
 A pull request controls its own install scripts and gate code. Before running anything on a pull request branch
 you did not write, read its diff, then install it with `bun install --ignore-scripts`, so no install script runs.
 `bun run check` on that branch still goes through Bun's script runner, which puts the branch's own
-`node_modules/.bin` first on `PATH`. A tracked `node_modules/.bin/bun` then runs before the gate's refusal can, so
-the diff read is what catches one there.
+`node_modules/.bin` first on `PATH`. A tracked `node_modules/.bin/bun` then runs before the gate's refusal can.
+Bun also runs a `bunfig.toml` preload before the gate's first line, whichever way the gate starts, and before the
+commit hook's commitlint and in the `format` and `prepare` scripts, since each runs under `bunx --bun`.
+`eslint.config.ts` and `commitlint.config.js` are code too: the `lint` row and the commit hook run them. The
+gate's refusals keep such a branch from merging, and nothing in the gate can stop its first run on your machine,
+so the diff read is what catches one there.
 
 ## The gate
 
@@ -37,6 +42,27 @@ zizmor's process alone. Otherwise it runs zizmor offline, and the row's label sa
 any value, forces offline. In CI the gate runs zizmor offline and holds no token. gh reads its token from the
 system credential store, so an empty `GH_CONFIG_DIR` leaves it reachable.
 
+Before any row, the gate's preflight refuses to run beside what Bun or Prettier reads before a row starts:
+
+- a tracked env file Bun loads, in any case;
+- a tracked `.npmrc`, which names the registry `bun install` fetches from;
+- a tracked path under a `node_modules` directory at any depth;
+- a `bunfig.toml` holding anything but `[install] minimumReleaseAge`, since Bun runs a `preload` it names and
+  applies a `[define]` table;
+- a `scripts/tsconfig.json` that differs from the copy in `scripts/startup.ts`, and any other `tsconfig.json`,
+  `jsconfig.json`, `package.json` or `node_modules` under `scripts/`, since Bun resolves the gate's imports through
+  them;
+- a `patchedDependencies` entry in `package.json` for a package the gate's scripts import;
+- a `.prettierrc` that differs from the copy in `scripts/startup.ts`, any other Prettier config file anywhere in the
+  tree, in any case, a `prettier` key in any `package.json` and a `package.yaml`, since Prettier loads a config
+  written as code and any plugin a config names. The `format` row and the `format` script pass
+  `--config .prettierrc`, which stops Prettier's search for any other.
+
+A template such as `.env.example` passes, and so does your own untracked env file or `.npmrc`. The gate loads
+nothing from `node_modules/` until these checks pass, so a planted package never runs ahead of its refusal. The
+gate is this repository's only TypeScript, so `scripts/tsconfig.json` is the one TypeScript config, and the
+`typecheck` row reads it.
+
 A few checks run only in CI, each because it needs something a working machine does not have. The `commits`
 job lints a pull request's commit range and the subject its squash writes, which do not exist before the pull
 request does. The `workflows` job runs zizmor's online audits, which flag a pinned commit outside its action's
@@ -45,9 +71,8 @@ asset `mise.lock` names against GitHub's record of it. Both need the job token, 
 `dependency-review` job compares the pull request's dependencies against its base through GitHub's dependency
 graph. That review sees the direct npm packages `package.json` names and nothing under `bun.lock`, which is the
 one leg it covers here. `codeql` is GitHub's analysis, over the TypeScript gate every Bun repository copies and
-over the workflows, and it runs on GitHub. Its `Analyze` checks are required, and
-a code-scanning rule refuses a merge while an analysis is missing or still running
-([What never happens](#what-never-happens)).
+over the workflows, and it runs on GitHub. Its `Analyze` checks are required, and a code-scanning rule refuses a
+merge while an analysis is missing or still running ([What never happens](#what-never-happens)).
 
 ## Commit messages
 
@@ -118,8 +143,9 @@ git log --oneline v0.1.0..v0.2.0
 
 - `.github/workflows/`: the reusable workflows and this repository's own callers.
 - `renovate/`: the base preset and one preset per kind.
-- `scripts/`: the gate. `check.ts` is the runner, `tools.ts` holds the mise expectations, `run.ts` starts every
-  process with a deadline.
+- `scripts/`: the gate. `check.ts` is the runner, `startup.ts` holds the preflight checks, `tools.ts` holds the
+  mise expectations, `run.ts` starts every process with a deadline, and `tsconfig.json` is the gate's own
+  TypeScript config.
 - The root and `.github/`: the community files GitHub serves as defaults, and this repository's own boilerplate.
 - `docs/`: the documents [README.md#documentation](README.md#documentation) indexes.
 
@@ -133,15 +159,13 @@ None. The gate's rows are the checks, and the break round in the alignment recor
 - `scripts/run.ts` resolves every program to an absolute path from `PATH` alone, and Bun itself runs as
   `process.execPath`. On Windows a bare program name resolves from the current directory before `PATH`, so a
   committed `gh.bat` would otherwise run in place of gh. The gate refuses a root file whose name before the first
-  dot is a program it or its hooks start, gh, bun, git or mise, whatever its extension. `bun.lock`, `mise.toml`
-  and `mise.lock` are the named exceptions.
-- The gate starts mise with an environment built from an allow-list, never the one it inherited, and refuses a
-  tracked `.env` file, which Bun would load into the gate's environment. A template such as `.env.example`
-  passes.
+  dot is a program it, its hooks or an install start, `bun`, `bunx`, `gh`, `git`, `mise` or `node`, whatever its
+  extension. `bun.lock`, `mise.toml` and `mise.lock` are the named exceptions.
+- The gate starts mise with an environment built from an allow-list, never the one it inherited.
 - Bun's script runner puts `node_modules/.bin` first on `PATH`, so under `bun run` a committed
   `node_modules/.bin/bun` would replace the gate. CI installs with `bun install --frozen-lockfile --ignore-scripts`,
-  and before its first row the gate refuses any tracked path under `node_modules`. CI and the push hook call
-  `bun scripts/check.ts` directly, which skips the script runner, so the refusal runs before every merge.
+  and CI and the push hook call `bun scripts/check.ts` directly, which skips the script runner, so the preflight's
+  `node_modules` refusal runs before every merge.
 - A row throws with the tool's own output, so a red row reads the same as running the tool by hand.
 - Every package runs from its path under `node_modules`, and every tool `mise.toml` pins from the path
   `mise which` prints. mise, gh and git each start from an absolute `PATH` entry outside the checkout.
