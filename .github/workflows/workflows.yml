@@ -1,16 +1,15 @@
 name: workflows
 
 # actionlint and zizmor over the caller's .github directory, at the versions the caller's
-# mise.toml pins and from the artifacts its mise.lock records. The job runs mise install --locked
-# over the checkout, so it installs the bytes the caller's gate installs. A run of this job and a
-# run of the gate read the same two files, and both prove ShellCheck ran before they trust a clean
-# actionlint run.
+# mise.toml pins and from the artifacts its mise.lock records. The job installs taplo, ShellCheck,
+# actionlint and zizmor, the four tools it runs, locked, so it installs the bytes the caller's gate
+# installs for them. A run of this job and a run of the gate read the same two files, and both
+# prove ShellCheck ran before they trust a clean actionlint run.
 #
 # The job token sits in this job and in no gate job. Inside a job a step's environment is not a
 # boundary, since any step can read the token from the runner, so the token goes to the job that
-# installs no dependencies and runs no build or test. Three steps name it: the install, for a
-# tool whose attestation mise reads from GitHub's API, the lockfile asset check, and zizmor, whose
-# online audits need it.
+# installs no dependencies and runs no build or test. Two steps name it: the lockfile asset check
+# and zizmor, whose online audits need it.
 #
 # A caller's uses: job grants permissions: contents: read. A called job can only lower what its
 # caller passes, and a caller passing none is refused before any step runs.
@@ -141,16 +140,15 @@ jobs:
               print(f"::error::{finding}, which no rule reads. Remove it.")
           sys.exit(1 if found else 0)
           PY
-      # With the refusals passed, the install mise-action would have run: locked, so a tool the
+      # With the refusals passed, the four tools this job runs install, locked, so a tool the
       # lockfile does not pin for this platform is refused. mise re-verifies each artifact and its
-      # provenance line, since nothing was restored. A tool mise's registry does not route, such
-      # as a github: coordinate, has its attestation read from GitHub's API, which answers an
-      # unauthenticated runner at 60 requests an hour per address, so this step names the job
-      # token as MISE_GITHUB_TOKEN. An aqua tool's install makes no API request and ignores it.
+      # provenance line, since nothing was restored. Each is a registry tool whose attestation
+      # mise reads from mise-versions.jdx.dev, so the step needs no token. A caller's other pins,
+      # such as a github: coordinate whose attestation only GitHub's API serves, are left alone.
+      # If mise-versions cannot verify an attestation, mise asks GitHub's API instead, without a
+      # token, and a refused or rate-limited answer fails the install.
       - name: mise install
-        env:
-          MISE_GITHUB_TOKEN: ${{ github.token }}
-        run: mise install --locked
+        run: mise install --locked taplo shellcheck actionlint zizmor
       # mise.lock names each artifact twice: the url mise downloads, and url_api, the same asset
       # by id. GitHub records each asset's download address, and its sha256 for an asset uploaded
       # since it began keeping digests. This step asks GitHub for every asset the lockfile names
