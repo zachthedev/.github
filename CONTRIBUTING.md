@@ -126,6 +126,9 @@ None. The gate's rows are the checks, and the break round in the alignment recor
   `process.execPath`. On Windows a bare program name resolves from the current directory before `PATH`, so a
   committed `gh.bat` would otherwise run in place of gh. The gate refuses a committed file named like a program
   it spawns.
+- The gate starts mise with an environment built from an allow-list, never the one it inherited, and refuses a
+  tracked `.env` file, which Bun would load into the gate's environment. A template such as `.env.example`
+  passes.
 - A row throws with the tool's own output, so a red row reads the same as running the tool by hand.
 - Every binary resolves through `mise which`, `bunx --no-install` or `bun node_modules/<package>/…`. Nothing
   reads the machine's own installs.
