@@ -6,8 +6,8 @@ Install before committing. [docs/dev.md#prerequisites](docs/dev.md#prerequisites
 and `bun install` installs the dependencies and the git hooks. The commit hook checks every commit message
 before it is recorded, and the push hook runs the gate and refuses the push when it fails.
 
-The commit hook runs commitlint through `bunx --no-install`, which refuses a missing package and fetches nothing,
-and the push hook runs `bun scripts/check.ts`. The hook script `lefthook install` writes fails open. When it finds
+The commit hook runs commitlint through `bunx --bun --no-install`, which refuses a missing package, fetches
+nothing and runs commitlint under Bun rather than a `node` on `PATH`. The push hook runs `bun scripts/check.ts`. The hook script `lefthook install` writes fails open. When it finds
 no lefthook binary, as in a checkout whose `node_modules/` is gone, it prints `Can't find lefthook in PATH` and
 exits 0, and the commit or push goes through unchecked. A fresh clone runs no hook at all until `bun install`
 runs. CI's `commits` job and gate hold both cases.
