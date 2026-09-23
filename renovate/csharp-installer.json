@@ -2,7 +2,8 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": [
     "A C# application under central package management that ships an installer. The nuget manager cannot tell a runtime package from a test package, because every PackageVersion carries the same depType. A package in Directory.Packages.props is therefore a fix, and the repository names its test-only packages as chore.",
-    "The SDK in global.json, the MSBuild SDKs and the tools in dotnet-tools.json stay chore. A refreshed packages.lock.json changes the assemblies the installer carries, so lock file maintenance is a fix.",
+    "The SDK in global.json is a fix, by the rule below. The MSBuild SDKs and the tools in dotnet-tools.json stay chore.",
+    "Lock file maintenance is a chore. Every NuGet version here is an exact central pin, and NuGet takes the lowest version a transitive range allows. A refresh therefore moves only the tooling lock files, which the installer never carries.",
     "The WiX project is not in the nuget manager's default file list. managerFilePatterns is additive."
   ],
   "extends": ["./default"],
@@ -15,9 +16,12 @@
       "matchDepTypes": ["nuget"],
       "matchFileNames": ["Directory.Packages.props"],
       "semanticCommitType": "fix"
+    },
+    {
+      "description": "SelfContained is true, so the installer carries the runtime of the SDK that builds it, and an SDK bump cuts a release.",
+      "matchManagers": ["nuget"],
+      "matchDepTypes": ["dotnet-sdk"],
+      "semanticCommitType": "fix"
     }
-  ],
-  "lockFileMaintenance": {
-    "semanticCommitType": "fix"
-  }
+  ]
 }
