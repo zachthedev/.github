@@ -1,0 +1,122 @@
+import eslint from '@eslint/js';
+import { defineConfig, globalIgnores } from 'eslint/config';
+import prettierConfig from 'eslint-config-prettier';
+import tseslint from 'typescript-eslint';
+
+// typescript-eslint reads types through the TypeScript 6.x compiler API, which the native TypeScript 7 compiler
+// does not expose, so the `typescript` package it resolves stays on 6.x beside the `@typescript/native` alias the
+// typecheck row runs.
+export default defineConfig(
+  // flat config reads no .gitignore, so every ignored directory a lint could
+  // reach is named here, the worktrees Claude Code writes included.
+  globalIgnores(['node_modules/**', 'coverage/**', 'dist/**', '.claude/worktrees/**']),
+
+  eslint.configs.recommended,
+  tseslint.configs.strictTypeChecked,
+  tseslint.configs.stylisticTypeChecked,
+
+  {
+    languageOptions: {
+      parserOptions: {
+        projectService: {
+          allowDefaultProject: ['commitlint.config.js', 'eslint.config.ts'],
+        },
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
+
+  // Production and tooling code
+  {
+    files: ['src/**/*.ts', 'scripts/**/*.ts'],
+    rules: {
+      '@typescript-eslint/explicit-function-return-type': [
+        'error',
+        {
+          allowExpressions: true,
+          allowTypedFunctionExpressions: true,
+          allowHigherOrderFunctions: true,
+          allowDirectConstAssertionInArrowFunctions: true,
+        },
+      ],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        {
+          prefer: 'type-imports',
+          fixStyle: 'inline-type-imports',
+        },
+      ],
+      '@typescript-eslint/no-non-null-assertion': 'warn',
+      '@typescript-eslint/prefer-nullish-coalescing': 'error',
+      '@typescript-eslint/prefer-optional-chain': 'error',
+      // Conflicts with strict-boolean-expressions; explicit null/undefined
+      // checks are preferred for clarity.
+      '@typescript-eslint/no-unnecessary-condition': 'off',
+      '@typescript-eslint/strict-boolean-expressions': [
+        'error',
+        {
+          allowNullableObject: true,
+          allowNullableBoolean: true,
+          allowNullableString: false,
+          allowNullableNumber: false,
+          allowAny: false,
+        },
+      ],
+      'no-console': ['warn', { allow: ['warn', 'error', 'log'] }],
+      'prefer-const': 'error',
+      'no-var': 'error',
+      'object-shorthand': 'error',
+      'prefer-template': 'error',
+    },
+  },
+
+  // Tests
+  {
+    files: ['tests/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        {
+          prefer: 'type-imports',
+          fixStyle: 'inline-type-imports',
+        },
+      ],
+    },
+  },
+
+  // Config files at the repo root sit outside the tsconfig project; lint
+  // them without type information.
+  {
+    files: ['commitlint.config.js', 'eslint.config.ts'],
+    extends: [tseslint.configs.disableTypeChecked],
+  },
+
+  // commitlint.config.js is byte-identical in every repository and reads the
+  // URL global Node and Bun both provide, so the global is declared here
+  // rather than imported there.
+  {
+    files: ['commitlint.config.js'],
+    languageOptions: {
+      globals: { URL: 'readonly' },
+    },
+  },
+
+  // Must stay last: disables rules that conflict with prettier formatting
+  prettierConfig,
+);

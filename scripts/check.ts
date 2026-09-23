@@ -185,8 +185,17 @@ const rows: readonly Row[] = [
   {
     name: 'typecheck',
     checks: 'tsc --noEmit over the gate',
+    // The native TypeScript 7 compiler, called by its alias's path because the 6.x `typescript` package that
+    // typescript-eslint needs ships a tsc of its own.
     check: () => {
-      expectClean('tsc', ['bun', 'node_modules/typescript/bin/tsc', '--noEmit']);
+      expectClean('tsc', ['bun', 'node_modules/@typescript/native/bin/tsc', '--noEmit']);
+    },
+  },
+  {
+    name: 'lint',
+    checks: 'eslint over the tree with no warnings allowed',
+    check: () => {
+      expectClean('eslint', ['bun', 'node_modules/eslint/bin/eslint.js', '.', '--max-warnings=0']);
     },
   },
   {
