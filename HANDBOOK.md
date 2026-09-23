@@ -519,8 +519,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `.github` is named as a second file input, with the reason beside it.
 - zizmor's online audits run in the shared `workflows` job alone, on every pull request and weekly from
   `audit.yml`. That job is the one CI job whose steps name the job token: its zizmor step and its lockfile asset
-  check under Tools.
-- In CI the gate runs zizmor with `--offline` and holds no token. Locally the gate runs zizmor online when
+  check under Tools. The one exception is a `mise install --locked` step for a tool mise's registry does not
+  route, below.
+- In CI the gate runs zizmor with `--offline`, and the gate step holds no token. Locally the gate runs zizmor online when
   `gh auth token` answers, handing the token to zizmor's process alone, and passes `--offline` otherwise, never
   as a silent default. That token comes from gh's credential store, so an empty `GH_CONFIG_DIR` leaves it
   reachable.
@@ -529,8 +530,13 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `MISE_GITHUB_ENTERPRISE_TOKEN` included.
 - Inside a job, a step's environment is not a boundary: any step can read the job token from the runner. The
   job is the boundary, so the token goes to the job that installs no dependencies and runs no build or test.
-- A gate job gives `jdx/mise-action` an empty `github_token`. A locked install makes no GitHub API request, so
-  the job token has no use there.
+- Every `jdx/mise-action` step takes an empty `github_token`, so the action exports no token to later steps.
+- A locked install reads a registry tool's attestations from mise's versions host. A tool mise's registry does not
+  route queries the GitHub API on every install.
+- A job installing such a tool runs `mise install --locked` as its own step, before any step that runs repository
+  code. That step alone sets `MISE_GITHUB_TOKEN` to the job token, under the job's `contents: read`. The token
+  already sits in the job, and the unauthenticated limit of 60 requests an hour per runner address fails installs
+  at random. The gate step itself stays tokenless.
 - A scheduled workflow's header states the requirement its section names and claims nothing tighter (Known
   defects). `deps` runs at least once a day. `codeql` and the `audit.yml` job that calls `workflows` run weekly.
   The advisory reports run on the clocks Advisories names.
@@ -746,8 +752,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A self-contained installer ships the runtime of the SDK that builds it, so a looser pin lets two builds of one
   commit ship different runtimes. The pin is the SDK carrying the newest runtime past the cooldown, never one
   behind what builds ship. Renovate bumps the SDK as `fix(deps)`, and the bump cuts a release (Updates).
-- A backend is chosen for integrity: `aqua:` where a registry entry exists, `github:` otherwise. `cargo:` and
-  `ubi:` record no lockfile integrity, so neither is used (Known defects).
+- A backend is chosen for integrity: the one whose entry reaches the higher tier, and `aqua:` on a tie. `cargo:`
+  and `ubi:` record no lockfile integrity, so neither is used (Known defects).
 - Each tool's integrity tier is stated under Dependencies in `CONTRIBUTING.md`. The tiers: provenance, a
   checksum in a pinned tree, a checksum recorded by a third party, a checksum mise hashed at lock time, or a
   version alone. "Verified" is never written for a hash check.
@@ -820,8 +826,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   its hand-computed checksum.
 - `locked_verify_provenance` verifies against the coordinate the lockfile itself supplies. It arms the downgrade
   refusal for an entry that claims provenance and replaces none of the assertions.
-- mise fetches attestation bundles from its own versions host, `mise-versions.jdx.dev`, and verifies them
-  locally. A release's provenance check therefore depends on that host being reachable, token or no token.
+- For a tool mise's registry routes, mise reads attestation bundles from its versions host,
+  `mise-versions.jdx.dev`, and verifies them locally. When the host answers nothing usable, mise asks the GitHub
+  API instead. The versions host refuses every repository outside mise's registry.
 - The assertions run before the install, held by construction: one task asserts, then installs.
 - The gate resolves a binary through `mise which` and invokes that path. A human activates mise in the shell.
 - `MISE_BACKENDS_<TOOL>` overrides a backend from the environment and no setting reports it. The tier statement
