@@ -98,8 +98,8 @@ break callers see carries `!` after the type or scope and explains the break in 
 workflow, a break is a caller's `uses:` line, `with:` input or required secret that stops working. A break only
 contributors see carries neither `!` nor a `BREAKING CHANGE:` footer, because either cuts a release.
 
-Every version heading in `CHANGELOG.md` links GitHub's compare view from the previous tag, which lists every
-change in the release, hidden types included. The same list locally:
+Every version heading in `CHANGELOG.md` after the first links GitHub's compare view from the previous tag, which
+lists every change in the release, hidden types included. The same list locally:
 
 ```sh
 git log --oneline v0.1.0..v0.2.0
