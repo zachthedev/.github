@@ -1,12 +1,20 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": [
-    "A Go module that ships a binary. config:recommended makes a require line a fix. The indirect lines behind tool directives, the toolchain directive and everything else stay chore.",
+    "A Go module that ships a binary. config:recommended makes a require line a fix, and the rule below makes the go and toolchain lines one. The indirect lines behind tool directives and everything else stay chore.",
     "go.mod lists every transitive module, so a Dependabot alert on an indirect one opens a fix. The base preset's vulnerabilityAlerts.enabled forces the disabled line back on for that alert alone. security:gomodIndirectSecurityUpdates is not used, because its blanket rule also stops the tool directives' modules from updating.",
     "go mod tidy runs after every update so go.sum stays exact. Go has no lock file maintenance: go.sum is not a lock file to Renovate."
   ],
   "extends": ["./default"],
   "postUpdateOptions": ["gomodTidy"],
+  "packageRules": [
+    {
+      "description": "The go and toolchain lines pick the standard library linked into the binary, so a bump ships.",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["golang", "toolchain"],
+      "semanticCommitType": "fix"
+    }
+  ],
   "lockFileMaintenance": {
     "enabled": false
   }
