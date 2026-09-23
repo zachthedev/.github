@@ -681,8 +681,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     into the binary;
   - the `csharp-installer` preset types the .NET SDK in `global.json` `fix`, because the installer ships that
     SDK's runtime (Tools);
-  - the `rust-app` preset types a `rust-toolchain` bump `fix`, because std links into the shipped binary. The
-    `rust-crates` preset leaves it `chore`.
+  - the `rust-crates` and `rust-app` presets type a `rust-toolchain` bump `fix`, because std links into the
+    shipped artifact. Under lockstep that bump releases every crate (Versioning).
 - `zachthedev/.github` types a pin inside a reusable workflow `fix`, because callers run it.
 - A `zachthedev/**` bump's SHA is on `.github`'s `main`. The reviewer checks it with
   `gh api repos/zachthedev/.github/compare/main...<sha>`, reading `behind` or `identical`.
