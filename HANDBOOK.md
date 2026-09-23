@@ -433,6 +433,13 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The gate refuses a committed file named like a program it spawns, such as `gh`, `mise`, `bun` or `git` with a
   Windows executable extension, so a red row fires before any spawn reaches one.
 - PLACEHOLDER, replaced before the pull request opens: the Go, Rust and C# mechanism for the two rules above.
+- A pull request controls its own gate code: `package.json` scripts, `check.ts`, `cake.cs`, an MSBuild `Exec`, a
+  `build.rs`. No gate therefore makes running an untrusted pull request safe, in CI or on a contributor's
+  machine. In CI, GitHub's approval for a fork's pull request and the gate job's read-only, tokenless shape
+  contain one. On a contributor's machine, reading the diff before running anything contains one.
+- The file refusals, the program resolution and the `mise.toml` allow-list under Tools do something narrower.
+  They keep a code path from hiding in files that read as data, such as `mise.toml`, a lockfile, a stray config or
+  a binary named like a tool, where a reviewer skimming a diff does not look for one.
 - A test or script that spawns git drops every inherited `GIT_*` variable for that process and names the
   repository with `-C <root>`. git exports `GIT_DIR` and `GIT_INDEX_FILE` to a hook, so a gate the hook runs
   otherwise writes into the hook's own repository.
@@ -736,7 +743,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The gate also refuses a symlink or junction at the root or under `.config`, `.mise` or `mise`, because mise
   follows a link to a config the name check never sees.
 - `mise.toml` holds `[tools]`, `[tool_config]` and `[settings]` alone. A `mise.toml` can carry a postinstall,
-  hooks, `[env]` or tasks, and each of them runs code, so the gate holds the file to an allow-list:
+  hooks, `[env]` or tasks, and each of them runs code (Known defects), so the gate holds the file to an
+  allow-list:
   - `[tool_config]` and `[settings]` are compared whole against the expected values;
   - a tool entry in any pin file, and the lockfile's `options`, carries `version` and a `version_prefix` equal to
     the tool's tag prefix, and nothing else;
@@ -961,7 +969,12 @@ bears on, the defect, and the condition that removes it.
   gate reading `mise.toml` and `mise.lock` alone stays green and runs the binary. mise reads `.tool-versions`
   even under `MISE_OVERRIDE_CONFIG_FILENAMES`. With auto env on, set by a miserc or `MISE_AUTO_ENV`, it reads
   per-platform `mise.<platform>.toml` files under that override too. It follows a symlink or junction to a config
-  file. The refusals and the four pins under Tools exist for this. Removed once a locked install reads one named config and its lockfile alone.
+  file. The refusals and the four pins under Tools exist for this. Removed once a locked install reads one named
+  config and its lockfile alone.
+- mise config code (Tools): `mise install` runs a config's `[hooks]` and the `exec(...)` templates in its `[env]`
+  and `[vars]`, even from a home with no trust state, while `mise which` refuses an untrusted config.
+  `MISE_NO_ENV` and `MISE_NO_HOOKS` leave `[vars]` running, so the `mise.toml` allow-list is the control, not an
+  environment pin. Removed once `mise install` refuses an untrusted config as `mise which` does.
 - Immutable releases (Tags): an immutable release locks the tag with its assets. The cleanup in
   `gh release delete --cleanup-tag` is a ref deletion, so it is refused. A bad release leaves the tag on the
   wrong commit with the version spent. Removed once a fork of release-please tracks burned version tags and
