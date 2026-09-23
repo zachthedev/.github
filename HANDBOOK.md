@@ -547,7 +547,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   Commits specification's recommendation. git's own `Revert "..."` subject is never used: commitlint skips it,
   and release-please cannot parse it.
 - A pull request's title takes the type of its most user-facing commit, and `!` when any commit breaks something
-  users see. A squash of several commits lands the title's type alone.
+  users see. A squash of several commits lands the title alone, so without the `!` a break and its major bump are
+  lost.
 - A body paragraph never opens with a bare type, because release-please reads it as a second change.
 
 ## Hooks
@@ -615,8 +616,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   toolchain whose runtime ships is `fix(deps)`:
   - the `go-cli` preset types the `go` and `toolchain` lines `fix`, because they pick the standard library linked
     into the binary;
-  - the `csharp-installer` preset types the .NET SDK in `global.json` `fix`, because a self-contained installer
-    carries the runtime that SDK ships.
+  - the `csharp-installer` preset types the .NET SDK in `global.json` `fix`, because the installer ships that
+    SDK's runtime (Tools).
 - `zachthedev/.github` types a pin inside a reusable workflow `fix`, because callers run it.
 - A `zachthedev/**` bump's SHA is on `.github`'s `main`. The reviewer checks it with
   `gh api repos/zachthedev/.github/compare/main...<sha>`, reading `behind` or `identical`.
@@ -690,6 +691,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A tool the stack owns is pinned the stack's way: `go.mod` tool directives, `dotnet-tools.json`, cargo for
   xtask dependencies. A tool no stack owns, such as actionlint, zizmor, ShellCheck and taplo, is pinned in
   `mise.toml` with `mise.lock`. `mise.lock` is excluded from the formatter.
+- The .NET SDK is pinned exactly. `global.json` names the exact SDK, and setup-dotnet installs that version alone.
+  A self-contained installer ships the runtime of the SDK that builds it, so a looser pin lets two builds of one
+  commit ship different runtimes. Renovate bumps the SDK as `fix(deps)`, and the bump cuts a release (Updates).
 - A backend is chosen for integrity: `aqua:` where a registry entry exists, `github:` otherwise. `cargo:` and
   `ubi:` record no lockfile integrity, so neither is used (Known defects).
 - Each tool's integrity tier is stated in `CONTRIBUTING.md`. The tiers: provenance, a checksum in a pinned tree,
