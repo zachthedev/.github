@@ -479,6 +479,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A Bun gate refuses a tracked env file Bun loads on its own, `.env` and its variants, because Bun loads it into
   the gate's environment (Known defects). The names match without regard to case. A template such as
   `.env.example` passes.
+- `bunx --bun` also loads `.env`, `.env.local` and `.env.development` into the tools it runs, and only a `bunfig.toml`
+  `env = false` stops that. `bunfig.toml` stays the cooldown alone (Updates), so a contributor's own untracked env
+  file is the named residual. An env value can turn a row red, as `PRETTIER_EXPERIMENTAL_CLI` does, and runs no
+  code.
 - Before its first row, a Bun gate also refuses what changes which code runs before or inside it:
   - a `bunfig.toml` other than the cooldown, compared whole, because a top-level `preload`, a `[test] preload`
     and `[define]` each run or rewrite code;
@@ -497,7 +501,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - The actionlint row names the workflow files. With no file argument actionlint also needs a `.git`, so it fails
     in an archive copy of the tree.
   - The zizmor row checks the count of files it reports as completed.
-  - The toml row fails unless taplo's own list of found files matches the files the row handed it.
+  - The toml row fails unless taplo's own list of found files matches the files the row handed it. taplo's own
+    walk skips a name such as `docs/BAD.TOML`, which that comparison catches.
 - Every ignore file a row reads, such as `.prettierignore` and the excludes in `.taplo.toml`, is compared whole
   against a constant in that repository's gate. A change to what a row skips is then a gate change a reviewer
   sees.
