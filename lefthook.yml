@@ -2,8 +2,11 @@
 # script runs on every `bun install`.
 #
 # Every job resolves its tool with `bunx --no-install`, so the version that
-# runs is the one bun.lock pins and nothing is fetched at commit time. With no
-# installed package the job exits 1, which is a refusal rather than a pass.
+# runs is the one bun.lock pins and nothing is fetched at commit time. When
+# lefthook runs and a job's package is missing, the job exits 1, a refusal.
+# When node_modules is gone, lefthook itself is missing: the installed hook
+# script exits 0 and the commit or push goes through. CI's commits job and
+# gate are the control for that case.
 
 commit-msg:
   jobs:
