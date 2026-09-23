@@ -430,12 +430,13 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - No gate row resolves a tool from the machine's `PATH`. The programs the gate expects on `PATH` are the
   prerequisites `docs/dev.md` names.
 - A gate resolves every program it spawns to an absolute path from `PATH` alone, and spawns that path. It drops
-  empty and relative `PATH` entries and any entry inside the repository. It never runs a bare name, and it never
-  uses a directory the repository tracks or the process starts in as a lookup location. On Windows a bare name
-  can otherwise resolve from the current directory or a tracked tool directory before `PATH`.
+  empty and relative `PATH` entries and any entry inside the repository. Inside the repository compares file
+  identity, never spelling. It never runs a bare name, and it never uses a directory the repository tracks or the
+  process starts in as a lookup location. On Windows a bare name can otherwise resolve from the current directory
+  or a tracked tool directory before `PATH`.
 - Where a stack's spawn searches such a directory, the gate also refuses a committed file named like a program it
-  spawns, such as `gh`, `mise`, `bun` or `git`, with an executable extension or none. A red row then fires before
-  any spawn reaches one. Per stack:
+  or its hooks start: `bun`, `bunx`, `gh`, `git`, `mise` or `node`, with an executable extension or none. A red row
+  then fires before any spawn reaches one. Per stack:
   - Bun: `Bun.spawnSync` searches the current directory first, in CreateProcess's order. `scripts/run.ts`
     therefore resolves every program itself and runs Bun as `process.execPath`, and the gate refuses committed
     tool-named files.
@@ -450,8 +451,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Bun's script runner puts the checkout's `node_modules/.bin` first on `PATH`, so under `bun run` a committed
   `node_modules/.bin/bun` would replace the gate itself. In a Bun repository CI therefore installs with
   `bun install --frozen-lockfile --ignore-scripts`, the shared `commits` job's install included, and the gate
-  refuses any tracked path under `node_modules` before its first row. `bun run check` stays the documented
-  command. CI and the `pre-push` hook call the gate script directly, as `bun scripts/check.ts`, because a bare
+  refuses any tracked path with a `node_modules` segment, at any depth, before its first row. `bun run check` stays
+  the documented command. CI and the `pre-push` hook call the gate script directly, as `bun scripts/check.ts`, because a bare
   `bun <file>` skips the script runner. The refusal therefore runs before every merge.
 - A pull request controls its own gate code: `package.json` scripts, `check.ts`, `cake.cs`, an MSBuild `Exec`, a
   `build.rs`. No gate therefore makes running an untrusted pull request safe, in CI or on a contributor's
@@ -461,8 +462,24 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   something narrower. They keep a code path from hiding in files that read as data, such as `mise.toml`, a
   lockfile, a `.env` file, a stray config, a tracked `node_modules` path or a binary named like a tool, where a
   reviewer skimming a diff does not look for one.
+- The refusals keep such a file off the default branch. They cannot stop the first local run of an unread branch:
+  a `bunfig.toml` preload, a root `tsconfig.json` redirect or a Task `dotenv` runs before any row does.
+  `eslint.config.ts` and `commitlint.config.js` are code the rows run by design.
 - A Bun gate refuses a tracked env file Bun loads on its own, `.env` and its variants, because Bun loads it into
-  the gate's environment (Known defects). A template such as `.env.example` passes.
+  the gate's environment (Known defects). The names match without regard to case. A template such as
+  `.env.example` passes.
+- Before its first row, a Bun gate also refuses what changes which code runs before or inside it:
+  - a `bunfig.toml` other than the cooldown, compared whole, because a top-level `preload`, a `[test] preload`
+    and `[define]` each run or rewrite code;
+  - a `scripts/` directory without its own `tsconfig.json`, compared whole, or one holding a `jsconfig.json`, a
+    `package.json` or a `node_modules`, because the root `tsconfig.json`'s `paths`, `extends` and `baseUrl`
+    otherwise redirect the gate's imports;
+  - a `package.json` `patchedDependencies` entry for a package the gate imports, because a frozen
+    `--ignore-scripts` install still applies it;
+  - a tracked `.npmrc`, because it redirects even the frozen, script-free install.
+- Those checks import only built-in modules, so no package loads before they pass.
+- Where a runtime loads an env file before the gate starts, such as Task's `dotenv`, CI and the `pre-push` hook
+  run the tracked-file refusal as their own step, before that runtime starts.
 - A test or script that spawns git drops every inherited `GIT_*` variable for that process and names the
   repository with `-C <root>`. git exports `GIT_DIR` and `GIT_INDEX_FILE` to a hook, so a gate the hook runs
   otherwise writes into the hook's own repository.
@@ -527,8 +544,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   Before any mise command reads the checkout, the job refuses what the gate refuses: another mise config, lock or
   rc file, a root file named like a program a gate starts, and a link at the root or under `.config`, `.mise` or
   `mise`. Its `Refused keys` step then reads `mise.toml` and `mise.lock` with Python's `tomllib` and refuses any
-  key outside the gate's allow-lists (Tools). A job holding a token loads no `mise.toml` whose keys are unchecked,
-  because mise evaluates exec templates on any load of a trusted config.
+  key outside the gate's allow-lists (Tools). A job holding a token loads no `mise.toml` whose keys are unchecked.
+  `jdx/mise-action` exports `MISE_TRUSTED_CONFIG_PATHS` for the workspace to every later step, and mise evaluates
+  exec templates on any load of a trusted config.
 - zizmor's online audits run in the shared `workflows` job alone, on every pull request and daily from
   `audit.yml`. That job is the one CI job whose steps name the job token: its zizmor step and its lockfile asset
   check under Tools. It installs taplo, ShellCheck, actionlint and zizmor alone, each routed by mise's registry,
@@ -646,8 +664,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   the source. `proseWrap` is not written. Prose stays as the author wrapped it.
 - One exact Prettier version across every repository, never a range. A bump is one pull request per repository.
 - `.editorconfig` agrees with the config for every file Prettier owns.
-- `prettier --check .` runs with no glob and no ignore flags. A generated file the owning tool formats goes in
-  `.prettierignore`.
+- The Prettier row runs `prettier --check --config .prettierrc .`, with no glob and no ignore flags. `--config`
+  stops every other config search. A generated file the owning tool formats goes in `.prettierignore`.
+- A Prettier config can name a plugin, and Prettier loads it before it checks anything. The gate therefore
+  compares `.prettierrc` whole, as parsed JSON, against the identical text. It refuses any other Prettier config
+  file at any depth, a `package.json` `prettier` key and a `package.yaml`.
 - C# is formatted by CSharpier at the same width.
 - taplo formats every TOML file in every kind, from `.taplo.toml`. A repository carrying TOML pins taplo in
   `mise.toml` and runs it as a gate row.
@@ -798,7 +819,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - `[tool_config]` and `[settings]` are compared whole against the expected values;
   - a tool entry in any pin file, and the lockfile's `options`, carries `version` and a `version_prefix` equal to
     the tool's tag prefix, and nothing else;
-  - the lockfile's keys are allow-listed at the top, entry and platform levels.
+  - the lockfile's keys are allow-listed at the top, entry and platform levels, its `tools` table holds the
+    pinned tools alone, and its `lockfile_version` equals 1.
+- Every mise spawn asserts `mise.toml` and `mise.lock` first, inside the one place that starts mise, so no row or
+  task reaches mise over an unchecked file.
 - Every mise call the gate makes, `install`, `which` and `exec`, carries four pins beside
   `MISE_URL_REPLACEMENTS`: `MISE_OVERRIDE_CONFIG_FILENAMES=mise.toml`,
   `MISE_OVERRIDE_TOOL_VERSIONS_FILENAMES=none`, `MISE_ENV=''` and `MISE_AUTO_ENV=false`. mise reads
@@ -806,9 +830,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   pins are the second layer behind the refusal above.
 - Every workflow that runs mise sets the four pins and the same map at workflow level. A called workflow does not
   inherit its caller's workflow-level `env`, so each shared job sets its own. Every `jdx/mise-action` step sets
-  `env: false` and `export_path: false`, and a later step reaches a tool through its `mise which` path or its
-  shim. With `env` on, the action writes `mise env --json` into `GITHUB_ENV`, where a config's `[env]` template
-  renders with the runner's tokens in reach.
+  `env: false`, `export_path: false` and `add_shims_to_path: false`, and a later step reaches a tool through its
+  `mise which` path. A repository that runs a tool through a shim records the deviation at the drift site. With
+  `env` on, the action writes `mise env --json` into `GITHUB_ENV`, where a config's `[env]` template renders with
+  the runner's tokens in reach.
 - Every job that runs `jdx/mise-action` runs it before `actions/checkout`. The action always runs
   `mise --version` and `mise ls` and trusts the workspace, so a checked-out `mise.toml`'s `exec` templates would
   run in that step, before any gate refusal. With `install: false` and a pinned mise version, the action needs no
