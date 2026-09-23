@@ -19,6 +19,8 @@ commit-msg:
 pre-push:
   jobs:
     # The gate, the same script the ci workflow's gate job runs. It runs over
-    # the working tree, so uncommitted edits count toward the result.
+    # the working tree, so uncommitted edits count toward the result. Bun runs
+    # the file directly rather than through the package script, whose runner
+    # puts node_modules/.bin first on PATH.
     - name: check
-      run: bun run check
+      run: bun scripts/check.ts

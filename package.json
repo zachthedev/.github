@@ -5,8 +5,8 @@
   "type": "module",
   "packageManager": "bun@1.4.2",
   "scripts": {
-    "check": "bun run scripts/check.ts",
-    "check:rows": "bun run scripts/check.ts --rows",
+    "check": "bun scripts/check.ts",
+    "check:rows": "bun scripts/check.ts --rows",
     "format": "prettier --write .",
     "prepare": "lefthook install"
   },
