@@ -43,24 +43,18 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      # packageManager in package.json is the one Bun pin.
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: package.json
-      - run: bun install --frozen-lockfile
-      # mise alone, verified against the release's signed checksums. install: false, because
-      # the gate asserts mise.lock before it installs from it, and an install here would put
-      # the bytes on disk before the assertions read the file. cache: false for the same
-      # reason: nothing restored ahead of the assertions. github_token: '', because a locked
-      # install makes no GitHub API request, and the default exports the job token as
-      # MISE_GITHUB_TOKEN to every later step. env: false and export_path: false, because the
-      # defaults write the output of mise env --json to GITHUB_ENV and mise's PATH entries to
-      # GITHUB_PATH, and a config's [env] template renders there with the action's own
-      # environment, runner tokens included. add_shims_to_path: false, so a tool mise.toml pins
-      # never shadows a program the gate starts by name.
+      # mise alone, and before the checkout, so no repository file exists while the action runs.
+      # It always runs mise --version and mise ls, and trusts the workspace, so a mise.toml would
+      # have its [env] and [vars] exec templates evaluated here, ahead of the gate's refusals.
+      # With install: false and a pinned version it reads no repository file, and the bin
+      # directory it puts on PATH lies outside the workspace the checkout cleans. The action
+      # verifies its download against the release's signed checksums. install: false, also
+      # because the gate asserts mise.lock before it installs from it. cache: false, so nothing
+      # is restored ahead of the assertions. github_token: '', because a locked install makes no
+      # GitHub API request, and the default exports the job token as MISE_GITHUB_TOKEN to every
+      # later step. env: false and export_path: false, because the defaults write the output of
+      # mise env --json to GITHUB_ENV and mise's PATH entries to GITHUB_PATH. add_shims_to_path:
+      # false, so a tool mise.toml pins never shadows a program the gate starts by name.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
           version: 2026.9.11
@@ -70,7 +64,19 @@ jobs:
           env: false
           export_path: false
           add_shims_to_path: false
-      - run: bun run check
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # packageManager in package.json is the one Bun pin.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      # --ignore-scripts, so no package's lifecycle script and no prepare script runs in CI.
+      # The gate starts every package from its path under node_modules and needs none of them.
+      - run: bun install --frozen-lockfile --ignore-scripts
+      # Bun runs the file directly rather than through the package script, whose runner puts
+      # node_modules/.bin first on PATH, ahead of the programs the gate starts.
+      - run: bun scripts/check.ts
 
   # Each calling job grants what its called job declares. A called job can only lower what its
   # caller passes, and a caller passing none is refused before any step runs.
