@@ -34,6 +34,22 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: package.json
+      # bun install keeps a tracked package directory at the locked version in place of the one it
+      # would fetch, and bunx then runs that copy. This job runs beside the caller's gate, whatever
+      # its stack, so it refuses every tracked path with a node_modules segment before the install.
+      # The match ignores case, as Windows and macOS open Node_Modules for node_modules. A failed
+      # git call stops the step.
+      - name: Refused paths
+        run: |
+          tracked=$(git ls-files)
+          found=$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)node_modules/' || true)
+          if [ -n "$found" ]; then
+            while IFS= read -r path; do
+              echo "::error::$(printf '%q' "$path") is tracked under node_modules, which bun install keeps and bunx runs."
+            done <<< "$found"
+            echo "::error::Remove them from the index: git rm -r --cached -- <each node_modules directory named above>"
+            exit 1
+          fi
       # --ignore-scripts, so no lifecycle script and no prepare script from the caller's tree
       # runs here. commitlint needs none of them.
       - run: bun install --frozen-lockfile --ignore-scripts
