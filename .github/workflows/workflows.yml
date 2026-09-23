@@ -8,8 +8,9 @@ name: workflows
 #
 # The job token sits in this job and in no gate job. Inside a job a step's environment is not a
 # boundary, since any step can read the token from the runner, so the token goes to the job that
-# installs no dependencies and runs no build or test. Two steps name it: the lockfile asset check
-# and zizmor, whose online audits need it.
+# installs no dependencies and runs no build or test. Three steps name it: the install, for a
+# tool whose attestation mise reads from GitHub's API, the lockfile asset check, and zizmor, whose
+# online audits need it.
 #
 # A caller's uses: job grants permissions: contents: read. A called job can only lower what its
 # caller passes, and a caller passing none is refused before any step runs.
@@ -66,34 +67,31 @@ jobs:
       # This job runs beside the caller's gate, not after it, so a red gate stops nothing here.
       # The job therefore refuses what the gate refuses, before any mise command reads the
       # checkout: every mise config, lock or rc file other than mise.toml and mise.lock, in the
-      # root and in .config, every file at the root named like a program a gate starts, which
-      # Windows runs from the current directory ahead of PATH, and every link at the root or
+      # root and in .config, every file at the root named like a program a gate starts, with any
+      # extension, which Windows runs from the current directory ahead of PATH under any
+      # extension PATHEXT lists, and every link at the root or
       # under .config, .mise or mise, which mise would follow past the names. Names compare
       # without regard to case, as they do on Windows and macOS. mise.semver.toml and its lock
       # are a Rust repository's named exception, and MISE_ENV above keeps mise from reading
       # them here. The pins above are the second layer.
       - name: Refused files
         run: |
-          names=(.tool-versions .miserc.toml mise .mise .mise.toml .mise.lock '.mise.*.toml' '.mise.*.lock' 'mise.*.toml' 'mise.*.lock')
-          for program in gh mise bun git; do
-            for extension in '' .com .exe .bat .cmd .vbs .vbe .js .jse .wsf .wsh .msc .cpl; do
-              names+=("$program$extension")
-            done
-          done
-          match=()
-          for name in "${names[@]}"; do
-            match+=(-o -iname "$name")
-          done
           found=$(
-            find . -mindepth 1 -maxdepth 1 \( "${match[@]:1}" \) ! -name mise.semver.toml ! -name mise.semver.lock -print
+            find . -mindepth 1 -maxdepth 1 \( -iname .tool-versions -o -iname .miserc.toml -o -iname mise -o -iname .mise \
+              -o -iname .mise.toml -o -iname .mise.lock -o -iname '.mise.*.toml' -o -iname '.mise.*.lock' \
+              -o -iname 'mise.*.toml' -o -iname 'mise.*.lock' \) ! -name mise.semver.toml ! -name mise.semver.lock -print
+            find . -mindepth 1 -maxdepth 1 ! -type d \( -iname gh -o -iname 'gh.*' -o -iname bun -o -iname 'bun.*' \
+              -o -iname git -o -iname 'git.*' -o -iname mise -o -iname 'mise.*' \) \
+              ! -name bun.lock ! -name mise.toml ! -name mise.lock ! -name mise.semver.toml ! -name mise.semver.lock -print
             find . -mindepth 2 -maxdepth 2 -ipath './.config/mise*' -print
             find . -mindepth 1 -maxdepth 1 -type l -print
             find . -mindepth 2 \( -ipath './.config/*' -o -ipath './.mise/*' -o -ipath './mise/*' \) -type l -print
           )
           if [ -n "$found" ]; then
             while IFS= read -r path; do
-              echo "::error::mise or a gate reads $(printf '%q' "$path") in place of mise.toml, mise.lock or the program on PATH. Remove it."
+              echo "::error::mise or a gate reads $(printf '%q' "$path") in place of mise.toml, mise.lock or the program on PATH."
             done <<< "$found"
+            echo "::error::Remove each file and link named above."
             exit 1
           fi
       # mise runs a config's hooks, [env] and [vars] exec templates and a tool entry's
@@ -145,8 +143,13 @@ jobs:
           PY
       # With the refusals passed, the install mise-action would have run: locked, so a tool the
       # lockfile does not pin for this platform is refused. mise re-verifies each artifact and its
-      # provenance line, since nothing was restored.
+      # provenance line, since nothing was restored. A tool mise's registry does not route, such
+      # as a github: coordinate, has its attestation read from GitHub's API, which answers an
+      # unauthenticated runner at 60 requests an hour per address, so this step names the job
+      # token as MISE_GITHUB_TOKEN. An aqua tool's install makes no API request and ignores it.
       - name: mise install
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
         run: mise install --locked
       # mise.lock names each artifact twice: the url mise downloads, and url_api, the same asset
       # by id. GitHub records each asset's download address, and its sha256 for an asset uploaded
