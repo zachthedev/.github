@@ -714,13 +714,22 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `.config/mise*`, `.config/mise/**`, `.config/miserc.toml`, `.mise/**`, a `mise/` directory, `.miserc.toml` and
   `.tool-versions`. The Rust repositories keep `mise.semver.toml` and `mise.semver.lock` as the named exception
   (Releases).
+- The gate also refuses a symlink or junction at the root or under `.config`, `.mise` or `mise`, because mise
+  follows a link to a config the name check never sees.
+- `mise.toml` holds `[tools]`, `[tool_config]` and `[settings]` alone. A `mise.toml` can carry a postinstall,
+  hooks, `[env]` or tasks, and each of them runs code, so the gate holds the file to an allow-list:
+  - `[tool_config]` and `[settings]` are compared whole against the expected values;
+  - a tool entry in any pin file, and the lockfile's `options`, carries `version` and a `version_prefix` equal to
+    the tool's tag prefix, and nothing else;
+  - the lockfile's keys are allow-listed at the top, entry and platform levels.
 - Every mise call the gate makes, `install`, `which` and `exec`, carries four pins beside
   `MISE_URL_REPLACEMENTS`: `MISE_OVERRIDE_CONFIG_FILENAMES=mise.toml`,
   `MISE_OVERRIDE_TOOL_VERSIONS_FILENAMES=none`, `MISE_ENV=''` and `MISE_AUTO_ENV=false`. mise reads
   `.tool-versions` under the config override alone, and with auto env on it reads per-platform config files. The
   pins are the second layer behind the refusal above.
-- The shared `workflows` job carries the same four pins and the same map. Its `jdx/mise-action` step also sets
-  `env: false`. The action otherwise writes `mise env --json` into `GITHUB_ENV`, where a config's `[env]`
+- Every workflow that runs mise sets the four pins and the same map at workflow level. Every `jdx/mise-action`
+  step sets `env: false` and `export_path: false`, and a later step reaches a tool through its `mise which` path
+  or its shim. With `env` on, the action writes `mise env --json` into `GITHUB_ENV`, where a config's `[env]`
   template renders with the runner's tokens in reach.
 - Before setting a `MISE_` variable, the gate removes every case spelling of that name from the inherited
   environment. On Windows a differently cased inherited name wins over the one the gate sets.
@@ -737,7 +746,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - that every platform has an asset constant and every asset constant has a platform;
   - that no entry carries a nested `platforms` table, and no quoted `"platforms.<name>"` table names a platform
     `lockfile_platforms` leaves out. mise reads both spellings.
-- A finding quotes every lockfile value it prints.
+- A finding quotes every lockfile value it prints and escapes its control characters.
 - `mise.toml` carries a `url_replacements` rule that sends the GitHub asset API to an unreachable host, and the
   gate asserts the rule equals a constant. Every install the gate or CI runs carries the same map in
   `MISE_URL_REPLACEMENTS`, because a committed higher-precedence config file lifts a rule `mise.toml` alone
@@ -802,8 +811,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   ```
 
   `--repo` alone fails, because the reusable `publish.yml` signs the attestation. The second form binds the tag:
-  resolve the tag's commit, then add `--source-digest <sha>`. It binds because `publish.yml` refuses a tag that
-  does not name `GITHUB_SHA`.
+  resolve the tag's commit with `gh api repos/zachthedev/<repo>/commits/tags/<tag>`, then add
+  `--source-digest <sha>`. The `tags/` form means a branch of the same name cannot answer. It binds because
+  `publish.yml` refuses a tag that does not name `GITHUB_SHA`.
 
 - `--source-ref refs/tags/...` is never used. `cd.yml` runs on a push to the default branch, so the certificate
   records `refs/heads/main`, and every genuine asset fails the tag form.
@@ -931,8 +941,8 @@ bears on, the defect, and the condition that removes it.
   with `mise.<env>.toml` and its lock, then redirects `mise install --locked` to any url with any checksum. A
   gate reading `mise.toml` and `mise.lock` alone stays green and runs the binary. mise reads `.tool-versions`
   even under `MISE_OVERRIDE_CONFIG_FILENAMES`. With auto env on, set by a miserc or `MISE_AUTO_ENV`, it reads
-  per-platform `mise.<platform>.toml` files under that override too. The refusal and the four pins under Tools
-  exist for this. Removed once a locked install reads one named config and its lockfile alone.
+  per-platform `mise.<platform>.toml` files under that override too. It follows a symlink or junction to a config
+  file. The refusals and the four pins under Tools exist for this. Removed once a locked install reads one named config and its lockfile alone.
 - Immutable releases (Tags): an immutable release locks the tag with its assets. The cleanup in
   `gh release delete --cleanup-tag` is a ref deletion, so it is refused. A bad release leaves the tag on the
   wrong commit with the version spent. Removed once a fork of release-please tracks burned version tags and
