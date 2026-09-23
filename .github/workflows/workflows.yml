@@ -1,10 +1,15 @@
 name: workflows
 
-# actionlint and zizmor over the caller's workflows, at the versions the caller's mise.toml pins
-# and from the artifacts its mise.lock records. mise-action finds the lockfile and runs
-# mise install --locked, so the job installs the bytes the caller's gate installs. A run of this
-# job and a run of the gate read the same two files, and both prove ShellCheck ran before they
-# trust a clean actionlint run.
+# actionlint and zizmor over the caller's .github directory, at the versions the caller's
+# mise.toml pins and from the artifacts its mise.lock records. mise-action finds the lockfile and
+# runs mise install --locked, so the job installs the bytes the caller's gate installs. A run of
+# this job and a run of the gate read the same two files, and both prove ShellCheck ran before
+# they trust a clean actionlint run.
+#
+# The job token sits in this job and in no gate job. Inside a job a step's environment is not a
+# boundary, since any step can read the token from the runner, so the token goes to the job that
+# installs no dependencies and runs no build or test. One step names it: zizmor, whose online
+# audits need it.
 #
 # A caller's uses: job grants permissions: contents: read. A called job can only lower what its
 # caller passes, and a caller passing none is refused before any step runs.
@@ -19,19 +24,70 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+    # Every mise command in the job reads mise.toml and mise.lock alone, the two files the
+    # caller's gate asserts. mise merges every config file it discovers and each one's sibling
+    # lockfile, so a committed mise.local.toml with a lockfile of its own would otherwise send
+    # the install to any url. The names and values are the gate's own: no other config
+    # filename, no .tool-versions, no environment-specific file, and the url_replacements rule
+    # that sends mise's url_api fallback to a host that does not resolve. The environment
+    # outranks every file mise reads, .miserc.toml included.
+    env:
+      MISE_OVERRIDE_CONFIG_FILENAMES: mise.toml
+      MISE_OVERRIDE_TOOL_VERSIONS_FILENAMES: none
+      MISE_ENV: ''
+      MISE_AUTO_ENV: 'false'
+      MISE_URL_REPLACEMENTS: '{"regex:^https://api\\.github\\.com/repos/[^/]+/[^/]+/releases/assets/.*$":"https://url-api-refused.invalid/"}'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # This job runs beside the caller's gate, not after it, so a red gate stops nothing here.
+      # The job therefore refuses what the gate refuses, before any mise command reads the
+      # checkout: every mise config, lock or rc file other than mise.toml and mise.lock, in the
+      # root and in .config, and every file at the root named like a program a gate starts,
+      # which Windows runs from the current directory ahead of PATH. Names compare without
+      # regard to case, as they do on Windows and macOS. The pins above are the second layer.
+      - name: Refused files
+        run: |
+          names=(.tool-versions .miserc.toml mise .mise .mise.toml .mise.lock '.mise.*.toml' '.mise.*.lock' 'mise.*.toml' 'mise.*.lock')
+          for program in gh mise bun git; do
+            for extension in '' .com .exe .bat .cmd .vbs .vbe .js .jse .wsf .wsh .msc .cpl; do
+              names+=("$program$extension")
+            done
+          done
+          match=()
+          for name in "${names[@]}"; do
+            match+=(-o -iname "$name")
+          done
+          found=$(
+            find . -mindepth 1 -maxdepth 1 \( "${match[@]:1}" \) -print
+            find . -mindepth 2 -maxdepth 2 -ipath './.config/mise*' -print
+          )
+          if [ -n "$found" ]; then
+            while IFS= read -r path; do
+              echo "::error::mise or a gate reads $(printf '%q' "$path") in place of mise.toml, mise.lock or the program on PATH. Remove it."
+            done <<< "$found"
+            exit 1
+          fi
       # The action verifies its own download against the release's minisign-signed checksums.
       # With mise.lock in the checkout it runs mise install --locked, which refuses a tool the
       # lockfile does not pin for this platform. The caller's mise.toml settings apply, because
       # the action trusts the checkout. cache: false, so every run installs cold and mise
       # re-verifies each artifact and its provenance line. A restored cache would skip both.
+      # github_token: '', because a locked install makes no GitHub API request, and the default
+      # exports the job token as MISE_GITHUB_TOKEN to every later step. env: false, because the
+      # default writes the output of mise env --json to GITHUB_ENV, and a config's [env] template
+      # renders there with the action's own environment, runner tokens included.
+      # add_shims_to_path: false, so a bare program name in a later step never resolves to a
+      # tool the caller's mise.toml pins. Every step reaches a pinned tool through mise exec or
+      # mise which, and mise stays on PATH either way.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
           version: 2026.9.11
           cache: false
+          github_token: ''
+          env: false
+          add_shims_to_path: false
       # actionlint exits 0 with ShellCheck absent or unable to start, and no flag changes that. A
       # path that resolves to nothing turns the rule off with no word outside -verbose. This step
       # writes a workflow whose one finding belongs to ShellCheck and requires the finding back, so
@@ -70,12 +126,16 @@ jobs:
           SHELLCHECK: ${{ steps.shellcheck.outputs.path }}
         run: mise exec -- actionlint -pyflakes= -shellcheck="$SHELLCHECK"
       # Online, so the audits that ask GitHub run: a pinned commit outside its action's
-      # repository, a stale action ref. The job token is enough for them and is read-only.
-      # --strict-collection fails on a file zizmor cannot parse. Without it a broken workflow
-      # is dropped and reported as clean. The config is named, so ZIZMOR_CONFIG in the
-      # environment cannot swap it. The input is the workflows directory, the same input the
-      # gate reads, so the two report the same files.
+      # repository, a known-vulnerable action, a version comment naming the wrong tag. The job
+      # token is enough for them and is read-only, and any failed call aborts the run. Every
+      # gate runs zizmor offline in CI, so this step is where those audits run.
+      # --strict-collection fails on a file zizmor cannot parse. Without it a broken workflow is
+      # dropped and reported as clean. The config is named, so ZIZMOR_CONFIG in the environment
+      # cannot swap it. The input is .github, the gate's own input, which holds the workflows,
+      # dependabot.yml and any composite action under .github/actions. --collect=all turns
+      # zizmor's ignore handling off, so no .gitignore, exclude file or global excludes file can
+      # hide one of them.
       - name: zizmor
         env:
           GH_TOKEN: ${{ github.token }}
-        run: mise exec -- zizmor --no-progress --strict-collection --config .github/zizmor.yml .github/workflows
+        run: mise exec -- zizmor --no-progress --strict-collection --config .github/zizmor.yml --collect=all .github
