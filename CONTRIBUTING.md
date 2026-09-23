@@ -9,8 +9,8 @@ before it is recorded, and the push hook runs the gate and refuses the push when
 The commit hook runs commitlint through `bunx --no-install`, which refuses a missing package and fetches nothing,
 and the push hook runs `bun scripts/check.ts`. The hook script `lefthook install` writes fails open. When it finds
 no lefthook binary, as in a checkout whose `node_modules/` is gone, it prints `Can't find lefthook in PATH` and
-exits 0, and the commit or push goes through unchecked. A fresh clone runs no hook at all until `bun install` runs. CI's `commits` job and gate hold both
-cases.
+exits 0, and the commit or push goes through unchecked. A fresh clone runs no hook at all until `bun install`
+runs. CI's `commits` job and gate hold both cases.
 
 A pull request controls its own install scripts and gate code. Before running anything on a pull request branch
 you did not write, read its diff, then install it with `bun install --ignore-scripts`, so no install script runs.
