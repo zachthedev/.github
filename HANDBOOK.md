@@ -432,7 +432,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - No gate, hook or shared job starts a tool on a `node` from `PATH`. `bunx` starts a bin whose shebang names
   `node`, such as Prettier's or commitlint's, under the `node` on `PATH` when one exists, and GitHub's runners
   carry Node. Every `bunx` therefore passes `--bun`, or the gate starts the tool through Bun by its path under
-  `node_modules`.
+  `node_modules`. `bun run` starts a `package.json` script's bare bin the same way, so such a script calls
+  `bunx --bun --no-install` too.
 - A gate resolves every program it spawns to an absolute path from `PATH` alone, and spawns that path. It drops
   empty and relative `PATH` entries, any entry inside the repository and any entry inside the running
   executable's directory. Inside compares file identity, never spelling. It never runs a bare name, and it never
@@ -440,9 +441,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   can otherwise resolve from the current directory or a tracked tool directory before `PATH`.
 - Every gate hands its children a `PATH` with no entry inside the checkout, so a child resolving a bare name
   cannot reach one either.
-- Where a stack's spawn searches such a directory, the gate also refuses a committed file named like a program it
-  or its hooks start: `bun`, `bunx`, `gh`, `git`, `mise` or `node`, with an executable extension or none. A red row
-  then fires before any spawn reaches one. Per stack:
+- Where a stack's spawn searches such a directory, the gate also refuses a committed file named like a program it,
+  its hooks or an install start: `bun`, `bunx`, `gh`, `git`, `mise` or `node`, with an executable extension or
+  none. A red row then fires before any spawn reaches one. Per stack:
   - Bun: `Bun.spawnSync` searches the current directory first, in CreateProcess's order. `scripts/run.ts`
     therefore resolves every program itself and runs Bun as `process.execPath`, and the gate refuses committed
     tool-named files.
@@ -472,8 +473,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   lockfile, a `.env` file, a stray config, a tracked `node_modules` path or a binary named like a tool, where a
   reviewer skimming a diff does not look for one.
 - The refusals keep such a file off the default branch. They cannot stop the first local run of an unread branch:
-  a `bunfig.toml` preload, a root `tsconfig.json` redirect or a Task `dotenv` runs before any row does.
-  `eslint.config.ts` and `commitlint.config.js` are code the rows run by design.
+  a `bunfig.toml` preload, a `paths` redirect in the gate's own `scripts/tsconfig.json` or a Task `dotenv` runs
+  before any row does. Under `bunx --bun` a preload also runs before each commit hook's tool and in any script
+  that calls it. `eslint.config.ts` and `commitlint.config.js` are code the rows run by design.
 - A Bun gate refuses a tracked env file Bun loads on its own, `.env` and its variants, because Bun loads it into
   the gate's environment (Known defects). The names match without regard to case. A template such as
   `.env.example` passes.
@@ -686,8 +688,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The Prettier row runs `prettier --check --config .prettierrc .`, with no glob and no ignore flags. `--config`
   stops every other config search. A generated file the owning tool formats goes in `.prettierignore`.
 - A Prettier config can name a plugin, and Prettier loads it before it checks anything. The gate therefore
-  compares `.prettierrc` whole, as parsed JSON, against the identical text. It refuses any other Prettier config
-  file at any depth, a `package.json` `prettier` key and a `package.yaml`.
+  parses `.prettierrc` as JSON and compares it whole against the identical file's values, so key order and
+  whitespace pass and a file that does not parse is refused. It refuses any other Prettier config file at any
+  depth and in any case, a `package.json` `prettier` key and a `package.yaml`.
 - C# is formatted by CSharpier at the same width.
 - taplo formats every TOML file in every kind, from `.taplo.toml`. A repository carrying TOML pins taplo in
   `mise.toml` and runs it as a gate row.
