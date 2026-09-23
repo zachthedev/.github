@@ -445,10 +445,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     or `GODEBUG`, so `.env` stays gitignored. Nothing sets `GODEBUG=execerrdot=0` or a `.` or empty `PATH` entry.
   - Rust: `Command` searches the running binary's own directory, then `PATH`, and never the current directory.
     xtask resolves each program with `which::which_global` and spawns the absolute path.
-- Bun's script runner puts the checkout's `node_modules/.bin` first on `PATH`, so a committed
+- Bun's script runner puts the checkout's `node_modules/.bin` first on `PATH`, so under `bun run` a committed
   `node_modules/.bin/bun` would replace the gate itself. In a Bun repository CI therefore installs with
-  `bun install --frozen-lockfile --ignore-scripts`, the gate's first row refuses any tracked path under
-  `node_modules`, and each check script starts the gate through `"$npm_execpath"`, never a bare `bun`.
+  `bun install --frozen-lockfile --ignore-scripts`, and the gate's first row refuses any tracked path under
+  `node_modules`. `bun run check` stays the documented command. CI and the `pre-push` hook call the gate script
+  directly, as `bun scripts/check.ts`, because a bare `bun <file>` skips the script runner. The refusal therefore
+  runs before every merge.
 - A pull request controls its own gate code: `package.json` scripts, `check.ts`, `cake.cs`, an MSBuild `Exec`, a
   `build.rs`. No gate therefore makes running an untrusted pull request safe, in CI or on a contributor's
   machine. In CI, GitHub's approval for a fork's pull request and the gate job's read-only, tokenless shape
