@@ -19,7 +19,8 @@ concurrency:
 jobs:
   # The gate a contributor runs locally, called and never restated. bun run check:rows prints
   # what it covers. It resolves every tool through mise which, asserts mise.lock against
-  # mise.toml, then installs, in that order by construction.
+  # mise.toml, then installs, in that order by construction. No step here names a token, so the
+  # gate's zizmor runs offline, and zizmor's online audits run in the workflows job below.
   gate:
     strategy:
       # One platform failing still reports the others.
@@ -42,17 +43,28 @@ jobs:
       # mise alone, verified against the release's signed checksums. install: false, because
       # the gate asserts mise.lock before it installs from it, and an install here would put
       # the bytes on disk before the assertions read the file. cache: false for the same
-      # reason: nothing restored ahead of the assertions.
+      # reason: nothing restored ahead of the assertions. github_token: '', because a locked
+      # install makes no GitHub API request, and the default exports the job token as
+      # MISE_GITHUB_TOKEN to every later step. env: false, because the default writes the
+      # output of mise env --json to GITHUB_ENV, and a config's [env] template renders there
+      # with the action's own environment, runner tokens included. add_shims_to_path: false,
+      # so a tool mise.toml pins never shadows a program the gate starts by name. The step's
+      # mise commands read mise.toml alone, under the pins every gate mise command carries.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
           version: 2026.9.11
           install: false
           cache: false
-      # GH_TOKEN, so the gate's zizmor runs online here as it does for a contributor whose
-      # gh auth token succeeds. The job token is read-only.
-      - run: bun run check
+          github_token: ''
+          env: false
+          add_shims_to_path: false
         env:
-          GH_TOKEN: ${{ github.token }}
+          MISE_OVERRIDE_CONFIG_FILENAMES: mise.toml
+          MISE_OVERRIDE_TOOL_VERSIONS_FILENAMES: none
+          MISE_ENV: ''
+          MISE_AUTO_ENV: 'false'
+          MISE_URL_REPLACEMENTS: '{"regex:^https://api\\.github\\.com/repos/[^/]+/[^/]+/releases/assets/.*$":"https://url-api-refused.invalid/"}'
+      - run: bun run check
 
   # Each calling job grants what its called job declares. A called job can only lower what its
   # caller passes, and a caller passing none is refused before any step runs.
