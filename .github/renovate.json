@@ -18,6 +18,19 @@
   ],
   "packageRules": [
     {
+      "description": "Callers run these workflows at a release of this repository, so a pin inside one ships to them and cuts a release. .github's own ci.yml, cd.yml and audit.yml stay ci.",
+      "matchFileNames": [
+        ".github/workflows/commits.yml",
+        ".github/workflows/workflows.yml",
+        ".github/workflows/dependency-review.yml",
+        ".github/workflows/codeql.yml",
+        ".github/workflows/deps.yml",
+        ".github/workflows/release-pr.yml",
+        ".github/workflows/publish.yml"
+      ],
+      "semanticCommitType": "fix"
+    },
+    {
       "matchManagers": ["github-actions"],
       "matchDepTypes": ["uses-with"],
       "matchDepNames": ["ghcr.io/renovatebot/renovate"],
