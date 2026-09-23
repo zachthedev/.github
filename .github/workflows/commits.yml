@@ -4,8 +4,8 @@ name: commits
 # package.json and bun.lock carry commitlint, and its commitlint.config.js carries the rules and
 # reads .github/commit-scopes.json. The job therefore lints what the caller's commit-msg hook
 # lints, from the same lockfile. The range is the pull request's base..head, and commitlint reads
-# it from git. The title is linted as the subject a squash merge writes: the title with the pull
-# request number appended.
+# it from git. The subject a squash writes is linted too: the only commit's subject for a
+# one-commit pull request, the title otherwise, with the pull request number appended.
 #
 # A caller's uses: job grants permissions: contents: read. A called job can only lower what its
 # caller passes, and a caller passing none is refused before any step runs.
@@ -42,11 +42,21 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: bunx --no-install commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
-      # A squash merge lands the title with the number appended, so that string is what reaches
-      # the default branch and what the header length rule applies to. Both values arrive through
-      # the environment and reach commitlint on stdin, so neither is ever a shell word.
-      - name: Pull request title
+      # GitHub's default squash message lands a one-commit pull request under that commit's subject
+      # and a longer one under the title, each with the pull request number appended. That string
+      # reaches the default branch, so it is the one the header length rule reads. Every value
+      # arrives through the environment and reaches commitlint on stdin, so none is ever a shell
+      # word.
+      - name: Squash subject
         env:
           TITLE: ${{ github.event.pull_request.title }}
           NUMBER: ${{ github.event.pull_request.number }}
-        run: printf '%s (#%s)\n' "$TITLE" "$NUMBER" | bunx --no-install commitlint --verbose
+          COMMITS: ${{ github.event.pull_request.commits }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$COMMITS" = "1" ]; then
+            subject=$(git log -1 --format=%s "$HEAD_SHA")
+          else
+            subject=$TITLE
+          fi
+          printf '%s (#%s)\n' "$subject" "$NUMBER" | bunx --no-install commitlint --verbose
