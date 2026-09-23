@@ -537,9 +537,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   included, without regard to case. `bun install` keeps a tracked package directory at the locked version, and
   `bunx` then runs that copy. The job runs beside every caller's gate, whatever the caller's stack, so it holds
   the refusal itself.
-- The same step refuses a tracked `.npmrc` at any depth, because it redirects the install's registry. It refuses a
-  `package.json` `patchedDependencies` entry for an `@commitlint` package or a package `commitlint.config.js`
-  imports, because a frozen install without scripts still applies it.
+- The same step refuses a tracked `.npmrc` at any depth, also without regard to case, because it redirects the
+  install's registry. It refuses a `package.json` `patchedDependencies` entry for an `@commitlint` package or a
+  package `commitlint.config.js` imports, because a frozen install without scripts still applies it.
 - The `workflows` workflow runs actionlint and zizmor. The gate proves ShellCheck ran by writing a canary
   workflow with an unquoted variable and requiring the finding back. actionlint exits 0 with ShellCheck absent,
   and no flag changes that.
