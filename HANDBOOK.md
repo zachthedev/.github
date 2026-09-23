@@ -611,9 +611,13 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - labels: `dependencies` on every pull request, `ci` on a workflow bump, `security` on a fix
 - A Renovate group takes the highest type among its members, lowest first `chore`, `ci`, `build`, `fix`, `feat`.
   A group holding anything that ships therefore lands `fix(deps)`. A group rule sets no `semanticCommitType`.
-- Where a derived type misses what ships, the preset or the repository file types it by the Commits rule. The
-  `go-cli` preset types the `go` and `toolchain` lines `fix`, because they pick the standard library linked into
-  the binary. `zachthedev/.github` types a pin inside a reusable workflow `fix`, because callers run it.
+- Where a derived type misses what ships, the preset or the repository file types it by the Commits rule. A
+  toolchain whose runtime ships is `fix(deps)`:
+  - the `go-cli` preset types the `go` and `toolchain` lines `fix`, because they pick the standard library linked
+    into the binary;
+  - the `csharp-installer` preset types the .NET SDK in `global.json` `fix`, because a self-contained installer
+    carries the runtime that SDK ships.
+- `zachthedev/.github` types a pin inside a reusable workflow `fix`, because callers run it.
 - A `zachthedev/**` bump's SHA is on `.github`'s `main`. The reviewer checks it with
   `gh api repos/zachthedev/.github/compare/main...<sha>`, reading `behind` or `identical`.
 - The Monday window's own pull requests keep a quiet repository active, so its scheduled workflows stay
@@ -769,9 +773,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   because a break on a hidden type prints that heading.
 - A release needs a user-facing change or a break, under both tools. release-please applies that itself: it cuts
   no release whose changelog is empty. release-plz applies it through `release_commits`.
-- Every version heading links GitHub's compare view from the previous tag. The view lists every change in the
-  release, hidden types included. `git log <previous tag>..<tag>` lists the same. A first release has no
-  previous tag, and `git log <tag>` lists it.
+- Every version heading after the first links GitHub's compare view from the previous tag. The view lists every
+  change in the release, hidden types included. `git log <previous tag>..<tag>` lists the same. The first release
+  has no previous tag, so its heading carries no link, and `git log <tag>` lists it.
 - In a Rust repository `git_release_generate_notes` appends GitHub's generated notes to the draft release, below
   the changelog.
 - Under release-please, a squash whose title hid a user-facing change is corrected with `BEGIN_COMMIT_OVERRIDE`
