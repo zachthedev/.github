@@ -19,7 +19,8 @@ name: codeql
 #
 # This repository is its own caller. A workflow cannot call itself, because a loop in the
 # workflow tree is refused, so the push, pull request and schedule triggers below run the job
-# directly here, over actions alone. Every other repository carries the caller in the kickstart.
+# directly here, over javascript-typescript and actions: the TypeScript gate under scripts/ is the
+# one every Bun repository copies. Every other repository carries the caller in the kickstart.
 #
 # codeql-action falls back from build-mode none to autobuild for C# and Java on a server-side
 # flag, and logs it. A C# caller reads its first run's log before it trusts the conclusion.
@@ -78,7 +79,7 @@ jobs:
       matrix:
         # A caller must pass languages. The fallback is reachable from this repository's own
         # triggers alone, where the inputs context is empty.
-        include: ${{ fromJSON(inputs.languages || '[{"language":"actions"}]') }}
+        include: ${{ fromJSON(inputs.languages || '[{"language":"javascript-typescript"},{"language":"actions"}]') }}
     steps:
       # This repository's own triggers carry no inputs, so submodules falls back to false there.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
