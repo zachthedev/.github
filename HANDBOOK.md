@@ -722,7 +722,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `mise.toml` with `mise.lock`. `mise.lock` is excluded from the formatter.
 - The .NET SDK is pinned exactly. `global.json` names the exact SDK with `rollForward: patch`. CI's setup-dotnet
   then installs and builds with that SDK alone, and a contributor's machine one patch ahead still runs the gate.
-  `global.json`'s `errorMessage` names the exact install command.
+  `global.json`'s `errorMessage` names the install command and points at `sdk.version` without repeating the
+  number, and `docs/dev.md` reads the version from `global.json`. Renovate rewrites `sdk.version` alone, so a
+  literal version anywhere else goes stale on every bump.
 - A self-contained installer ships the runtime of the SDK that builds it, so a looser pin lets two builds of one
   commit ship different runtimes. The pin is the SDK carrying the newest runtime past the cooldown, never one
   behind what builds ship. Renovate bumps the SDK as `fix(deps)`, and the bump cuts a release (Updates).
