@@ -24,9 +24,13 @@ agent as they bind a person.
 - Never hand-edit `CHANGELOG.md`, the version in `package.json` or `.release-please-manifest.json`
   ([why](CONTRIBUTING.md#what-never-happens)).
 - Never write a version number into `HANDBOOK.md` ([why](CONTRIBUTING.md#what-never-happens)).
+- Never run `gh auth token` where its output is visible. gh answers from the system credential store, so the
+  output is the owner's live token, and a transcript holding it forces a rotation.
 - Never write a `mise.lock` line outside `mise lock`, except a checksum computed as `mise.toml` says
   ([why](CONTRIBUTING.md#what-never-happens)).
-- Never merge a preset or workflow change past a red gate ([why](CONTRIBUTING.md#what-never-happens)).
+- Never commit a mise config or lock file beside `mise.toml` and `mise.lock`
+  ([why](CONTRIBUTING.md#what-never-happens)).
+- Never merge past a red gate ([why](CONTRIBUTING.md#what-never-happens)).
 
 ## Deviations
 

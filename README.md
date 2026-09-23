@@ -7,7 +7,7 @@ repository calls or extends the rest.
 
 | Part                                                                 | Read by                                                                                                              |
 | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| [.github/workflows/](.github/workflows/)                             | Every repository's `ci.yml`, `cd.yml`, `codeql.yml` and `deps.yml`, which call these with `uses:`.                   |
+| [.github/workflows/](.github/workflows/)                             | Every repository's `ci.yml`, `cd.yml`, `codeql.yml`, `deps.yml` and `audit.yml`, which call these with `uses:`.      |
 | [renovate/](renovate/)                                               | Every repository's `.github/renovate.json`, which extends one kind preset from this directory on its default branch. |
 | The documents in the table below                                     | GitHub, as the default for a repository that carries none of its own, and a person aligning a repository.            |
 | [.github/ISSUE_TEMPLATE/](.github/ISSUE_TEMPLATE/)                   | GitHub, as the default issue forms for a repository that defines none.                                               |
@@ -17,10 +17,12 @@ repository calls or extends the rest.
 
 The reusable workflows:
 
-- [commits.yml](.github/workflows/commits.yml): commitlint over a pull request's commits and its title.
-- [workflows.yml](.github/workflows/workflows.yml): actionlint and zizmor over a repository's workflows.
+- [commits.yml](.github/workflows/commits.yml): commitlint over a pull request's commits and the subject its
+  squash writes.
+- [workflows.yml](.github/workflows/workflows.yml): actionlint and zizmor over a repository's `.github`, with
+  zizmor's online audits, and each `mise.lock` asset checked against GitHub's record.
 - [dependency-review.yml](.github/workflows/dependency-review.yml): the advisory check on what a change adds.
-- [codeql.yml](.github/workflows/codeql.yml): code scanning over the shipped language and `actions`.
+- [codeql.yml](.github/workflows/codeql.yml): code scanning over the caller's languages and `actions`.
 - [deps.yml](.github/workflows/deps.yml): the daily Renovate run, under the updater app.
 - [release-pr.yml](.github/workflows/release-pr.yml): the release pull request, under the releaser app.
 - [publish.yml](.github/workflows/publish.yml): the publish of a draft release.
