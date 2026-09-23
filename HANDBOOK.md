@@ -688,13 +688,18 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - the `rust-crates` and `rust-app` presets type a `rust-toolchain` bump `fix`, because std links into the
     shipped artifact. Under lockstep that bump releases every crate (Versioning).
 - `zachthedev/.github` types a pin inside a reusable workflow `fix`, because callers run it.
+- Lock file maintenance lands `chore(deps)` in every preset, so a release always needs a user-facing change. A
+  refreshed transitive dependency ships with the next release a user-facing change cuts. An advisory against one
+  does not wait for that release: it takes the alert path below, and its fix is `fix(deps)`.
 - A `zachthedev/**` bump's SHA is on `.github`'s `main`. The reviewer checks it with
   `gh api repos/zachthedev/.github/compare/main...<sha>`, reading `behind` or `identical`.
 - The Monday window's own pull requests keep a quiet repository active, so its scheduled workflows stay
   enabled (Known defects).
 - Security fixes come from Dependabot alerts (Dependabot). Renovate fixes a direct dependency in every ecosystem
-  and an indirect Go module, because `go.mod` names it. A transitive Cargo or NuGet advisory is Dependabot's. A
-  transitive Bun advisory is fixed by hand from the alert with `bun audit fix`, because no bot fixes one.
+  and an indirect Go module, because `go.mod` names it. A transitive Cargo or NuGet advisory is Dependabot's: its
+  security update opens the pull request in `rust-crates`, `rust-app` and `csharp-installer`. Renovate opens
+  nothing for a transitive Bun advisory, and no other bot does either. The daily `bun audit` reports it, and it is
+  fixed by a direct bump or by hand from the alert with `bun audit fix`.
   Renovate's `security:gomodIndirectSecurityUpdates` preset is never used. It disables the modules behind
   `tool` directives.
 - The cooldown:
