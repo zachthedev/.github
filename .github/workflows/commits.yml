@@ -80,12 +80,13 @@ jobs:
       # runs here. commitlint needs none of them.
       - run: bun install --frozen-lockfile --ignore-scripts
       # --from and --to are commitlint's own range: it walks base..head in git. --no-install runs
-      # the lockfile's commitlint and refuses to fetch another.
+      # the lockfile's commitlint and refuses to fetch another. --bun runs it under Bun, since
+      # bunx otherwise starts a bin whose shebang names node on the runner's node.
       - name: Pull request commits
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: bunx --no-install commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
+        run: bunx --bun --no-install commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
       # GitHub's default squash message lands a one-commit pull request under that commit's subject
       # and a longer one under the title, each with the pull request number appended. That string
       # reaches the default branch, so it is the one the header length rule reads. Every value
@@ -103,4 +104,4 @@ jobs:
           else
             subject=$TITLE
           fi
-          printf '%s (#%s)\n' "$subject" "$NUMBER" | bunx --no-install commitlint --verbose
+          printf '%s (#%s)\n' "$subject" "$NUMBER" | bunx --bun --no-install commitlint --verbose
