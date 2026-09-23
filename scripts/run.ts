@@ -59,6 +59,6 @@ export function run(cmd: readonly string[], timeoutMs: number, env: Readonly<Rec
  */
 export function describe(finished: Finished): string {
   const printed: string = [finished.stdout, finished.stderr].join('\n').trim();
-  const ending: string = finished.timedOut ? 'was killed at its deadline' : `exited ${finished.exitCode}`;
+  const ending: string = finished.timedOut ? 'was killed at its deadline' : `exited ${String(finished.exitCode)}`;
   return `${ending} saying: ${printed.length === 0 ? 'nothing' : printed}`;
 }

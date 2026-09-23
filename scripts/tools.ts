@@ -264,9 +264,9 @@ export async function lockfileFindings(): Promise<string[]> {
       continue;
     }
     const entries = lock.data.tools[tool.key];
-    if (entries === undefined || entries.length !== 1) {
+    if (entries?.length !== 1) {
       found.push(
-        `${LOCK} records ${entries?.length ?? 0} entries for ${tool.key}, and one is expected. Write it again with: ${RELOCK}`,
+        `${LOCK} records ${String(entries?.length ?? 0)} entries for ${tool.key}, and one is expected. Write it again with: ${RELOCK}`,
       );
       continue;
     }

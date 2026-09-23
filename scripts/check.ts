@@ -34,7 +34,7 @@ delete process.env['MISE_GITHUB_TOKEN'];
 interface Row {
   readonly name: string;
   readonly checks: string;
-  readonly check: () => Promise<void>;
+  readonly check: () => void | Promise<void>;
 }
 
 /** The binary paths the `tools` row resolves, read by the rows after it. */
@@ -158,7 +158,7 @@ async function workflows(): Promise<void> {
 
 /* ///// renovate ///// */
 
-async function renovate(): Promise<void> {
+function renovate(): void {
   const files = [...new Bun.Glob('renovate/*.json').scanSync('.'), '.github/renovate.json'].sort();
   for (const file of files) {
     // The validator exits 0 on a config it never validated, so the success
@@ -185,17 +185,23 @@ const rows: readonly Row[] = [
   {
     name: 'typecheck',
     checks: 'tsc --noEmit over the gate',
-    check: async () => expectClean('tsc', ['bun', 'node_modules/typescript/bin/tsc', '--noEmit']),
+    check: () => {
+      expectClean('tsc', ['bun', 'node_modules/typescript/bin/tsc', '--noEmit']);
+    },
   },
   {
     name: 'format',
     checks: 'prettier --check over the tree',
-    check: async () => expectClean('prettier', ['bunx', '--no-install', 'prettier', '--check', '.']),
+    check: () => {
+      expectClean('prettier', ['bunx', '--no-install', 'prettier', '--check', '.']);
+    },
   },
   {
     name: 'toml',
     checks: 'taplo fmt --check over every TOML file',
-    check: async () => expectClean('taplo', [await binary('taplo'), 'fmt', '--check']),
+    check: async () => {
+      expectClean('taplo', [await binary('taplo'), 'fmt', '--check']);
+    },
   },
   {
     name: 'workflows',
@@ -255,10 +261,10 @@ async function main(): Promise<number> {
   }
   console.log(`  ${dim('─'.repeat(width + 12))}`);
   if (failures.length === 0) {
-    console.log(`  ${selected.length} checks passed`);
+    console.log(`  ${String(selected.length)} checks passed`);
     return 0;
   }
-  console.log(`  ${failures.length} of ${selected.length} checks failed: ${failures.join(', ')}`);
+  console.log(`  ${String(failures.length)} of ${String(selected.length)} checks failed: ${failures.join(', ')}`);
   return 1;
 }
 
