@@ -30,6 +30,7 @@ version: migrating later costs more than changing now.
 | ------------ | -------- | ---------------------------------------------------------------------------------------------------------- |
 | Identity     | allowed  | MIT by default, one copyright line, the legal name, the first publication year, never updated              |
 | Authorship   | none     | the legal name only where a field is legally operative, `ZachTheDev` everywhere a user reads               |
+| Names        | none     | `zach.tools` by ecosystem family, one naming form per ecosystem                                            |
 | Branch rules | none     | two default-branch rulesets: squash pull requests, then the checks and code scanning no merge bypasses     |
 | Actions      | none     | read-only default token, Actions cannot approve pull requests, SHA pinning required                        |
 | Environments | none     | a scope per credential, a tier per deployment, an approval per reviewed publish, each with a policy        |
@@ -204,6 +205,21 @@ from its kickstart. An existing repository is aligned by matching its kickstart.
 - The public email is `hey@zachthe.dev`, in every field a user reads that carries one:
   `ZachTheDev <hey@zachthe.dev>`.
 - Commits carry `Zach Landquist <me@zachthe.dev>` from the global git identity. No repository sets its own.
+
+## Names
+
+- `zach.tools` is organized by ecosystem family at its first segment and is flat below it.
+- A Go module is `zach.tools/go/<name>`, where the name is the repository's minus any `-go` suffix. A program lives
+  at `cmd/<what the user types>`.
+- An Android or iOS app takes `zach.tools/app/<name>`, reversed as `tools.zach.app.<name>` for its application
+  ID, namespace and package root.
+- A published crate is `<project>-<component>`.
+- A C# application takes its product name for its namespaces and assemblies. A NuGet library takes
+  `ZachTheDev.<Product>` as its package ID, assembly name and root namespace.
+- A WinGet identifier is `ZachTheDev.<Product>`, matching the installer's publisher fields.
+- `package.json`'s `name` is the repository name. npm refuses a leading dot, so `zachthedev/.github` takes
+  `@zachthedev/dotgithub`.
+- An entry in zach-tools' `modules.json` stays while any version exists at its path.
 
 ## GitHub settings
 
