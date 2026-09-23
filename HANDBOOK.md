@@ -510,9 +510,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The gate's own `git` child starts with an empty environment plus `GIT_CONFIG_NOSYSTEM` and
   `GIT_CONFIG_GLOBAL=/dev/null`, and `SystemRoot` on Windows where the stack's start of git needs it, as Go's does.
   Listing tracked files needs no inherited name.
-- A Go gate compares tracked names through Unicode simple case folding in its own code, never through git's
-  `:(icase)` pathspec magic. git's `icase` folds ASCII alone, and an inherited `GIT_LITERAL_PATHSPECS` turns the
-  magic off without a word.
+- Every gate lists tracked paths once and compares names through Unicode case folding in its own code, never
+  through git's `:(icase)` pathspec magic. git's `icase` folds ASCII alone, macOS's APFS folds case beyond ASCII,
+  and an inherited `GIT_LITERAL_PATHSPECS` turns the magic off without a word. A broader fold costs a false refusal
+  at worst.
 - The stack's own runner drives the gate: Bun scripts in `package.json`, `xtask` for Rust, Cake for C#, go-task
   for Go. A `Makefile` is a violation.
 - `cargo xtask` is `cargo run --package xtask`, and the outer cargo resolves the workspace before any row runs.
