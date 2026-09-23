@@ -120,6 +120,8 @@ END_COMMIT_OVERRIDE
 A revert says what it undoes in fresh words and names each reverted commit in a `Refs:` footer. Its scope follows
 the scope rule above, and it carries none when none applies. A `revert:` prefix on the reverted header overflows
 the header limit, and git's own `Revert "..."` subject is one commitlint skips and release-please cannot parse.
+The `commits` job lints the landing subject with every ignore off, so a pull request GitHub's revert button opens
+fails until its title takes this form.
 
 ```text
 revert(scope): what is undone, in fresh words
