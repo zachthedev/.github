@@ -512,6 +512,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   and it goes.
 - The `commits` workflow runs commitlint over the pull request range and over the subject the squash writes,
   with ` (#N)` appended.
+- Before its install, the `commits` workflow refuses any tracked path with a `node_modules` segment, nested ones
+  included, without regard to case. `bun install` keeps a tracked package directory at the locked version, and
+  `bunx` then runs that copy. The job runs beside every caller's gate, whatever the caller's stack, so it holds
+  the refusal itself.
 - The `workflows` workflow runs actionlint and zizmor. The gate proves ShellCheck ran by writing a canary
   workflow with an unquoted variable and requiring the finding back. actionlint exits 0 with ShellCheck absent,
   and no flag changes that.
