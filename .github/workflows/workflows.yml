@@ -8,8 +8,8 @@ name: workflows
 #
 # The job token sits in this job and in no gate job. Inside a job a step's environment is not a
 # boundary, since any step can read the token from the runner, so the token goes to the job that
-# installs no dependencies and runs no build or test. One step names it: zizmor, whose online
-# audits need it.
+# installs no dependencies and runs no build or test. Two steps name it: the lockfile asset check
+# and zizmor, whose online audits need it.
 #
 # A caller's uses: job grants permissions: contents: read. A called job can only lower what its
 # caller passes, and a caller passing none is refused before any step runs.
@@ -88,6 +88,61 @@ jobs:
           github_token: ''
           env: false
           add_shims_to_path: false
+      # mise.lock names each artifact twice: the url mise downloads, and url_api, the same asset
+      # by id. GitHub records each asset's download address, and its sha256 for an asset uploaded
+      # since it began keeping digests. This step asks GitHub for every asset the lockfile names
+      # by id and requires the address to equal the lockfile's url and the digest, where GitHub
+      # keeps one, to equal its checksum. For a tool whose release carries no attestation,
+      # ShellCheck today, that digest is the second source for the checksum mise verifies. An
+      # asset with no digest, taplo's, is held to its address alone. Both spellings of a
+      # platform table are read, and a url_api outside the asset reference form, a failed call
+      # or a lockfile naming no asset at all fails the step. A lockfile value reaches the log
+      # through printf %q, so a control character in it prints as an escape.
+      - name: Lockfile assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mise exec -- taplo get -f mise.lock -o json > "$RUNNER_TEMP/lock.json"
+          jq -r '
+            .tools // {} | to_entries[] | .key as $tool | .value[] |
+            ( (to_entries[] | select(.key | startswith("platforms.")) | {platform: (.key | ltrimstr("platforms.")), entry: .value}),
+              (.platforms // {} | to_entries[] | {platform: .key, entry: .value}) ) |
+            select(.entry.url_api != null) |
+            [$tool, .platform, .entry.url_api, (.entry.url // ""), (.entry.checksum // "")] | @tsv
+          ' "$RUNNER_TEMP/lock.json" > "$RUNNER_TEMP/assets.tsv"
+          reference='^https://api\.github\.com/(repos/[A-Za-z0-9-]+/[A-Za-z0-9_.-]+/releases/assets/[0-9]+)$'
+          checked=0
+          failed=0
+          while IFS=$'\t' read -r tool platform api url checksum; do
+            label="$(printf '%q %q' "$tool" "$platform")"
+            if [[ ! "$api" =~ $reference ]] || [[ "$api" == */../* ]] || [[ "$api" == */./* ]]; then
+              echo "::error::$label url_api is not a release asset reference: $(printf '%q' "$api")"
+              failed=1
+              continue
+            fi
+            path=${BASH_REMATCH[1]}
+            if ! asset=$(gh api "$path" --jq '[.browser_download_url, (.digest // "")] | @tsv' < /dev/null); then
+              echo "::error::$label: gh api $path failed"
+              failed=1
+              continue
+            fi
+            IFS=$'\t' read -r served digest <<< "$asset"
+            if [ "$served" != "$url" ]; then
+              echo "::error::$label: GitHub serves asset $path at $served, and mise.lock records $(printf '%q' "$url")"
+              failed=1
+            fi
+            if [ -n "$digest" ] && [ "$digest" != "$checksum" ]; then
+              echo "::error::$label: GitHub records $digest for asset $path, and mise.lock records $(printf '%q' "$checksum")"
+              failed=1
+            fi
+            checked=$((checked + 1))
+          done < "$RUNNER_TEMP/assets.tsv"
+          if [ "$checked" -eq 0 ] && [ "$failed" -eq 0 ]; then
+            echo "::error::mise.lock names no release asset by id, so this step checked nothing."
+            exit 1
+          fi
+          echo "Checked $checked lockfile assets against GitHub."
+          exit "$failed"
       # actionlint exits 0 with ShellCheck absent or unable to start, and no flag changes that. A
       # path that resolves to nothing turns the rule off with no word outside -verbose. This step
       # writes a workflow whose one finding belongs to ShellCheck and requires the finding back, so
