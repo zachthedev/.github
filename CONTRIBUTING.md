@@ -12,6 +12,9 @@ The hook script `lefthook install` writes fails open. When it finds no lefthook 
 unchecked. A fresh clone runs no hook at all until `bun install` runs. CI's `commits` job and gate hold both
 cases.
 
+A pull request controls its own install scripts and gate code. Before running anything on a pull request branch
+you did not write, read its diff, then install it with `bun install --ignore-scripts`, so no install script runs.
+
 ## The gate
 
 ```sh
@@ -129,6 +132,10 @@ None. The gate's rows are the checks, and the break round in the alignment recor
 - The gate starts mise with an environment built from an allow-list, never the one it inherited, and refuses a
   tracked `.env` file, which Bun would load into the gate's environment. A template such as `.env.example`
   passes.
+- Bun's script runner puts `node_modules/.bin` first on `PATH`, so a committed `node_modules/.bin/bun` would
+  replace the gate. CI installs with `bun install --frozen-lockfile --ignore-scripts`, the gate's first row
+  refuses any tracked path under `node_modules`, and the `check` scripts start the gate through
+  `"$npm_execpath"`, never a bare `bun`.
 - A row throws with the tool's own output, so a red row reads the same as running the tool by hand.
 - Every binary resolves through `mise which`, `bunx --no-install` or `bun node_modules/<package>/…`. Nothing
   reads the machine's own installs.
