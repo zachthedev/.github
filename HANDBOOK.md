@@ -574,8 +574,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - commitlint: `--config commitlint.config.js` stops `.commitlintrc*`, the other `commitlint.config.*` names,
     `package.yaml` and the `package.json` key. cosmiconfig still builds its meta config from the root `.config`,
     which stays refused.
-  - ESLint `--config eslint.config.ts`, taplo `--config .taplo.toml` and zizmor `--config .github/zizmor.yml`: each
-    stops the tool's other config names, measured with the row's own flags, with no exception.
+  - ESLint `--config eslint.config.ts`, taplo `--config .taplo.toml`, zizmor `--config .github/zizmor.yml` and
+    golangci-lint `--config .golangci.yml`: each stops the tool's other config names, measured with the row's own
+    flags, with no exception.
   - rustfmt reads a `rustfmt.toml` or `.rustfmt.toml` at any depth, in any case and above the checkout. The row
     runs `cargo fmt --check -- --config-path rustfmt.toml`, which stops every one of those reads.
   - clippy reads a `clippy.toml` or `.clippy.toml` from a crate's directory, the workspace root and above the
@@ -800,7 +801,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   online when `gh auth token` answers, handing the token to zizmor's process alone, and passes `--offline`
   otherwise, never as a silent default. That token comes from gh's credential store, so an empty `GH_CONFIG_DIR`
   leaves it reachable.
-- `gh auth token` runs under a short deadline of its own, and a timeout reads as no token.
+- `gh auth token` runs under a short deadline of its own, and a timeout reads as no token, so zizmor runs
+  offline. That is no row deadline (Gate): without it a hanging keyring read hangs the local gate. The deadline is
+  the runtime's own, Bun's spawn `timeout` or Go's `exec.CommandContext`, with no tree kill.
 - Every other process the gate starts runs without any token variable a gate tool reads, `GITHUB_API_TOKEN` and
   `MISE_GITHUB_ENTERPRISE_TOKEN` included.
 - Inside a job, a step's environment is not a boundary: any step can read the job token from the runner. The
