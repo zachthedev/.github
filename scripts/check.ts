@@ -367,7 +367,9 @@ async function format(): Promise<string> {
   const { getFileInfo } = await import('prettier');
   const checked: string[] = [];
   for (const path of await trackedFiles()) {
-    const info = await getFileInfo(path, { ignorePath: PRETTIERIGNORE });
+    // resolveConfig: false, since the API resolves the nearest config from each
+    // file's directory, and a nested one would load its plugins in this process.
+    const info = await getFileInfo(path, { ignorePath: PRETTIERIGNORE, resolveConfig: false });
     if (!info.ignored && info.inferredParser !== null) {
       checked.push(path);
     }
@@ -606,8 +608,9 @@ function inheritedCalls(report: unknown): InheritedCall[] {
  * A secrets-inherit waiver in .github/zizmor.yml binds to a file or a line,
  * not to the workflow a job calls, so pointing a waived job at another
  * repository keeps the waiver and hands that repository every secret. zizmor
- * runs with no config, so it reports every such job, waived or not. It exits
- * 10 to 14 when it reports findings.
+ * runs with no config and `--no-ignores`, which drops inline ignore comments
+ * too, so it reports every such job, waived or not. It exits 10 to 14 when it
+ * reports findings.
  *
  * @throws When zizmor fails or a job calls anything else
  */
@@ -618,6 +621,7 @@ async function inheritedCallsHeld(zizmor: string): Promise<number> {
       '--no-progress',
       '--offline',
       '--no-config',
+      '--no-ignores',
       '--strict-collection',
       '--format',
       'json',
