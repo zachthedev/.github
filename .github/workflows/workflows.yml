@@ -96,37 +96,59 @@ jobs:
           fi
       # zizmor honors an inline ignore comment, which waives any audit on its line outside
       # .github/zizmor.yml, the one file the caller's gate compares whole. So every zizmor waiver
-      # lives in that file, and a tracked file under .github carrying such a comment is refused. A
-      # directive in a workflow that turns a ShellCheck check off silences it under actionlint,
-      # and ShellCheck has no waiver file here, so a script that needs one is rewritten. Both
-      # match without regard to case or spacing. git grep exits 1 on no match.
-      - name: Refused inline waivers
+      # lives in that file, and a tracked file under .github carrying such a comment is refused,
+      # matched without regard to case or spacing. git grep exits 1 on no match. A ShellCheck
+      # directive is refused where ShellCheck reads it, by the stand-in below.
+      - name: Refused zizmor waivers
         run: |
           status=0
           waivers=$(git grep -I -n -i -E 'zizmor:[[:space:]]*ignore\[' -- .github) || status=$?
-          if [ "$status" -le 1 ]; then
-            status=0
-            directives=$(git grep -I -n -i -E '#[[:space:]]*shellcheck[[:space:]]+disable' -- .github/workflows) || status=$?
-          fi
           if [ "$status" -gt 1 ]; then
             echo "::error::git grep could not read the tracked files under .github."
             exit 1
           fi
-          if [ -n "$waivers" ] || [ -n "$directives" ]; then
+          if [ -n "$waivers" ]; then
             while IFS= read -r match; do
-              [ -n "$match" ] || continue
               path=${match%%:*}
               rest=${match#*:}
               echo "::error::$(printf '%q' "$path") line ${rest%%:*} waives a zizmor audit inline. Move it into .github/zizmor.yml, under that audit's ignore list."
             done <<< "$waivers"
-            while IFS= read -r match; do
-              [ -n "$match" ] || continue
-              path=${match%%:*}
-              rest=${match#*:}
-              echo "::error::$(printf '%q' "$path") line ${rest%%:*} disables ShellCheck. Rewrite the script so ShellCheck passes it."
-            done <<< "$directives"
             exit 1
           fi
+      # actionlint hands ShellCheck a script only when its shell is bash or sh, or starts with
+      # "bash " or "sh ", so a step or defaults.run shell such as /bin/bash -e {0} runs bash with
+      # no ShellCheck at all. Every shell key in a tracked workflow is held to bash, sh or pwsh,
+      # written plainly on its own line. No YAML parser is pinned here, so the check reads each
+      # line and decodes every double-quoted string's escapes first, so an escaped key reads as
+      # its text. An explicit ? key and an alias written as a key are refused, since either can
+      # name a key the line never spells.
+      - name: Held shell values
+        run: |
+          python3 - <<'PY'
+          import re, subprocess, sys
+          listed = subprocess.run(["git", "ls-files", "-z", "--", ".github/workflows"], capture_output=True, check=True)
+          KEY = re.compile(r"(?:^|[^A-Za-z0-9_-])shell[\s\"']*:", re.I)
+          HELD = re.compile(r"^\s*(?:-\s+)?shell:\s+(?:bash|sh|pwsh)\s*(?:#.*)?$")
+          EXPLICIT = re.compile(r"^\s*(?:-\s+)?\?(?:\s|$)")
+          ALIAS = re.compile(r"(?:^|[\s{,])\*[^\s:]+\s*:(?:\s|$)")
+          QUOTED = re.compile(r'"((?:[^"\\]|\\.)*)"')
+          ESCAPE = re.compile(r"\\(x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|.)")
+          def decoded(text):
+              return ESCAPE.sub(lambda m: chr(int(m[1][1:], 16)) if len(m[1]) > 1 else m[1], text)
+          found = []
+          for name in filter(None, listed.stdout.decode().split("\0")):
+              with open(name, encoding="utf-8", errors="replace") as file:
+                  lines = file.read().split("\n")
+              for number, line in enumerate(lines, 1):
+                  plain = QUOTED.sub(lambda m: '"' + decoded(m[1]) + '"', line)
+                  if (KEY.search(line) or KEY.search(plain)) and not HELD.match(line):
+                      found.append(f"{name!r} line {number} sets a shell other than bash, sh or pwsh, or in another form")
+                  elif EXPLICIT.match(line) or ALIAS.search(line):
+                      found.append(f"{name!r} line {number} writes a key as an explicit ? key or an alias")
+          for finding in found:
+              print(f"::error::{finding}. actionlint runs ShellCheck for bash and sh alone.")
+          sys.exit(1 if found else 0)
+          PY
       # mise runs a config's hooks, [env] and [vars] exec templates and a tool entry's
       # postinstall command whenever it loads the file, so mise.toml holds [tools], [tool_config]
       # and [settings] alone, each with the keys the caller's gate reads, and mise.lock holds the
@@ -239,18 +261,49 @@ jobs:
           fi
           echo "Checked $checked lockfile assets against GitHub."
           exit "$failed"
-      # actionlint exits 0 with ShellCheck absent or unable to start, and no flag changes that. A
-      # path that resolves to nothing turns the rule off with no word outside -verbose. This step
-      # writes a workflow whose one finding belongs to ShellCheck and requires the finding back, so
-      # the clean run below carries weight. The path is resolved in its own statement, so a failed
-      # resolution stops the step, and the run below reads the path this step proved.
-      # -pyflakes= turns the Python linter off. No caller pins one, so a finding from it would be
-      # one the caller's gate never reports.
-      - name: ShellCheck present
+      # actionlint runs ShellCheck through a stand-in this step writes to RUNNER_TEMP from this
+      # workflow's own text, never from the caller's checkout. actionlint hands it each script as
+      # ShellCheck reads it, YAML decoded, so no escape or fold hides a line from it. It refuses
+      # every line holding a ShellCheck directive, in any case, as a finding in ShellCheck's JSON
+      # form, clears SHELLCHECK_OPTS, and otherwise runs the pinned ShellCheck over the same bytes.
+      # Any error exits nonzero with nothing on stdout, which fails actionlint. actionlint exits 0 when
+      # the program it names cannot start, so two canaries run with the same -shellcheck value:
+      # one needs SC2086 back, which proves ShellCheck runs behind the stand-in, and one needs the
+      # refusal back, which proves the stand-in is wired. The value quotes each path, since
+      # actionlint splits it as a command line. -pyflakes= turns the Python linter off. No caller
+      # pins one, so a finding from it would be one the caller's gate never reports.
+      - name: ShellCheck stand-in
         id: shellcheck
         run: |
           shellcheck=$(mise which shellcheck)
           actionlint=$(mise which actionlint)
+          standin="$RUNNER_TEMP/shellcheck-stand-in.sh"
+          cat > "$standin" <<'STANDIN'
+          #!/bin/bash
+          set -uo pipefail
+          shellcheck=$1
+          shift
+          script=$(mktemp) || exit 2
+          trap 'rm -f "$script"' EXIT
+          cat > "$script" || exit 2
+          status=0
+          lines=$(grep -n -i -E '#[[:space:]]*shellcheck[[:space:]]' "$script" | cut -d: -f1) || status=$?
+          if [ "$status" -gt 1 ]; then
+            exit 2
+          fi
+          if [ -n "$lines" ]; then
+            findings=""
+            while IFS= read -r line; do
+              findings+="${findings:+,}{\"file\":\"-\",\"line\":$line,\"endLine\":$line,\"column\":1,\"endColumn\":1,\"level\":\"error\",\"code\":0,\"message\":\"A ShellCheck directive is refused in a workflow script. Rewrite the script so ShellCheck passes it.\"}"
+            done <<< "$lines"
+            printf '[%s]\n' "$findings"
+            exit 1
+          fi
+          unset SHELLCHECK_OPTS
+          exec "$shellcheck" "$@" < "$script"
+          STANDIN
+          chmod 755 "$standin"
+          command="'$standin' '$shellcheck'"
           canary=$(mktemp -d)
           cat > "$canary/canary.yml" <<'CANARY'
           name: canary
@@ -261,23 +314,42 @@ jobs:
               steps:
                 - run: echo $GITHUB_REF
           CANARY
-          found=$("$actionlint" -pyflakes= -shellcheck="$shellcheck" "$canary/canary.yml" || true)
+          hash='#'
+          cat > "$canary/directive.yml" <<CANARY
+          name: canary
+          on: push
+          jobs:
+            canary:
+              runs-on: ubuntu-latest
+              steps:
+                - run: |
+                    ${hash} shellcheck disable=SC2086
+                    echo \$GITHUB_REF
+          CANARY
+          found=$("$actionlint" -pyflakes= -shellcheck="$command" "$canary/canary.yml" || true)
           case "$found" in
             *SC2086*) ;;
             *)
-              echo "::error::actionlint found no SC2086 in a script that carries one, so ShellCheck never ran."
-              echo "::error::Check that ${shellcheck} starts."
+              echo "::error::actionlint found no SC2086 in a script that carries one, so ShellCheck never ran behind the stand-in."
               exit 1
               ;;
           esac
-          echo "path=$shellcheck" >> "$GITHUB_OUTPUT"
+          found=$("$actionlint" -pyflakes= -shellcheck="$command" "$canary/directive.yml" || true)
+          case "$found" in
+            *"ShellCheck directive is refused"*) ;;
+            *)
+              echo "::error::actionlint returned no refusal for a script carrying a ShellCheck directive, so the stand-in never ran."
+              exit 1
+              ;;
+          esac
+          echo "command=$command" >> "$GITHUB_OUTPUT"
           echo "actionlint=$actionlint" >> "$GITHUB_OUTPUT"
-      # -shellcheck names the binary the step above proved, so actionlint cannot pick another off
-      # PATH, and the actionlint that runs is the one the step above ran.
+      # -shellcheck names the stand-in the step above proved, so actionlint cannot pick another
+      # ShellCheck off PATH, and the actionlint that runs is the one the step above ran.
       - name: actionlint
         env:
           ACTIONLINT: ${{ steps.shellcheck.outputs.actionlint }}
-          SHELLCHECK: ${{ steps.shellcheck.outputs.path }}
+          SHELLCHECK: ${{ steps.shellcheck.outputs.command }}
         run: '"$ACTIONLINT" -pyflakes= -shellcheck="$SHELLCHECK"'
       # A secrets-inherit waiver in .github/zizmor.yml binds to a file or a line, not to the
       # workflow a job calls, so pointing a waived job at another repository keeps the waiver and
