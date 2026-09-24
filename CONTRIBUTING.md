@@ -6,10 +6,12 @@ Install before committing. [docs/dev.md#prerequisites](docs/dev.md#prerequisites
 and `bun install` installs the dependencies and the git hooks. The commit hook checks every commit message
 before it is recorded, and the push hook runs the gate and refuses the push when it fails.
 
-The commit hook runs commitlint as `bun ./node_modules/@commitlint/cli/cli.js`, under Bun rather than a `node` on
-`PATH`, and it fails when the package is missing. The `format` and `prepare` scripts start their tools the same
-way, by path under `node_modules/`. None of them uses `bunx`, which falls back to `PATH`, a parent
-`node_modules/.bin` or its own cache when a package is missing. The push hook runs `bun scripts/check.ts`.
+The commit hook runs commitlint as `bun --no-env-file ./node_modules/@commitlint/cli/cli.js`, under Bun rather
+than a `node` on `PATH`, and it fails when the package is missing. The `format` and `prepare` scripts start their
+tools the same way, by path under `node_modules/`. None of them uses `bunx`, which falls back to `PATH`, a parent
+`node_modules/.bin` or its own cache when a package is missing. The push hook runs
+`bun --no-env-file scripts/check.ts`. Every one of these `bun` starts, the `check` and `check:rows` scripts and
+CI's gate step pass `--no-env-file`, so Bun loads no `.env` into them.
 The hook script `lefthook install` writes fails open. When it finds no lefthook binary, as in a checkout whose
 `node_modules/` is gone, it prints `Can't find lefthook in PATH` and exits 0, and the commit or push goes through
 unchecked. A fresh clone runs no hook at all until `bun install` runs. CI's `commits` job and gate hold both
@@ -245,7 +247,8 @@ alignment record proves they go red.
 - The gate starts mise with an environment built from an allow-list, never the one it inherited.
 - Bun's script runner puts `node_modules/.bin` first on `PATH`, so under `bun run` a committed
   `node_modules/.bin/bun` would replace the gate. CI installs with `bun install --frozen-lockfile --ignore-scripts`,
-  and CI and the push hook call `bun scripts/check.ts` directly, which skips the script runner, so the preflight's
+  and CI and the push hook call `bun --no-env-file scripts/check.ts` directly, which skips the script runner, so
+  the preflight's
   `node_modules` refusal runs before every merge.
 - A row throws with the tool's own output, so a red row reads the same as running the tool by hand.
 - Every package runs from its absolute path under `node_modules`, and every tool `mise.toml` pins from the path
