@@ -501,12 +501,16 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     `--ignore-scripts` install still applies it;
   - a tracked `.npmrc`, because it redirects even the frozen, script-free install.
 - Those checks import only built-in modules, so no package loads before they pass.
-- A Bun gate refuses `paths` and `baseUrl` in any tracked `tsconfig.json` or `jsconfig.json`, `extends` chains
-  included. Under `bunx --bun` Bun applies the root one to a tool's own imports, so a `paths` entry for a package
+- A Bun gate refuses `paths` and `baseUrl` in a `tsconfig.json` or `jsconfig.json`, `extends` chains included.
+  Under `bunx --bun` Bun applies the root one to a tool's own imports, so a `paths` entry for a package
   commitlint imports ran repository code in the commit hook. A project aliases through `package.json` `imports`,
   whose `#` names cannot redirect a bare package name.
-- A Go repository, and any other with no TypeScript, refuses a tracked `tsconfig.json` or `jsconfig.json`
-  outright. `.github` refuses every one but `scripts/tsconfig.json`, which its gate compares whole.
+- A Go repository, and any other with no TypeScript, refuses a `tsconfig.json` or `jsconfig.json` outright.
+  `.github` refuses every one but `scripts/tsconfig.json`, which its gate compares whole.
+- Both tsconfig refusals read the root file and `scripts/tsconfig.json` on disk, committed or not, and a deeper
+  file when it is tracked. A tool in the root `node_modules` resolves through the config found walking up from
+  its own files, which reaches only its package's own and the root's. A nested one reaches only its project's
+  code, which the test row runs anyway, and a walk of every depth on disk would reach `node_modules`.
 - Where a repository keeps a root `tsconfig.json`, the gate compares it whole against that repository's own
   constant, beside `scripts/tsconfig.json`. A `noCheck: true` there let the typecheck row pass over a type error
   while it printed its full count.
@@ -574,7 +578,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - In a C# repository:
   - The gate refuses a nested `Directory.Build.props`, a `Directory.Build.rsp` anywhere, and a nested
     `.globalconfig`, `.editorconfig` or `nuget.config`. Each turned a red build green or added a package source
-    past the root's `<clear />`. A tracked nested `.editorconfig` passes only where the gate holds it byte for byte.
+    past the root's `<clear />`. A nested `.editorconfig` passes only where the gate names it and holds it byte
+    for byte.
   - The build, test and installer rows pass `DirectoryBuildPropsPath`, `DirectoryBuildTargetsPath` and
     `DirectoryPackagesPropsPath` as absolute paths at the root, and `-noAutoResponse`, so MSBuild reads the
     root's files alone and no response file.
