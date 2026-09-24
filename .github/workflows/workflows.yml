@@ -95,24 +95,36 @@ jobs:
             exit 1
           fi
       # zizmor honors an inline ignore comment, which waives any audit on its line outside
-      # .github/zizmor.yml, the one file the caller's gate compares whole. So every waiver lives in
-      # that file, and a tracked file under .github carrying such a comment is refused, matched
-      # without regard to case or spacing. git grep exits 1 on no match.
-      - name: Refused zizmor waivers
+      # .github/zizmor.yml, the one file the caller's gate compares whole. So every zizmor waiver
+      # lives in that file, and a tracked file under .github carrying such a comment is refused. A
+      # directive in a workflow that turns a ShellCheck check off silences it under actionlint,
+      # and ShellCheck has no waiver file here, so a script that needs one is rewritten. Both
+      # match without regard to case or spacing. git grep exits 1 on no match.
+      - name: Refused inline waivers
         run: |
           status=0
           waivers=$(git grep -I -n -i -E 'zizmor:[[:space:]]*ignore\[' -- .github) || status=$?
+          if [ "$status" -le 1 ]; then
+            status=0
+            directives=$(git grep -I -n -i -E '#[[:space:]]*shellcheck[[:space:]]+disable' -- .github/workflows) || status=$?
+          fi
           if [ "$status" -gt 1 ]; then
             echo "::error::git grep could not read the tracked files under .github."
             exit 1
           fi
-          if [ -n "$waivers" ]; then
+          if [ -n "$waivers" ] || [ -n "$directives" ]; then
             while IFS= read -r match; do
+              [ -n "$match" ] || continue
               path=${match%%:*}
               rest=${match#*:}
-              echo "::error::$(printf '%q' "$path") line ${rest%%:*} waives a zizmor audit inline."
+              echo "::error::$(printf '%q' "$path") line ${rest%%:*} waives a zizmor audit inline. Move it into .github/zizmor.yml, under that audit's ignore list."
             done <<< "$waivers"
-            echo "::error::Move each waiver named above into .github/zizmor.yml, under that audit's ignore list."
+            while IFS= read -r match; do
+              [ -n "$match" ] || continue
+              path=${match%%:*}
+              rest=${match#*:}
+              echo "::error::$(printf '%q' "$path") line ${rest%%:*} disables ShellCheck. Rewrite the script so ShellCheck passes it."
+            done <<< "$directives"
             exit 1
           fi
       # mise runs a config's hooks, [env] and [vars] exec templates and a tool entry's
