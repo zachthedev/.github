@@ -95,6 +95,62 @@ jobs:
             echo "::error::Remove each path, commitlint key and patch named above."
             exit 1
           fi
+      # Under --bun, Bun applies a tsconfig.json or jsconfig.json to commitlint's own imports, so a
+      # paths entry or a baseUrl there runs checkout code in place of a package commitlint loads.
+      # Every tracked one, at any depth and in any case, and every file its extends names, is read
+      # for either. An extends naming a package or a file outside the checkout is refused, since
+      # the step cannot read it before the install. A failed git or jq call stops the step: a
+      # malformed file among them, and one carrying comments, which jq does not read. This is a
+      # step of its own because actionlint stalls on Windows handing ShellCheck a script past 4 KB.
+      - name: Refused TypeScript path aliases
+        run: |
+          tracked=$(git ls-files)
+          aliased=""
+          root=$(realpath -m -- "$PWD")
+          mapfile -t queue < <(printf '%s\n' "$tracked" | grep -iE '(^"?|/)(tsconfig|jsconfig)\.json"?$' || true)
+          declare -A visited=()
+          index=0
+          while [ "$index" -lt "${#queue[@]}" ]; do
+            file=${queue[$index]}
+            index=$((index + 1))
+            [ -n "$file" ] || continue
+            [ -z "${visited[$file]+set}" ] || continue
+            visited[$file]=1
+            if [ ! -f "$file" ]; then
+              aliased+="$(printf '%q' "$file") is not a file this step can read, so what it sets is unknown."$'\n'
+              continue
+            fi
+            set_keys=$(jq -r 'if type != "object" then error("is not an object") else (.compilerOptions // {}) | if type != "object" then error("compilerOptions is not an object") else [keys[] | select(. == "paths" or . == "baseUrl")] | join(" and ") end end' "$file")
+            if [ -n "$set_keys" ]; then
+              aliased+="$(printf '%q' "$file") sets $set_keys, which Bun applies to the imports of commitlint's own code."$'\n'
+            fi
+            targets=$(jq -r '(.extends // empty) | if type == "array" then .[] elif type == "string" then . else error("extends is neither a string nor a list") end' "$file")
+            while IFS= read -r target; do
+              [ -n "$target" ] || continue
+              case "$target" in
+                ./* | ../*) ;;
+                *)
+                  aliased+="$(printf '%q' "$file") extends $(printf '%q' "$target"), a package this step cannot read before the install."$'\n'
+                  continue
+                  ;;
+              esac
+              resolved=$(realpath -m -- "$(dirname -- "$file")/$target")
+              if [ ! -f "$resolved" ] && [ -f "$resolved.json" ]; then
+                resolved=$resolved.json
+              fi
+              case "$resolved" in
+                "$root"/*) queue+=("${resolved#"$root"/}") ;;
+                *) aliased+="$(printf '%q' "$file") extends $(printf '%q' "$target"), outside the checkout."$'\n' ;;
+              esac
+            done <<< "$targets"
+          done
+          if [ -n "$aliased" ]; then
+            while IFS= read -r finding; do
+              [ -n "$finding" ] && echo "::error::$finding"
+            done <<< "$aliased"
+            echo "::error::Remove each paths and baseUrl setting named above. Alias through package.json imports instead."
+            exit 1
+          fi
       # --ignore-scripts, so no lifecycle script and no prepare script from the caller's tree
       # runs here. commitlint needs none of them.
       - run: bun install --frozen-lockfile --ignore-scripts
