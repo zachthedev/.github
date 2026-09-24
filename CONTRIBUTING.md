@@ -177,7 +177,8 @@ None. The gate's rows are the checks, and the break round in the alignment recor
 ## Code
 
 - Every process the gate starts goes through `scripts/run.ts`, so every one carries a deadline. At the deadline
-  the gate kills the process and every process it started.
+  the gate kills the process and the processes it started. A descendant whose parent already exited is out of
+  that reach: only a Windows job object reaches one, and Bun exposes none, so such an orphan can outlive a row.
 - `scripts/run.ts` resolves every program to an absolute path from `PATH` alone, and Bun itself runs as
   `process.execPath`. On Windows a bare program name resolves from the current directory before `PATH`, so a
   committed `gh.bat` would otherwise run in place of gh, which the preflight refuses ([The gate](#the-gate)).

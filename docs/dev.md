@@ -9,7 +9,8 @@
   zizmor runs offline and no token is needed.
 
 When a process outlives its deadline, the gate also starts the system's own `taskkill` on Windows, or `ps`
-elsewhere, to end it and every process it started.
+elsewhere, to end it and the processes it started. A descendant whose parent already exited can outlive that
+kill ([CONTRIBUTING.md#code](../CONTRIBUTING.md#code)).
 
 ## First run
 
