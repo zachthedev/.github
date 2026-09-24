@@ -24,7 +24,6 @@ agent as they bind a person.
   for every later install, where no cooldown reads it again.
 - Never hand-edit `CHANGELOG.md`, the version in `package.json` or `.release-please-manifest.json`
   ([why](CONTRIBUTING.md#what-never-happens)).
-- Never write a version number into `HANDBOOK.md` ([why](CONTRIBUTING.md#what-never-happens)).
 - Never run `gh auth token` where its output is visible. gh answers from the system credential store, so the
   output is the owner's live token, and a transcript holding it forces a rotation.
 - Never write a `mise.lock` line outside `mise lock`, except a checksum computed as `mise.toml` says
@@ -35,7 +34,7 @@ agent as they bind a person.
 
 ## Deviations
 
-A comment beside a line that names the handbook records a deliberate deviation. It is a decision, not a defect.
+A comment beside a deviating line records a deliberate deviation. It is a decision, not a defect.
 
 ## Where the rest is
 
