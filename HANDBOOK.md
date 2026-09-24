@@ -370,7 +370,7 @@ API reports the value only on a `required_reviewers` rule.
   `# zizmor: ignore[secrets-inherit]`, which hides the job, and `--no-ignores` drops config ignores and inline
   comments alike. The hold then stands on its own, beside the inline refusal (Gate).
 - With that hold in place a line entry adds nothing, and an edit above the job would turn the gate red for no
-  reason. The waiver therefore names the file.
+  reason. A `secrets-inherit` waiver therefore names the file, the one audit whose waiver does (Gate).
 
 ### Apps
 
@@ -538,7 +538,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The root `.config` and a `package.json` `cosmiconfig` key are refused before any commitlint step, the shared
   `commits` job included. cosmiconfig builds its meta config in the working directory even under `--config`.
 - Every gate tool that searches for its own config runs with the one config named explicitly. The tools are
-  Prettier, commitlint, golangci-lint, ESLint, taplo and zizmor, CSharpier in C#, and rustfmt and clippy in Rust.
+  Prettier, commitlint, golangci-lint, ESLint, taplo and zizmor, CSharpier in C#, and rustfmt, clippy and
+  cargo-deny in Rust.
 - The gate refuses every other name such a tool searches, at every depth it searches, without regard to case. A
   config the tool finds first replaces the shared one: a committed `.golangci.json` beside `.golangci.yml`
   replaced the lint config and hid a `govet` finding.
@@ -546,6 +547,13 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     `package.yaml`.
   - commitlint: a `.commitlintrc*`, a `commitlint.config.*` other than the root `commitlint.config.js`, a
     `package.json` `commitlint` key and a `package.yaml`.
+  - rustfmt: every `rustfmt.toml` and `.rustfmt.toml` but the root `rustfmt.toml`. rustfmt reads one at any
+    depth, in any case and above the checkout, so the row runs `cargo fmt --check -- --config-path rustfmt.toml`.
+  - clippy: every `clippy.toml` and `.clippy.toml` but the root `clippy.toml`. clippy reads one from a crate's
+    directory, the workspace root and above the checkout, and it takes no config flag, so
+    `CLIPPY_CONF_DIR=<absolute root>` names it.
+  - cargo-deny: every `deny.toml` but the root one, a `.deny.toml` and a `.cargo/deny.toml`. cargo-deny reads the
+    nearest, so the row passes `--config deny.toml`, a global flag that goes ahead of `check`.
 - A gate that calls Prettier's `getFileInfo` passes `resolveConfig: false`. The API otherwise resolves the nearest
   config in the gate's own process, a nested `package.json` `prettier` key and its plugins included, and
   `--config` never reaches it.
@@ -572,6 +580,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every gate, and the shared `workflows` job, refuses a `zizmor: ignore[` comment in a tracked file under
   `.github`, so every waiver lives in `.github/zizmor.yml`. An inline comment waives any audit on its line,
   `unpinned-uses` included.
+- A waiver in `.github/zizmor.yml` names `file:line`, as an `artipacked` waiver does, so an edit that moves the
+  finding turns the gate red and the waiver is read again. `secrets-inherit` alone takes the file form,
+  because the callee hold is its control (Secrets).
 - zizmor's config cannot waive a composite action's finding. A composite action under `.github/actions`
   therefore carries no waiver, and its finding is fixed.
 - Both also refuse a `shellcheck disable` directive in a tracked workflow file. One silences ShellCheck under
@@ -609,6 +620,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     compares its checked count. A root `.csharpierignore` of `*` gave `Checked 0 files` and exit 0.
     `.csharpierrc` and `.csharpierignore` are held whole.
   - The gate refuses a root `cake.config`.
+- In a Rust repository:
+  - cargo started at the root reads the root `.cargo/config` and `.cargo/config.toml`, the extensionless one
+    winning, and every one above the checkout, never a crate's. The gate holds `.cargo/config.toml` whole and
+    refuses `.cargo/config`. A config above the checkout or in `CARGO_HOME` is a named residual.
+  - The gate refuses a `rust-toolchain` or `rust-toolchain.toml` anywhere but the root `rust-toolchain.toml`.
 - A test or script that spawns git drops every inherited `GIT_*` variable for that process and names the
   repository with `-C <root>`. git exports `GIT_DIR` and `GIT_INDEX_FILE` to a hook, so a gate the hook runs
   otherwise writes into the hook's own repository.
