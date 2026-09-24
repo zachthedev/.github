@@ -510,6 +510,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Where a repository keeps a root `tsconfig.json`, the gate compares it whole against that repository's own
   constant, beside `scripts/tsconfig.json`. A `noCheck: true` there let the typecheck row pass over a type error
   while it printed its full count.
+- Every tracked `tsconfig.json` and `jsconfig.json` is plain JSON with no comments, because every gate and the
+  `commits` job read one with a strict parser.
 - Every gate refuses a duplicated key, at any depth, in any JSON file it parses to decide a refusal. Bun's own
   reader keeps the first copy, while `JSON.parse` and Go's `encoding/json` keep the last. A duplicate therefore
   lets the gate pass one value while Bun uses the other.
@@ -616,6 +618,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   records the deviation.
 - A hand-rolled step closes a gap no tool closes and names that gap in a comment. Examples: the mise lockfile
   assertions and the unattested-tool cross-check under Tools, and the ShellCheck canary below.
+- Every `run:` script stays under 4 KB (Known defects).
 - No repository test reads a workflow file. actionlint and zizmor are the readers of workflow YAML. A property
   neither checks (a step order, a trigger set, a matrix, a permission) is held by construction. The reusable
   workflow or the one gate task that sequences it holds it. A test that parses `ci.yml` for its shape is glue,
@@ -1233,6 +1236,9 @@ bears on, the defect, and the condition that removes it.
 - Scheduled workflow notifications (Workflows): a failure notification goes to the last actor who edited the
   cron line, and no API reports who that is. A bot's bump can move it silently. Removed once an API reports the
   actor.
+- actionlint (Workflows): on Windows it stalls when it hands ShellCheck a `run:` script past about 4 KB. Every
+  run script therefore stays under 4 KB, and a longer check becomes a step of its own. Removed once actionlint
+  hands a long script over on Windows.
 - actionlint (Workflows): refuses GitHub's recommended `$/` syntax for a same-repository reusable workflow
   call. A same-repository caller writes `./`, and `.github/zizmor.yml` disables the `self-repository` audit
   with that reason. Upstream rhysd/actionlint#711. Removed once actionlint accepts `$/`.
