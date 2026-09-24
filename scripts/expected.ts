@@ -1,11 +1,13 @@
 /**
  * What the gate expects of the files each repository writes for itself: its
- * TypeScript project configs, the zizmor config, the patterns its
- * `.prettierignore` adds to the shared ones, and `eslint.config.ts`.
+ * TypeScript project configs, the zizmor config, the JavaScript and
+ * declaration files it tracks, the patterns its `.prettierignore` adds to the
+ * shared ones, and `eslint.config.ts`.
  *
  * @remarks
- * scripts/run.ts, scripts/tools.ts and scripts/startup.ts are the same in
- * every repository of the set, and startup.ts reads this module for the rest.
+ * scripts/run.ts, scripts/tools.ts, scripts/startup.ts and
+ * scripts/shellcheck.ts are the same in every repository of the set, and
+ * startup.ts reads this module for the rest.
  * A change to one of these files changes the matching value here in the same
  * commit, which a reviewer reads as a gate change. The preflight loads this
  * module before any check, so it imports nothing.
@@ -59,6 +61,15 @@ export const EXPECTED_ZIZMOR_CONFIG = {
 } as const;
 
 /**
+ * Every tracked JavaScript file (`.js`, `.jsx`, `.mjs`, `.cjs`) and
+ * declaration file (`.d.ts` and its kin) the repository keeps, by path. tsc
+ * checks neither kind: no project allows JavaScript, and `skipLibCheck` skips
+ * every declaration file, the repository's own included. ESLint lints no
+ * `.jsx` at all. So startup.ts refuses any other tracked file of either kind.
+ */
+export const EXPECTED_UNTYPED_SOURCES: readonly string[] = ['commitlint.config.js'];
+
+/**
  * The patterns `.prettierignore` holds beside the shared ones startup.ts
  * lists, each once. REPOS.md is the maintainer's local alignment table, which
  * .gitignore keeps out of the index and `bun run format` would otherwise walk.
@@ -69,7 +80,8 @@ export const OWN_PRETTIERIGNORE_PATTERNS: readonly string[] = ['/REPOS.md'];
  * What `eslint.config.ts` holds, byte for byte. ESLint runs the file as a
  * module, and its ignores and rules decide what the lint row checks.
  */
-export const EXPECTED_ESLINT_CONFIG = `import eslint from '@eslint/js';
+export const EXPECTED_ESLINT_CONFIG = `import comments from '@eslint-community/eslint-plugin-eslint-comments/configs';
+import eslint from '@eslint/js';
 import { defineConfig, globalIgnores } from 'eslint/config';
 import prettierConfig from 'eslint-config-prettier';
 import tseslint from 'typescript-eslint';
@@ -85,6 +97,18 @@ export default defineConfig(
   eslint.configs.recommended,
   tseslint.configs.strictTypeChecked,
   tseslint.configs.stylisticTypeChecked,
+
+  // An inline ESLint directive names each rule it turns off and gives its
+  // reason after \`--\`. The recommended set refuses a disable that names no
+  // rule or is never closed, and require-description refuses one with no
+  // reason. ESLint reports a directive that silences nothing, and the lint row
+  // allows no warning.
+  comments.recommended,
+  {
+    rules: {
+      '@eslint-community/eslint-comments/require-description': 'error',
+    },
+  },
 
   {
     languageOptions: {

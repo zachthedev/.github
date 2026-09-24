@@ -1,3 +1,4 @@
+import comments from '@eslint-community/eslint-plugin-eslint-comments/configs';
 import eslint from '@eslint/js';
 import { defineConfig, globalIgnores } from 'eslint/config';
 import prettierConfig from 'eslint-config-prettier';
@@ -14,6 +15,18 @@ export default defineConfig(
   eslint.configs.recommended,
   tseslint.configs.strictTypeChecked,
   tseslint.configs.stylisticTypeChecked,
+
+  // An inline ESLint directive names each rule it turns off and gives its
+  // reason after `--`. The recommended set refuses a disable that names no
+  // rule or is never closed, and require-description refuses one with no
+  // reason. ESLint reports a directive that silences nothing, and the lint row
+  // allows no warning.
+  comments.recommended,
+  {
+    rules: {
+      '@eslint-community/eslint-comments/require-description': 'error',
+    },
+  },
 
   {
     languageOptions: {

@@ -14,12 +14,19 @@ if (scopes.length === 0) {
 
 export default {
   extends: ['@commitlint/config-conventional'],
-  // Dependabot writes release notes and compare links into the body, well past
-  // the 72-column limit, and that is the update path the cooldown protects. A
-  // repository without Dependabot never matches it. The squash subject lint in
-  // CI reads the header alone, so a skipped commit's header is still checked
-  // where it lands.
-  ignores: [(message) => message.includes('Signed-off-by: dependabot[bot]')],
+  // Dependabot writes body lines past the 72-column limit that hold no URL, such
+  // as a grouped update's "Updates `<package>` from <old> to <new>", and that is
+  // the update path the cooldown protects. A repository without Dependabot never
+  // matches it. The match reads the lines after the header alone, so a title
+  // carrying the text is still linted, and the squash subject lint in CI checks
+  // the header where it lands.
+  ignores: [
+    (message) =>
+      message
+        .split('\n')
+        .slice(1)
+        .some((line) => line.startsWith('Signed-off-by: dependabot[bot] <')),
+  ],
   rules: {
     'scope-enum': [2, 'always', scopes],
     // 72 keeps a subject readable in `git log --oneline` inside an 80-column

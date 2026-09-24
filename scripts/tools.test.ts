@@ -315,6 +315,10 @@ const REFUSED_PROGRAM: readonly string[] = [
   'gh.tar.gz',
   'bun.lockb',
   'mise.toml.bak',
+  'node',
+  'node.exe',
+  'bunx',
+  'bunx.cmd',
 ];
 
 test.each([...REFUSED_PROGRAM])('%p is refused as a program name before any row', async (entry: string) => {
@@ -337,7 +341,6 @@ const ALLOWED: readonly string[] = [
   '.github/',
   'node_modules/',
   'gh/',
-  '.config/other.toml',
 ];
 
 test.each([...ALLOWED])('%p is refused neither as a mise file nor as a program name', async (entry: string) => {
@@ -379,6 +382,26 @@ test('a .config that is a file rather than a directory yields no finding', async
   plantEntry('.config');
 
   expect(await findings()).toEqual([]);
+});
+
+test.each(['.config/', '.config/other.toml', '.CONFIG/', '.Config'])(
+  'a root .config planted as %p is refused before any row',
+  async (entry: string) => {
+    writeFiles();
+    plantEntry(entry);
+    const name = entry.split('/')[0] ?? entry;
+
+    expect(await preflightFindings()).toEqual(
+      expect.arrayContaining([carrying(`${quoted(name)} is at the root, and mise, lefthook`)]) as string[],
+    );
+  },
+);
+
+test('a .config below the root is not refused as the root one', async () => {
+  writeFiles();
+  plantEntry('docs/.config/other.toml');
+
+  expect((await preflightFindings()).filter((finding) => finding.includes('is at the root'))).toEqual([]);
 });
 
 /** Links `link`, below the working directory, to a directory outside it. */
@@ -427,33 +450,68 @@ test.each(['', LOCK, PINS])('a missing file is a finding naming it (%p present a
   expect(await findings()).toEqual(expected);
 });
 
-/* ///// Patches to a package the gate imports ///// */
+/* ///// The packages node_modules must hold ///// */
 
-/** Writes a package.json patching zod and one gate script holding `source`. */
-function patchedScript(name: string, source: string): void {
-  writeFileSync('package.json', JSON.stringify({ patchedDependencies: { 'zod@4.6.5': 'patches/zod.patch' } }));
-  mkdirSync('scripts', { recursive: true });
-  writeFileSync(join('scripts', name), source);
+/** Writes a package.json naming `names` as devDependencies, and a package under node_modules for each of `present`. */
+function installed(names: readonly string[], present: readonly string[]): void {
+  writeFileSync(
+    'package.json',
+    JSON.stringify({ devDependencies: Object.fromEntries(names.map((name) => [name, '1.0.0'])) }),
+  );
+  for (const name of present) {
+    mkdirSync(join('node_modules', name), { recursive: true });
+    writeFileSync(join('node_modules', name, 'package.json'), JSON.stringify({ name, version: '1.0.0' }));
+  }
 }
 
-test('a patch to a package a script imports after a shebang line is refused before any row', async () => {
+/** The preflight's findings about node_modules. */
+async function installFindings(): Promise<string[]> {
+  return (await preflightFindings()).filter((finding) => finding.includes('node_modules'));
+}
+
+test('a manifest whose every package node_modules holds yields no finding about node_modules', async () => {
   writeFiles();
-  patchedScript('run-me.ts', "#!/usr/bin/env bun\nimport { z } from 'zod';\nexport const schema = z.string();\n");
+  installed(['prettier', '@scope/tool'], ['prettier', '@scope/tool']);
 
-  const found = await preflightFindings();
-
-  expect(found).toEqual(
-    expect.arrayContaining([carrying('package.json patches "zod@4.6.5", and the gate imports zod')]) as string[],
-  );
-  expect(found.filter((finding) => finding.startsWith('threw'))).toEqual([]);
+  expect(await installFindings()).toEqual([]);
 });
 
-test('a script whose imports cannot be scanned is refused by name when package.json patches a package', async () => {
+test('a package the manifest names that node_modules lacks is refused before any row, naming it alone', async () => {
   writeFiles();
-  patchedScript('broken.ts', "import { z from 'zod';\n");
+  installed(['prettier', 'zod', '@scope/tool'], ['zod']);
+
+  expect(await installFindings()).toEqual([
+    carrying('"prettier" is missing from node_modules'),
+    carrying('"@scope/tool" is missing from node_modules'),
+  ]);
+});
+
+test('a node_modules that is gone refuses every package the manifest names', async () => {
+  writeFiles();
+  installed(['prettier', 'zod'], []);
+
+  expect(await installFindings()).toEqual([
+    carrying('"prettier" is missing from node_modules'),
+    carrying('"zod" is missing from node_modules'),
+  ]);
+});
+
+test('a package linked out of the checkout is refused', async () => {
+  writeFiles();
+  installed(['prettier'], []);
+  mkdirSync('node_modules', { recursive: true });
+  linkOut(join('node_modules', 'prettier'));
+  const target = outside.at(-1) ?? '';
+  writeFileSync(join(target, 'package.json'), '{ "name": "prettier" }');
+
+  expect(await installFindings()).toEqual([carrying('"prettier" in node_modules leads out of the checkout')]);
+});
+
+test('a missing package.json is refused, since which packages node_modules must hold is unknown', async () => {
+  writeFiles();
 
   expect(await preflightFindings()).toEqual(
-    expect.arrayContaining([carrying('"scripts/broken.ts" could not be scanned for its imports')]) as string[],
+    expect.arrayContaining([carrying('package.json does not parse as the gate reads it')]) as string[],
   );
 });
 

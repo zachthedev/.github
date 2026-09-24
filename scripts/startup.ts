@@ -20,6 +20,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import {
   EXPECTED_ESLINT_CONFIG,
   EXPECTED_PROJECT_CONFIGS,
+  EXPECTED_UNTYPED_SOURCES,
   EXPECTED_ZIZMOR_CONFIG,
   OWN_PRETTIERIGNORE_PATTERNS,
 } from './expected';
@@ -294,6 +295,12 @@ const CONFIG_SEARCHES: readonly ConfigSearch[] = [
     reads: 'lefthook merges it over lefthook.yml, where it can replace any hook job. .gitignore lists it',
     personal: true,
   },
+  {
+    what: "Claude Code's local settings",
+    paths: ['.claude/settings.local.json'],
+    reads: "Claude Code reads it as one contributor's own settings. .gitignore lists it",
+    personal: true,
+  },
 ];
 
 /** `glob`, one of a {@link ConfigSearch}'s paths, as a pattern over a whole folded path. */
@@ -328,11 +335,23 @@ function packageKeyFindings(path: string): string[] {
     ];
   }
   const manifest = isTable(parsed) ? parsed : {};
-  return PACKAGE_KEYS.filter(([key]) => Object.hasOwn(manifest, key)).map(
+  const found = PACKAGE_KEYS.filter(([key]) => Object.hasOwn(manifest, key)).map(
     ([key, program]) =>
       `${quote(path)} carries a ${key} key, and ${program} reads its config from it. The one config is a file the gate names`,
   );
+  if (Object.hasOwn(manifest, PATCHES_KEY)) {
+    found.push(
+      `${quote(path)} carries a ${PATCHES_KEY} key, and bun install applies each patch it names over the package bun.lock pins, so a tool a row runs can change while its pin stays the same. Remove it`,
+    );
+  }
+  return found;
 }
+
+/**
+ * The `package.json` key bun install reads patches from. A patch bun.lock
+ * records with no entry here is not applied, so the manifest is the file read.
+ */
+const PATCHES_KEY = 'patchedDependencies';
 
 /** The names Bun and typescript-eslint read a project's TypeScript options from. */
 const PROJECT_CONFIG_NAMES: readonly string[] = ['tsconfig.json', 'jsconfig.json'];
@@ -378,8 +397,8 @@ function extendedConfig(from: string, target: unknown): { readonly file: string 
  *
  * @remarks
  * Bun applies `paths` and `baseUrl` to every import in the directory below the
- * config, node_modules code included, so under `bunx --bun` a bare package
- * name a commit hook's tool imports resolves to repository code. `extends` is
+ * config, node_modules code included, so under Bun a bare package name a
+ * commit hook's tool imports resolves to repository code. `extends` is
  * one path or a list, and the gate follows every entry. Each entry names
  * scripts/tsconfig.json or a config expected.ts holds, so a held chain holds
  * only held files, and an option such as `noCheck` never arrives through an
@@ -461,6 +480,20 @@ function projectConfigFindings(path: string): string[] {
  */
 const VCS_DIRECTORIES: readonly string[] = ['.git', '.sl', '.svn', '.hg', '.jj'];
 
+/**
+ * The root directories the lint and format rows skip: ESLint's globalIgnores
+ * and .prettierignore name each. A checkout fills them locally, and a file
+ * force-added there is tracked like any other, which the product can import.
+ */
+const SKIPPED_DIRECTORIES: readonly string[] = ['dist', 'coverage', '.claude/worktrees'];
+
+/**
+ * A JavaScript or declaration file, by the end of its folded name: `.js`,
+ * `.jsx`, `.mjs`, `.cjs`, `.d.ts`, `.d.mts`, `.d.cts`, and a declaration for
+ * another extension such as `.d.css.ts`.
+ */
+const UNTYPED_SOURCE = /\.(?:[cm]?jsx?|d\.(?:[^./]+\.)?[cm]?ts)$/;
+
 /** The directory GitHub reads workflows from, which reads one whose name ends in lowercase `.yml` here. */
 const WORKFLOWS = '.github/workflows';
 
@@ -472,57 +505,113 @@ const WORKFLOWS = '.github/workflows';
 const ZIZMOR_IGNORE_COMMENT = /zizmor\s*:\s*ignore\s*\[/i;
 
 /**
- * A ShellCheck directive that turns a check off. ShellCheck honors the
- * lowercase form alone, and case and spacing are allowed to differ here too.
+ * The `shell:` values a workflow may name. actionlint hands ShellCheck a
+ * script whose shell is bash or sh, and pwsh is the one other shell the set
+ * writes, so any other value runs a script no linter reads.
  */
-const SHELLCHECK_DISABLE = /#\s*shellcheck\s+disable/i;
+const WORKFLOW_SHELLS: readonly string[] = ['bash', 'sh', 'pwsh'];
+
+/**
+ * Every `shell:` value in the workflow at `path` outside
+ * {@link WORKFLOW_SHELLS}, as findings: under the workflow's `defaults.run`,
+ * a job's `defaults.run`, or a step.
+ *
+ * @remarks
+ * actionlint skips ShellCheck for a value such as `/bin/bash -e {0}`
+ * although bash runs the script, so a value is held to the exact names. Bun's
+ * YAML reader refuses some text actionlint's accepts, so a workflow it cannot
+ * read is a finding rather than a pass.
+ */
+function shellFindings(path: string, text: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = Bun.YAML.parse(text);
+  } catch (error: unknown) {
+    return [
+      `${quote(path)} does not parse as the gate reads YAML, so its shell values are unknown: ${quote(error instanceof Error ? error.message : String(error))}`,
+    ];
+  }
+  if (!isTable(parsed)) {
+    return [`${quote(path)} is not one YAML mapping as the gate reads it, so its shell values are unknown`];
+  }
+  const shells: (readonly [string, unknown])[] = [];
+  const defaultShell = (where: string, holder: unknown): void => {
+    const defaults = isTable(holder) ? holder['defaults'] : undefined;
+    const run = isTable(defaults) ? defaults['run'] : undefined;
+    if (isTable(run) && Object.hasOwn(run, 'shell')) {
+      shells.push([`${where}defaults.run.shell`, run['shell']]);
+    }
+  };
+  defaultShell('', parsed);
+  const jobs = parsed['jobs'];
+  for (const [id, job] of isTable(jobs) ? Object.entries(jobs) : []) {
+    defaultShell(`jobs.${id}.`, job);
+    const steps = isTable(job) ? job['steps'] : undefined;
+    for (const [index, step] of (Array.isArray(steps) ? (steps as unknown[]) : []).entries()) {
+      if (isTable(step) && Object.hasOwn(step, 'shell')) {
+        shells.push([`jobs.${id}.steps[${String(index)}].shell`, step['shell']]);
+      }
+    }
+  }
+  return shells
+    .filter(([, value]) => typeof value !== 'string' || !WORKFLOW_SHELLS.includes(value))
+    .map(
+      ([where, value]) =>
+        `${quote(path)} sets ${where} to ${quoteValue(value)}, and actionlint hands ShellCheck a bash or sh script alone. Use ${WORKFLOW_SHELLS.join(', ')}`,
+    );
+}
 
 /**
  * Every way the tracked file at `path` falls outside what the workflows and
  * format rows read, as findings: a workflow whose path is not
- * `.github/workflows/<name>.yml` exactly, an inline zizmor waiver under
- * `.github`, a ShellCheck disable directive under `.github/workflows`, and a
- * path under a version control directory.
+ * `.github/workflows/<name>.yml` exactly, a workflow `shell:` value outside
+ * {@link WORKFLOW_SHELLS}, an inline zizmor waiver under `.github`, a path
+ * under a version control directory or one of {@link SKIPPED_DIRECTORIES},
+ * and a JavaScript or declaration file expected.ts does not name.
  *
  * @remarks
  * actionlint and zizmor read a workflow by its lowercase `.yml` name alone,
  * so a `.YML` or `.yaml` one passes both unread. A zizmor waiver belongs in
- * the held zizmor.yml, where changing it is a gate change. ShellCheck, which
- * actionlint runs over a workflow's scripts, has no waiver file, so a script
- * it flags is rewritten.
+ * the held zizmor.yml, where changing it is a gate change. A ShellCheck
+ * directive is refused by scripts/shellcheck.ts, which reads each script as
+ * ShellCheck does.
  */
 function rowScopeFindings(path: string, segments: readonly string[]): string[] {
   const found: string[] = [];
   const folded = segments.join('/');
   const directory = segments.slice(0, -1).join('/');
-  if (
-    directory === WORKFLOWS &&
-    /\.ya?ml$/.test(folded) &&
-    !(path.startsWith(`${WORKFLOWS}/`) && path.endsWith('.yml'))
-  ) {
-    found.push(
-      `${quote(path)} is a workflow outside ${WORKFLOWS}/<name>.yml, and actionlint and zizmor read that spelling alone. Rename it`,
-    );
+  const present = segments[0] === '.github' && existsSync(path);
+  const text = present ? readFileSync(path, 'utf8') : '';
+  if (directory === WORKFLOWS && /\.ya?ml$/.test(folded)) {
+    if (!(path.startsWith(`${WORKFLOWS}/`) && path.endsWith('.yml'))) {
+      found.push(
+        `${quote(path)} is a workflow outside ${WORKFLOWS}/<name>.yml, and actionlint and zizmor read that spelling alone. Rename it`,
+      );
+    }
+    if (present) {
+      found.push(...shellFindings(path, text));
+    }
   }
-  const text = segments[0] === '.github' && existsSync(path) ? readFileSync(path, 'utf8') : '';
   if (ZIZMOR_IGNORE_COMMENT.test(text)) {
     found.push(
       `${quote(path)} carries a zizmor ignore comment, and zizmor waives the audit it names. A waiver is an entry in ${ZIZMOR_CONFIG}, which the gate holds whole`,
     );
   }
-  if (folded.startsWith(`${WORKFLOWS}/`)) {
-    for (const [index, line] of text.split('\n').entries()) {
-      if (SHELLCHECK_DISABLE.test(line)) {
-        found.push(
-          `${quote(path)} line ${String(index + 1)} disables ShellCheck, which has no waiver file. Rewrite the script so ShellCheck passes it`,
-        );
-      }
-    }
-  }
   const vcs = segments.slice(0, -1).find((segment) => VCS_DIRECTORIES.includes(segment));
   if (vcs !== undefined) {
     found.push(
       `${quote(path)} sits under a ${vcs} directory, and Prettier skips a file there without a word, so the format row would count a file it never checked. Move it`,
+    );
+  }
+  const skipped = SKIPPED_DIRECTORIES.find((directory) => folded.startsWith(`${directory}/`));
+  if (skipped !== undefined) {
+    found.push(
+      `${quote(path)} is tracked under ${skipped}/, which the lint and format rows skip, so no row checks it while the product can still import it. Remove it from the index with git rm --cached`,
+    );
+  }
+  if (UNTYPED_SOURCE.test(folded) && !EXPECTED_UNTYPED_SOURCES.includes(path)) {
+    found.push(
+      `${quote(path)} is JavaScript or a declaration file, which tsc never checks, and ESLint lints no .jsx. Write it as TypeScript, or name it in scripts/expected.ts`,
     );
   }
   return found;
@@ -545,17 +634,49 @@ async function listFiles(args: readonly string[], what: string): Promise<string[
 }
 
 /**
+ * A finding when git's work tree is not this checkout, or undefined when it
+ * is, compared by canonical path.
+ *
+ * @remarks
+ * git passes over a `.git` directory it cannot read, an empty one among them,
+ * and uses the first repository above it, where `git ls-files` lists that
+ * repository's files without a word. A `.git` file it cannot read fails
+ * instead.
+ */
+async function topLevelFinding(): Promise<string | undefined> {
+  const finished = await run(['git', 'rev-parse', '--show-toplevel'], GIT_TIMEOUT_MS, GIT_ENVIRONMENT, {
+    inherit: false,
+  });
+  const top = finished.stdout.trim();
+  if (finished.exitCode !== 0 || top.length === 0) {
+    return `git could not name the work tree it reads: it ${describe(finished)}`;
+  }
+  let same: boolean;
+  try {
+    same = realpathSync.native(top) === realpathSync.native('.');
+  } catch {
+    // A top directory that cannot be resolved is not this checkout.
+    same = false;
+  }
+  return same
+    ? undefined
+    : `git reads the work tree at ${quote(top)}, not this checkout, so every file it lists belongs to another repository. A .git here that git cannot read, such as an empty directory, sends it to one above. Run the gate from the root of a clone`;
+}
+
+/**
  * Every file in the tree the gate refuses to run beside, as findings: a file
  * a program in {@link CONFIG_SEARCHES} reads in place of the one the gate
  * names, a project config the gate does not hold or one that redirects a bare
- * import, a config key in any tracked `package.json`, a tracked path under a
+ * import, a config key or `patchedDependencies` in any tracked
+ * `package.json`, a tracked path under a
  * `node_modules` directory, a `node_modules` directory on disk below the root,
  * and a tracked file outside what the workflows and format rows read.
  *
  * @remarks
- * git lists the tracked files once and the untracked ones on disk once, the
- * ignored ones included, outside the root node_modules and Claude Code's
- * worktrees.
+ * git lists nothing until it names this checkout as its work tree, and a
+ * work tree anywhere else is the one finding. It then lists the tracked files
+ * once and the untracked ones on disk once, the ignored ones included,
+ * outside the root node_modules and Claude Code's worktrees.
  * The gate compares each name through {@link fold}, since git's `icase`
  * pathspec magic folds ASCII alone. A config that changes what a row reports
  * is refused on disk, tracked or not, so a local gate agrees with CI, and a
@@ -570,6 +691,10 @@ async function listFiles(args: readonly string[], what: string): Promise<string[
  * beside it.
  */
 export async function trackedFindings(): Promise<string[]> {
+  const top = await topLevelFinding();
+  if (top !== undefined) {
+    return [top];
+  }
   const tracked = await listFiles([], 'tracked files');
   const untracked = await listFiles(
     ['--others', '--exclude=/node_modules/', '--exclude=/.claude/worktrees/'],
@@ -754,64 +879,10 @@ async function walk(path: string): Promise<Dirent[]> {
   return found;
 }
 
-/** The packages the gate's scripts import, and a finding for each script whose imports could not be read. */
-interface GatePackages {
-  readonly packages: Set<string>;
-  readonly unreadable: readonly string[];
-}
-
-/**
- * The packages the gate's scripts import, by name, read from the scripts
- * themselves: every import that is not relative, not absolute, and not a
- * `node:` or `bun:` builtin.
- *
- * @remarks
- * Bun 1.4.2's import scan throws on a leading `#!` line, which Bun itself
- * skips when it runs the file, so the scan starts after one. A script the
- * scan still cannot read is a finding, since the packages it imports are
- * unknown.
- */
-async function gatePackages(): Promise<GatePackages> {
-  const transpiler = new Bun.Transpiler({ loader: 'ts' });
-  const packages = new Set<string>();
-  const unreadable: string[] = [];
-  for (const entry of await walk(SCRIPTS)) {
-    if (!entry.isFile() || !entry.name.endsWith('.ts')) {
-      continue;
-    }
-    const file = join(entry.parentPath, entry.name).replaceAll('\\', '/');
-    const text = await Bun.file(file).text();
-    const code = text.startsWith('#!') ? text.slice(text.includes('\n') ? text.indexOf('\n') + 1 : text.length) : text;
-    let imports: ReturnType<typeof transpiler.scanImports>;
-    try {
-      imports = transpiler.scanImports(code);
-    } catch (error: unknown) {
-      unreadable.push(
-        `${quote(file)} could not be scanned for its imports, so whether it imports a package package.json patches is unknown: ${quote(error instanceof Error ? error.message : String(error))}`,
-      );
-      continue;
-    }
-    for (const { path } of imports) {
-      if (/^(\.|\/|[a-z]:|node:|bun:)/i.test(path)) {
-        continue;
-      }
-      const segments = path.split('/');
-      packages.add(path.startsWith('@') ? segments.slice(0, 2).join('/') : (segments[0] ?? path));
-    }
-  }
-  return { packages, unreadable };
-}
-
 /**
  * The findings against what Bun reads to resolve the gate's own imports:
  * {@link SCRIPTS_TSCONFIG} differing from {@link EXPECTED_SCRIPTS_TSCONFIG},
- * any other {@link RESOLUTION_NAMES} entry under `scripts/`, and a
- * `package.json` patch to a package the gate imports.
- *
- * @remarks
- * The package list comes from the scripts' own imports, so a new import is
- * covered the moment it lands. A patch bun.lock records with no package.json
- * entry beside it is not applied, so package.json is the file read.
+ * and any other {@link RESOLUTION_NAMES} entry under `scripts/`.
  */
 async function scriptsFindings(): Promise<string[]> {
   const found = await heldWholeFindings({
@@ -827,26 +898,57 @@ async function scriptsFindings(): Promise<string[]> {
       found.push(`${quote(path)} is one Bun reads to resolve a gate script's imports, and ${SCRIPTS} holds none`);
     }
   }
+  return found;
+}
+
+/** The `package.json` tables that name the packages bun install puts under node_modules. */
+const DEPENDENCY_KEYS: readonly string[] = ['dependencies', 'devDependencies', 'optionalDependencies'];
+
+/**
+ * Every package the root {@link PACKAGE_JSON} names that the checkout's
+ * `node_modules` lacks, or holds through a link out of the checkout, as
+ * findings.
+ *
+ * @remarks
+ * Bun resolves a bare import from the nearest `node_modules` holding the
+ * package, so a checkout that lacks one loads a parent directory's copy, and
+ * with no `node_modules` at all Bun tries to install it at run time. Either
+ * way the code that runs is not the version bun.lock pins. The gate imports
+ * zod and prettier, eslint.config.ts and commitlint.config.js import their
+ * plugins, and each is refused here before any row loads it.
+ */
+async function installFindings(): Promise<string[]> {
   let manifest: unknown;
   try {
     manifest = parseJson(await Bun.file(PACKAGE_JSON).text());
   } catch (error: unknown) {
-    // Missing, malformed or read two ways: refused, since what Bun and bun install read from it is unknown.
-    found.push(
-      `${PACKAGE_JSON} does not parse as the gate reads it, so its patchedDependencies cannot be read: ${quote(error instanceof Error ? error.message : String(error))}`,
-    );
-    return found;
+    // Missing, malformed or read two ways: refused, since which packages Bun must find is unknown.
+    return [
+      `${PACKAGE_JSON} does not parse as the gate reads it, so which packages node_modules must hold is unknown: ${quote(error instanceof Error ? error.message : String(error))}`,
+    ];
   }
-  const patches = isTable(manifest) ? manifest['patchedDependencies'] : undefined;
-  if (isTable(patches)) {
-    const { packages, unreadable } = await gatePackages();
-    found.push(...unreadable);
-    for (const key of Object.keys(patches)) {
-      const at = key.lastIndexOf('@');
-      const name = at > 0 ? key.slice(0, at) : key;
-      if (packages.has(name)) {
-        found.push(`package.json patches ${quote(key)}, and the gate imports ${name} before its first check`);
-      }
+  const names = DEPENDENCY_KEYS.flatMap((key) => {
+    const table = isTable(manifest) ? manifest[key] : undefined;
+    return isTable(table) ? Object.keys(table) : [];
+  });
+  const modules = resolve('node_modules');
+  const found: string[] = [];
+  for (const name of names) {
+    let real: string;
+    try {
+      real = realpathSync.native(join(modules, name, PACKAGE_JSON));
+    } catch {
+      // Missing, or a link to nothing: either way the checkout does not hold the package.
+      found.push(
+        `${quote(name)} is missing from node_modules, and Bun then loads a copy from a parent directory's node_modules or installs one at run time, neither the version bun.lock pins. Run bun install`,
+      );
+      continue;
+    }
+    const inside = relative(realpathSync.native('.'), real);
+    if (inside.startsWith('..') || isAbsolute(inside)) {
+      found.push(
+        `${quote(name)} in node_modules leads out of the checkout, to ${quote(real)}, so what loads is not this checkout's install. Run bun install`,
+      );
     }
   }
   return found;
@@ -863,21 +965,21 @@ const EXPECTED_PRETTIERRC = { singleQuote: true, printWidth: 120 } as const;
 
 /**
  * The patterns every repository's {@link PRETTIERIGNORE} holds, beside the
- * ones expected.ts adds, each anchored at the root. The first two are files
- * release-please writes. The next three are directories a checkout fills
- * locally, and the last three are a contributor's own files that .gitignore
- * lists, so `bun run format`, which walks the tree past .gitignore, never
- * rewrites another worktree, build output or personal settings.
+ * ones expected.ts adds, each anchored at the root: the two files
+ * release-please writes, the {@link SKIPPED_DIRECTORIES}, and every personal
+ * file {@link CONFIG_SEARCHES} names at the root. `bun run format` walks the
+ * tree past .gitignore, so it never rewrites another worktree, build output
+ * or personal settings, and a pattern skips exactly what the gate refuses to
+ * track.
  */
 const SHARED_PRETTIERIGNORE_PATTERNS: readonly string[] = [
   '/CHANGELOG.md',
   '/.release-please-manifest.json',
-  '.claude/worktrees/',
-  '/coverage/',
-  '/dist/',
-  '/.claude/settings.local.json',
-  '/lefthook-local*',
-  '/.lefthook-local*',
+  ...SKIPPED_DIRECTORIES.map((directory) => `/${directory}/`),
+  ...CONFIG_SEARCHES.filter((search) => search.personal === true)
+    .flatMap((search) => search.paths)
+    .filter((path) => !path.startsWith('**/'))
+    .map((path) => `/${path}`),
 ];
 
 /** Every pattern {@link PRETTIERIGNORE} holds, each once. */
@@ -913,12 +1015,19 @@ if (scopes.length === 0) {
 
 export default {
   extends: ['@commitlint/config-conventional'],
-  // Dependabot writes release notes and compare links into the body, well past
-  // the 72-column limit, and that is the update path the cooldown protects. A
-  // repository without Dependabot never matches it. The squash subject lint in
-  // CI reads the header alone, so a skipped commit's header is still checked
-  // where it lands.
-  ignores: [(message) => message.includes('Signed-off-by: dependabot[bot]')],
+  // Dependabot writes body lines past the 72-column limit that hold no URL, such
+  // as a grouped update's "Updates \`<package>\` from <old> to <new>", and that is
+  // the update path the cooldown protects. A repository without Dependabot never
+  // matches it. The match reads the lines after the header alone, so a title
+  // carrying the text is still linted, and the squash subject lint in CI checks
+  // the header where it lands.
+  ignores: [
+    (message) =>
+      message
+        .split('\\n')
+        .slice(1)
+        .some((line) => line.startsWith('Signed-off-by: dependabot[bot] <')),
+  ],
   rules: {
     'scope-enum': [2, 'always', scopes],
     // 72 keeps a subject readable in \`git log --oneline\` inside an 80-column
@@ -1078,9 +1187,9 @@ function treeKillFindings(): string[] {
 /**
  * Every way the files Bun and the gate's tools read before they run differ
  * from what the gate expects, as findings: {@link BUNFIG}, what resolves the
- * gate's own imports, the configs and ignore files the rows and hooks read,
- * a root file named like a program, and a system with no program for the
- * tree kill.
+ * gate's own imports, a package the manifest names that node_modules lacks,
+ * the configs and ignore files the rows and hooks read, a root file named
+ * like a program, and a system with no program for the tree kill.
  *
  * @remarks
  * The gate calls this before any row, because Bun honored its files before
@@ -1094,6 +1203,7 @@ export async function startupFindings(): Promise<string[]> {
   return [
     ...(await bunfigFindings()),
     ...(await scriptsFindings()),
+    ...(await installFindings()),
     ...(
       await Promise.all(
         Object.entries(EXPECTED_PROJECT_CONFIGS).map(([path, expected]) =>

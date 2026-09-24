@@ -443,13 +443,23 @@ const BUN_ENV_NAMES: readonly string[] = [
   '.env.test.local',
 ];
 
+/** The arguments of the git call that names the work tree. */
+const TOP_LEVEL = 'rev-parse --show-toplevel';
+
+/** The arguments of the git call that lists the untracked files on disk. */
+const UNTRACKED = 'ls-files -z --others --exclude=/node_modules/ --exclude=/.claude/worktrees/';
+
 /**
- * Answers git's listing of the index with `tracked` and every other listing,
- * the untracked files on disk among them, with `untracked`, each NUL-separated.
+ * Answers each git call the preflight makes by its exact arguments: the work
+ * tree with the case's working directory, the index listing with `tracked`,
+ * and the untracked listing with `untracked`, each NUL-separated. Any other
+ * git call fails, so a call the case did not expect is a finding.
  */
 function answerGit(tracked: readonly string[], untracked: readonly string[] = []): void {
-  standIns.answer('git', { stdout: untracked.map((path) => `${path}\0`).join('') });
+  standIns.answer('git', { exitCode: 3 });
+  standIns.answer('git', { stdout: `${cwd}\n` }, TOP_LEVEL);
   standIns.answer('git', { stdout: tracked.map((path) => `${path}\0`).join('') }, 'ls-files -z');
+  standIns.answer('git', { stdout: untracked.map((path) => `${path}\0`).join('') }, UNTRACKED);
 }
 
 /** The arguments of every git start the case recorded, in order. */
@@ -477,16 +487,42 @@ test('a tracked env file in another case is a finding naming it as it is spelled
   expect(await trackedFindings()).toEqual([carrying('".Env.Production.Local" is an env file Bun loads')]);
 });
 
-test('git lists the whole index once and the untracked files once, NUL-separated, with no pathspec', async () => {
+test('git names the work tree, then lists the whole index once and the untracked files once, with no pathspec', async () => {
   answerGit([]);
 
-  await trackedFindings();
+  expect(await trackedFindings()).toEqual([]);
 
-  const [index, others, ...rest] = gitArgs();
+  const [top, index, others, ...rest] = gitArgs();
+  expect(top).toEqual(['rev-parse', '--show-toplevel']);
   expect(index).toEqual(['ls-files', '-z']);
   expect(others?.slice(0, 3)).toEqual(['ls-files', '-z', '--others']);
   expect(others?.filter((arg) => !arg.startsWith('-'))).toEqual(['ls-files']);
   expect(rest).toEqual([]);
+});
+
+test('a work tree other than the checkout, as an empty .git directory gives, is the one finding, and nothing is listed', async () => {
+  answerGit(['.env']);
+  standIns.answer('git', { stdout: `${besideDir('-parent')}\n` }, TOP_LEVEL);
+
+  expect(await trackedFindings()).toEqual([carrying('not this checkout, so every file it lists belongs to another')]);
+  expect(gitArgs()).toEqual([['rev-parse', '--show-toplevel']]);
+});
+
+test('a git that cannot name the work tree is the one finding, and nothing is listed', async () => {
+  answerGit(['.env']);
+  standIns.answer('git', { exitCode: 128 }, TOP_LEVEL);
+
+  expect(await trackedFindings()).toEqual([carrying('git could not name the work tree it reads: it exited 128')]);
+  expect(gitArgs()).toEqual([['rev-parse', '--show-toplevel']]);
+});
+
+test('an untracked Prettier config on disk is a finding, and an untracked env file is not', async () => {
+  answerGit([], ['.prettierrc.json', 'src/.prettierrc', '.env']);
+
+  expect(await trackedFindings()).toEqual([
+    carrying('".prettierrc.json" is a Prettier config'),
+    carrying('"src/.prettierrc" is a Prettier config'),
+  ]);
 });
 
 test('one tracked path under node_modules is a finding that names it', async () => {
@@ -526,7 +562,7 @@ test('the untracked listing leaves the root node_modules out and nothing below i
 
   await trackedFindings();
 
-  const others = gitArgs()[1] ?? [];
+  const others = gitArgs().find((args) => args.includes('--others')) ?? [];
   expect(others).toContain('--exclude=/node_modules/');
   expect(others.filter((arg) => /node_modules/i.test(arg))).toEqual(['--exclude=/node_modules/']);
 });
@@ -567,24 +603,20 @@ test('a tracked tsconfig.json extending scripts/tsconfig.json, which the gate ho
   expect(await trackedFindings()).toEqual([]);
 });
 
-test('a failed git read is a finding', async () => {
-  standIns.answer('git', { stdout: '', exitCode: 128 });
+test.each([
+  ['index', 'ls-files -z', 'tracked files'],
+  ['untracked', UNTRACKED, 'untracked files'],
+])('a failed %s listing is a finding', async (_label: string, args: string, what: string) => {
+  answerGit([]);
+  standIns.answer('git', { exitCode: 128 }, args);
 
-  expect(await trackedFindings()).toEqual(
-    expect.arrayContaining([
-      carrying('git could not list the tracked files the gate refuses: it exited 128'),
-    ]) as string[],
-  );
+  expect(await trackedFindings()).toEqual([carrying(`git could not list the ${what} the gate refuses: it exited 128`)]);
 });
 
 test('a missing git is a finding', async () => {
   process.env['PATH'] = besideDir('-empty');
 
-  expect(await trackedFindings()).toEqual(
-    expect.arrayContaining([
-      carrying('git could not list the tracked files the gate refuses: it exited 127'),
-    ]) as string[],
-  );
+  expect(await trackedFindings()).toEqual([carrying('git could not name the work tree it reads: it exited 127')]);
 });
 
 test("git starts with its two config switches and nothing from the gate's environment", async () => {
@@ -607,7 +639,7 @@ test("git starts with its two config switches and nothing from the gate's enviro
   }
 });
 
-/* ///// Inline waivers in workflows ///// */
+/* ///// Tracked files read as text ///// */
 
 /** Writes `text` at `path` below the working directory and answers git's index listing with it. */
 function trackFile(path: string, text: string): void {
@@ -616,41 +648,170 @@ function trackFile(path: string, text: string): void {
   answerGit([path]);
 }
 
-// The ShellCheck directive forms, written out here rather than read from the
-// module: ShellCheck honors the first, and the rest differ in case and
-// spacing, which the refusal covers too.
-const SHELLCHECK_DIRECTIVES: readonly string[] = [
-  '# shellcheck disable=SC2086',
-  '#shellcheck disable=all',
-  '#  ShellCheck  Disable=SC2086',
-  '# SHELLCHECK DISABLE=SC2046,SC2086',
+/* ///// Workflow shells ///// */
+
+/** A workflow whose one job runs one step, with `defaults` and `step` spliced in as written. */
+function workflow(defaults: string, step: string): string {
+  return `on: push\n${defaults}jobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n${step}`;
+}
+
+interface ShellCase {
+  readonly label: string;
+  readonly text: string;
+  readonly where: string;
+}
+
+// actionlint hands ShellCheck a bash or sh script alone, so each of these runs
+// a script no linter reads.
+const REFUSED_SHELLS: readonly ShellCase[] = [
+  {
+    label: 'a step naming bash by its path',
+    text: workflow('', '        shell: /bin/bash -e {0}\n'),
+    where: 'jobs.a.steps[0].shell to "/bin/bash -e {0}"',
+  },
+  {
+    label: 'a step naming python',
+    text: workflow('', '        shell: python\n'),
+    where: 'jobs.a.steps[0].shell to "python"',
+  },
+  {
+    label: 'a step naming bash in another case',
+    text: workflow('', '        shell: Bash\n'),
+    where: 'jobs.a.steps[0].shell to "Bash"',
+  },
+  {
+    label: 'a step naming pwsh with arguments',
+    text: workflow('', '        shell: pwsh -command ". \'{0}\'"\n'),
+    where: 'jobs.a.steps[0].shell to "pwsh -command',
+  },
+  {
+    label: 'the workflow default naming cmd',
+    text: workflow('defaults:\n  run:\n    shell: cmd\n', ''),
+    where: 'defaults.run.shell to "cmd"',
+  },
+  {
+    label: "a job's default naming an expression",
+    text: 'on: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    defaults:\n      run:\n        shell: ${{ matrix.shell }}\n    steps:\n      - run: echo hi\n',
+    where: 'jobs.a.defaults.run.shell to "${{ matrix.shell }}"',
+  },
 ];
 
-test.each([...SHELLCHECK_DIRECTIVES])('a tracked workflow carrying %p is a finding naming it', async (line: string) => {
+test.each([...REFUSED_SHELLS])('$label is a finding naming where', async ({ text, where }: ShellCase) => {
+  trackFile('.github/workflows/ci.yml', text);
+
+  expect(await trackedFindings()).toEqual([carrying(`".github/workflows/ci.yml" sets ${where}`)]);
+});
+
+test.each(['bash', 'sh', 'pwsh'])('a step and both defaults naming %p yield no finding', async (shell: string) => {
   trackFile(
     '.github/workflows/ci.yml',
-    `jobs:\n  a:\n    steps:\n      - run: |\n          ${line}\n          echo $V\n`,
+    `on: push\ndefaults:\n  run:\n    shell: ${shell}\njobs:\n  a:\n    runs-on: ubuntu-latest\n    defaults:\n      run:\n        shell: ${shell}\n    steps:\n      - run: echo hi\n        shell: ${shell}\n`,
   );
 
-  expect(await trackedFindings()).toEqual([carrying('".github/workflows/ci.yml" line 5 disables ShellCheck')]);
-});
-
-test('a ShellCheck directive outside .github/workflows yields no finding', async () => {
-  trackFile('.github/actions/probe/action.yml', 'runs:\n  steps:\n    - run: |\n        # shellcheck disable=SC2086\n');
-
   expect(await trackedFindings()).toEqual([]);
 });
 
-test('a ShellCheck directive in an untracked workflow yields no finding', async () => {
+test('a tracked workflow the gate cannot read as YAML is a finding', async () => {
+  trackFile('.github/workflows/ci.yml', 'jobs: [unclosed\n');
+
+  expect(await trackedFindings()).toEqual([
+    carrying('".github/workflows/ci.yml" does not parse as the gate reads YAML'),
+  ]);
+});
+
+test('a shell outside the workflows directory, or in an untracked workflow, yields no finding', async () => {
+  mkdirSync(join(cwd, '.github', 'actions', 'probe'), { recursive: true });
+  writeFileSync(join(cwd, '.github', 'actions', 'probe', 'action.yml'), 'runs:\n  steps:\n    - shell: python\n');
   mkdirSync(join(cwd, '.github', 'workflows'), { recursive: true });
-  writeFileSync(join(cwd, '.github', 'workflows', 'ci.yml'), '# shellcheck disable=SC2086\n');
-  answerGit([], ['.github/workflows/ci.yml']);
+  writeFileSync(join(cwd, '.github', 'workflows', 'ci.yml'), workflow('', '        shell: python\n'));
+  answerGit(['.github/actions/probe/action.yml'], ['.github/workflows/ci.yml']);
 
   expect(await trackedFindings()).toEqual([]);
 });
 
-test('a shellcheck source directive yields no finding', async () => {
-  trackFile('.github/workflows/ci.yml', '# shellcheck source=/dev/null\n');
+/* ///// Package patches ///// */
+
+test.each(['package.json', 'tools/sub/package.json'])(
+  'a tracked %p carrying patchedDependencies is a finding naming it',
+  async (path: string) => {
+    trackFile(path, JSON.stringify({ patchedDependencies: { 'prettier@3.9.8': 'patches/prettier.patch' } }));
+
+    expect(await trackedFindings()).toEqual([carrying(`${JSON.stringify(path)} carries a patchedDependencies key`)]);
+  },
+);
+
+test('an empty patchedDependencies table is a finding too', async () => {
+  trackFile('package.json', '{ "patchedDependencies": {} }');
+
+  expect(await trackedFindings()).toEqual([carrying('"package.json" carries a patchedDependencies key')]);
+});
+
+test('a package.json on disk that the index does not hold is not read for patches', async () => {
+  mkdirSync(join(cwd, 'tools'), { recursive: true });
+  writeFileSync(join(cwd, 'tools', 'package.json'), '{ "patchedDependencies": { "zod@4.6.5": "x.patch" } }');
+  answerGit([], ['tools/package.json']);
 
   expect(await trackedFindings()).toEqual([]);
 });
+/* ///// What no row checks ///// */
+
+test.each(['dist/helper.js', 'coverage/lcov.info', '.claude/worktrees/wt/src/a.ts', 'Dist/evil.ts', 'COVERAGE/x.md'])(
+  'a tracked %p under a directory the lint and format rows skip is a finding',
+  async (path: string) => {
+    answerGit([path]);
+
+    expect(await trackedFindings()).toEqual(
+      expect.arrayContaining([carrying(`${JSON.stringify(path)} is tracked under`)]) as string[],
+    );
+  },
+);
+
+test.each(['src/dist/a.ts', 'docs/coverage.md', 'distribution/a.ts', '.claude/settings.json'])(
+  'a tracked %p outside those root directories is not refused as under one',
+  async (path: string) => {
+    answerGit([path]);
+
+    expect((await trackedFindings()).filter((finding) => finding.includes('is tracked under'))).toEqual([]);
+  },
+);
+
+test.each([
+  'src/helper.jsx',
+  'src/helper.js',
+  'src/helper.mjs',
+  'src/helper.cjs',
+  'src/lie.d.ts',
+  'src/lie.d.mts',
+  'src/lie.d.cts',
+  'src/styles.d.css.ts',
+  'SRC/HELPER.JSX',
+  'tools/commitlint.config.js',
+])('a tracked %p that expected.ts does not name is a finding', async (path: string) => {
+  answerGit([path]);
+
+  expect(await trackedFindings()).toEqual(
+    expect.arrayContaining([
+      carrying(`${JSON.stringify(path)} is JavaScript or a declaration file, which tsc never checks`),
+    ]) as string[],
+  );
+});
+
+test('the JavaScript file expected.ts names, and TypeScript beside it, yield no finding', async () => {
+  answerGit(['commitlint.config.js', 'src/a.ts', 'src/a.tsx', 'src/a.mts', 'src/data.json', 'src/d.ts.md']);
+
+  expect(await trackedFindings()).toEqual([]);
+});
+
+test.each(['.claude/settings.local.json', '.Claude/Settings.Local.json', 'lefthook-local.yml', '.lefthook-local'])(
+  'a tracked personal file %p is a finding, and one on disk alone is not',
+  async (path: string) => {
+    answerGit([path]);
+    const tracked = await trackedFindings();
+    standIns.clear();
+    answerGit([], [path]);
+
+    expect(tracked).toEqual([carrying(`${JSON.stringify(path)} is `)]);
+    expect(tracked[0]).toContain('Remove it from the index with git rm --cached');
+    expect(await trackedFindings()).toEqual([]);
+  },
+);

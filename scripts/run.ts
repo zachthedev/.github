@@ -47,8 +47,9 @@ export function fold(name: string): string {
  * A file at the repository root named like one of these, with any extension
  * or none, is refused before any row. {@link resolveProgram} never reads
  * the working directory, so none of them can stand in for the program either
- * way. The gate starts gh, git and mise by name, the hooks start bun and
- * bunx, and lefthook's install script starts node.
+ * way. The gate starts gh, git and mise by name, the hooks and the
+ * package.json scripts start bun, lefthook's install script starts node, and
+ * bunx is the name a contributor types to run a package.
  */
 export const PROGRAM_NAMES: readonly string[] = ['bun', 'bunx', 'gh', 'git', 'mise', 'node'];
 

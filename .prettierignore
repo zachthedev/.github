@@ -12,17 +12,21 @@
 /.release-please-manifest.json
 
 # Directories a checkout fills locally, which `bun run format` walks into,
-# since --ignore-path keeps .gitignore from narrowing Prettier: Claude Code's
-# worktrees, each a whole checkout of its own, and test and build output.
-.claude/worktrees/
-/coverage/
+# since --ignore-path keeps .gitignore from narrowing Prettier: build and test
+# output, and Claude Code's worktrees, each a whole checkout of its own. The
+# gate refuses a file tracked under any of them.
 /dist/
+/coverage/
+/.claude/worktrees/
 
 # A contributor's own files, which .gitignore lists and `bun run format` would
-# otherwise rewrite: Claude Code's local settings and lefthook's local config.
+# otherwise rewrite: lefthook's local configs and Claude Code's local settings.
+# Each is exactly a name the gate refuses to track.
+/lefthook-local
+/lefthook-local.*
+/.lefthook-local
+/.lefthook-local.*
 /.claude/settings.local.json
-/lefthook-local*
-/.lefthook-local*
 
 # This repository's own, in scripts/expected.ts: the maintainer's local alignment table,
 # which .gitignore keeps out of the index.

@@ -1,0 +1,118 @@
+/**
+ * Stands in for ShellCheck under actionlint's `-shellcheck` flag, so a
+ * ShellCheck directive in a workflow script is refused in the text ShellCheck
+ * itself reads.
+ *
+ * @remarks
+ * The workflows row starts actionlint with `-shellcheck` naming the Bun that
+ * runs the gate, this file and the pinned ShellCheck. actionlint adds
+ * ShellCheck's own arguments and writes each script to stdin as ShellCheck
+ * reads it: YAML escapes and folding decoded and every `${{ }}` expression
+ * blanked. A line carrying `#`, any spacing, then `shellcheck` and a space, in
+ * any case, is refused as a finding in ShellCheck's JSON form, so actionlint
+ * prints it beside the step and the row fails. Any other script runs through
+ * the pinned ShellCheck unchanged, with its output and exit code passed
+ * through. The file is the same in every repository of the set and imports
+ * nothing, so actionlint starting it once per script loads no other module.
+ * Any failure here exits 2 with nothing on stdout, which actionlint reports as
+ * a failed run rather than a clean one.
+ */
+
+/** ShellCheck's JSON form of one finding, as `shellcheck -f json` prints it. */
+interface Finding {
+  readonly file: string;
+  readonly line: number;
+  readonly endLine: number;
+  readonly column: number;
+  readonly endColumn: number;
+  readonly level: 'error';
+  readonly code: number;
+  readonly message: string;
+  readonly fix: null;
+}
+
+// ShellCheck reads a directive as `#`, any spacing, `shellcheck`, then at least
+// one space. Its spacing is a space, a tab or one of eleven Unicode spaces,
+// and \s covers all of them but the zero-width space, which is added here. The
+// case is folded, which only widens the match.
+const ZERO_WIDTH_SPACE = String.fromCharCode(0x200b);
+const DIRECTIVE = new RegExp(`#[\\s${ZERO_WIDTH_SPACE}]*shellcheck[\\s${ZERO_WIDTH_SPACE}]`, 'i');
+
+/** The variable ShellCheck reads extra flags from, one of which can exclude any finding. */
+const OPTIONS_VARIABLE = 'SHELLCHECK_OPTS';
+
+/** Whether `path` is absolute on Windows or POSIX, read without importing node:path. */
+function isAbsolutePath(path: string): boolean {
+  return /^(?:[A-Za-z]:[\\/]|[\\/])/.test(path);
+}
+
+/** A finding for every line of `script` carrying a ShellCheck directive, numbered from 1. */
+function directives(script: string): Finding[] {
+  return script.split('\n').flatMap((text, index) =>
+    DIRECTIVE.test(text)
+      ? [
+          {
+            file: '-',
+            line: index + 1,
+            endLine: index + 1,
+            column: 1,
+            endColumn: 1,
+            level: 'error' as const,
+            code: 0,
+            message: `A ShellCheck directive is refused in a workflow script, so rewrite the script until ShellCheck passes it: ${JSON.stringify(text.trim().slice(0, 200))}`,
+            fix: null,
+          },
+        ]
+      : [],
+  );
+}
+
+async function main(): Promise<number> {
+  const [shellcheck = '', ...args] = process.argv.slice(2);
+  if (!isAbsolutePath(shellcheck)) {
+    throw new Error(`the first argument names ShellCheck by an absolute path, and it is ${JSON.stringify(shellcheck)}`);
+  }
+  const script = new Uint8Array(await Bun.stdin.arrayBuffer());
+  const refused = directives(new TextDecoder().decode(script));
+  if (refused.length > 0) {
+    await pass(Bun.stdout, new TextEncoder().encode(JSON.stringify(refused)));
+    return 1;
+  }
+  for (const name of Object.keys(process.env)) {
+    if (name.toUpperCase() === OPTIONS_VARIABLE) {
+      Reflect.deleteProperty(process.env, name);
+    }
+  }
+  const child = Bun.spawnSync({
+    cmd: [shellcheck, ...args],
+    env: { ...process.env },
+    stdin: script,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  if (child.exitCode === null) {
+    throw new Error(`ShellCheck ended on ${child.signalCode ?? 'a signal'} rather than an exit code`);
+  }
+  await pass(Bun.stderr, child.stderr);
+  await pass(Bun.stdout, child.stdout);
+  return child.exitCode;
+}
+
+/** Writes `bytes` to `stream` unless there are none, since Bun fails an empty write to a Windows pipe. */
+async function pass(stream: typeof Bun.stdout, bytes: Uint8Array): Promise<void> {
+  if (bytes.length > 0) {
+    await Bun.write(stream, bytes);
+  }
+}
+
+try {
+  process.exitCode = await main();
+} catch (error: unknown) {
+  console.error(`the ShellCheck stand-in failed: ${error instanceof Error ? error.message : String(error)}`);
+  process.exitCode = 2;
+}
+
+// Bun 1.4.2 ends a file with no import or export before its read of stdin
+// settles, exit 0 with nothing printed, so the empty export makes this file a
+// module that waits on the await above.
+export {};

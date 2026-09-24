@@ -17,29 +17,39 @@
  * `.npmrc`, a tracked path under node_modules, a config a tool would read in
  * place of the one the gate names, a bunfig.toml that holds anything but the
  * install cooldown, anything that would steer how Bun resolves an import, a
- * changed config or ignore file a row reads, an inline waiver, or a root file
- * named like a program. Every row that walks the tree says how many files it
- * checked and fails when that is none.
+ * package patch, a manifest package node_modules lacks, a changed config or
+ * ignore file a row reads, an inline waiver, a workflow shell ShellCheck never
+ * reads, or a root file named like a program. Every row that walks the tree
+ * says how many files it checked and fails when that is none.
  */
 
 import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve as resolvePath, sep } from 'node:path';
+import { join, sep } from 'node:path';
 import { styleText } from 'node:util';
 // Every module imported here reads Bun and node: built-ins alone, so nothing
 // under node_modules loads before the preflight in main() refuses a planted
 // package. tools.ts imports zod and the format row imports prettier, so each
-// loads where a row needs it. github.ts takes every GitHub token out of the
+// loads where a row needs it, once the preflight found it in the checkout's
+// node_modules rather than a parent's. github.ts takes every GitHub token out of the
 // environment when it loads, before any row starts a process.
+import { EXPECTED_ZIZMOR_CONFIG } from './expected';
 import { githubToken } from './github';
+import {
+  comparable,
+  files,
+  ignoreCommentFindings,
+  inheritedCallFindings,
+  inheritedCalls,
+  testCount,
+  unreadSourceFinding,
+} from './rows';
 import { describe, type Finished, fold, quote, run } from './run';
 import {
   ESLINT_CONFIG,
-  isTable,
   PRETTIERIGNORE,
   PRETTIERRC,
-  quoteValue,
   startupFindings,
   TAPLO_CONFIG,
   trackedFindings,
@@ -52,6 +62,13 @@ const TOOL_TIMEOUT_MS = 300_000;
 
 /** The Bun running the gate, so every row runs the one `packageManager` pins. */
 const BUN = process.execPath;
+
+/**
+ * The flag every Bun a row starts gets first, so no env file on disk sets a
+ * variable inside a row's tool. Bun 1.4.2 honors it over all eight names it
+ * loads, in every mode.
+ */
+const NO_ENV_FILE = '--no-env-file';
 
 /**
  * The checkout's node_modules as an absolute path. The gate runs from the
@@ -68,7 +85,10 @@ const ARGUMENT_BUDGET = 24_000;
 
 // ShellCheck reads extra flags from SHELLCHECK_OPTS whatever actionlint's --norc
 // says, and one can exclude any finding, so no process the gate starts gets it.
+// Every Bun reads BUN_OPTIONS as arguments ahead of its own, where a test name
+// pattern hides tests from a count and a preload runs code inside a tool.
 delete process.env['SHELLCHECK_OPTS'];
+delete process.env['BUN_OPTIONS'];
 
 /** A row of the gate: its name, what it checks, and the check itself. */
 interface Row {
@@ -177,16 +197,12 @@ function batches(paths: readonly string[]): string[][] {
   return all;
 }
 
-/** `path` as an absolute path compared without regard to case where the filesystem ignores it. */
-function comparable(path: string): string {
-  const absolute = resolvePath(path);
-  return process.platform === 'win32' || process.platform === 'darwin' ? absolute.toLowerCase() : absolute;
-}
-
-/** How a count of files reads in a row's line. */
-function files(count: number): string {
-  return `${String(count)} ${count === 1 ? 'file' : 'files'}`;
-}
+/**
+ * The variables every bun test the gate starts gets. With CI set, bun test
+ * fails a file holding `test.only` rather than running that test alone and
+ * leaving the rest out of its count.
+ */
+const TEST_ENV: Readonly<Record<string, string>> = { CI: 'true' };
 
 /* ///// scripts:test ///// */
 
@@ -195,89 +211,11 @@ function files(count: number): string {
 // the real gh, git, mise or the network. The row reads bun test's own count,
 // and a failure prints the whole report.
 async function scriptsTest(): Promise<string> {
-  const finished = await run([BUN, 'test', './scripts/'], TOOL_TIMEOUT_MS);
+  const finished = await run([BUN, NO_ENV_FILE, 'test', './scripts/'], TOOL_TIMEOUT_MS, TEST_ENV);
   if (finished.exitCode !== 0) {
     throw new Error(`bun test ./scripts/ ${describe(finished)}`);
   }
-  const ran = /^Ran (\d+) tests? across (\d+) files?\./m.exec(`${finished.stdout}\n${finished.stderr}`);
-  const tests = Number(ran?.[1] ?? 0);
-  if (tests === 0) {
-    throw new Error(`bun test ./scripts/ ran no test, so the row checks nothing: ${describe(finished)}`);
-  }
-  return `${String(tests)} ${tests === 1 ? 'test' : 'tests'} across ${files(Number(ran?.[2] ?? 0))}`;
-}
-
-/* ///// Shell values ///// */
-
-/** The shells a workflow step may name: the two actionlint hands ShellCheck, and pwsh. */
-const HELD_SHELLS: readonly string[] = ['bash', 'sh', 'pwsh'];
-
-/** Each shell value a parsed workflow sets, with where: its defaults, each job's defaults, and each step. */
-function shellValues(workflow: Record<string, unknown>): { where: string; value: unknown }[] {
-  const values: { where: string; value: unknown }[] = [];
-  const fromDefaults = (holder: Record<string, unknown>, where: string): void => {
-    const defaults = holder['defaults'];
-    const run = isTable(defaults) ? defaults['run'] : undefined;
-    if (isTable(run) && Object.hasOwn(run, 'shell')) {
-      values.push({ where, value: run['shell'] });
-    }
-  };
-  fromDefaults(workflow, 'defaults.run');
-  const jobs = workflow['jobs'];
-  for (const [id, job] of Object.entries(isTable(jobs) ? jobs : {})) {
-    if (!isTable(job)) {
-      continue;
-    }
-    fromDefaults(job, `jobs.${id}.defaults.run`);
-    const steps = job['steps'];
-    for (const [index, step] of (Array.isArray(steps) ? (steps as unknown[]) : []).entries()) {
-      if (isTable(step) && Object.hasOwn(step, 'shell')) {
-        values.push({ where: `jobs.${id}.steps[${String(index)}]`, value: step['shell'] });
-      }
-    }
-  }
-  return values;
-}
-
-/**
- * Every shell a tracked workflow names outside {@link HELD_SHELLS}, as
- * findings.
- *
- * @remarks
- * actionlint hands ShellCheck a script only when its shell is bash or sh, or
- * starts with "bash " or "sh ", so a step naming `/bin/bash -e {0}` runs bash
- * with no ShellCheck at all. Each workflow is read as YAML, so an escaped or
- * aliased key reads as the key it decodes to. A file that does not parse is a
- * finding, since the parser here refuses some text actionlint's accepts.
- */
-async function shellFindings(): Promise<string[]> {
-  const found: string[] = [];
-  for (const path of await trackedFiles()) {
-    if (!fold(path).startsWith('.github/workflows/')) {
-      continue;
-    }
-    let parsed: unknown;
-    try {
-      parsed = Bun.YAML.parse(await Bun.file(path).text());
-    } catch (error: unknown) {
-      found.push(
-        `${quote(path)} does not parse as YAML here, so the shells it names are unknown: ${quote(error instanceof Error ? error.message : String(error))}`,
-      );
-      continue;
-    }
-    if (!isTable(parsed)) {
-      found.push(`${quote(path)} is not one YAML mapping, so the shells it names are unknown`);
-      continue;
-    }
-    for (const { where, value } of shellValues(parsed)) {
-      if (typeof value !== 'string' || !HELD_SHELLS.includes(value)) {
-        found.push(
-          `${quote(path)} ${where} sets shell ${quoteValue(value)}, and actionlint runs ShellCheck for bash and sh alone. Name bash, sh or pwsh`,
-        );
-      }
-    }
-  }
-  return found;
+  return testCount('bun test ./scripts/', finished);
 }
 
 /* ///// tools ///// */
@@ -311,7 +249,7 @@ async function typecheck(): Promise<string> {
     ['scripts', ['--project', 'scripts']],
   ] as const) {
     const finished = await run(
-      [BUN, join(PACKAGES, '@typescript/native/bin/tsc'), '--noEmit', '--listFiles', ...project],
+      [BUN, NO_ENV_FILE, join(PACKAGES, '@typescript/native/bin/tsc'), '--noEmit', '--listFiles', ...project],
       TOOL_TIMEOUT_MS,
     );
     const lines = finished.stdout.split(/\r?\n/);
@@ -332,13 +270,9 @@ async function typecheck(): Promise<string> {
       checked.add(comparable(line));
     }
   }
-  const unread = (await trackedFiles()).filter(
-    (path) => /\.[cm]?tsx?$/.test(fold(path)) && !checked.has(comparable(path)),
-  );
-  if (unread.length > 0) {
-    throw new Error(
-      `no project reads ${unread.map((path) => quote(path)).join(', ')}, so tsc checks none of ${unread.length === 1 ? 'it' : 'them'}. Add each to a project's include`,
-    );
+  const unread = unreadSourceFinding(await trackedFiles(), checked);
+  if (unread !== undefined) {
+    throw new Error(unread);
   }
   return `${files(counts[0] ?? 0)} and ${files(counts[1] ?? 0)}`;
 }
@@ -382,6 +316,7 @@ async function lint(): Promise<string> {
   const finished = await run(
     [
       BUN,
+      NO_ENV_FILE,
       join(PACKAGES, 'eslint/bin/eslint.js'),
       '--config',
       ESLINT_CONFIG,
@@ -443,9 +378,19 @@ async function format(): Promise<string> {
   if (checked.length === 0) {
     throw new Error('no tracked file is one Prettier formats, so the row checks nothing');
   }
+  // Prettier leaves the code after its ignore comment unformatted with no
+  // reason given, so the row refuses the comment in every file it checks.
+  const waived: string[] = [];
+  for (const path of checked) {
+    waived.push(...ignoreCommentFindings(path, await Bun.file(path).text()));
+  }
+  if (waived.length > 0) {
+    throw new Error(waived.join('\n'));
+  }
   for (const batch of batches(checked)) {
     await expectClean('prettier', [
       BUN,
+      NO_ENV_FILE,
       join(PACKAGES, 'prettier/bin/prettier.cjs'),
       '--check',
       '--config',
@@ -503,37 +448,74 @@ async function toml(): Promise<string> {
 
 /* ///// workflows ///// */
 
-// A workflow whose only finding belongs to ShellCheck. actionlint reads it
-// clean on its own and reports SC2086 over the unquoted expansion once
-// ShellCheck runs. actionlint exits 0 with ShellCheck absent, and no flag
-// changes that, so a clean run over the tree carries weight only after this
-// finding came back.
-const SHELLCHECK_CANARY = `name: canary
+/** A one-step workflow running `script`, for the canaries. */
+function canaryWorkflow(script: string): string {
+  return `name: canary
 on: push
 jobs:
   canary:
     runs-on: ubuntu-latest
     steps:
-      - run: echo $GITHUB_REF
+      - run: |
+          ${script.split('\n').join('\n          ')}
 `;
-const SHELLCHECK_FINDING = 'SC2086';
+}
+
+/**
+ * The two canaries, each a workflow and what actionlint must report over it.
+ * The first carries one ShellCheck finding and nothing else, and SC2086 comes
+ * back only when ShellCheck ran behind the stand-in. actionlint exits 0 when
+ * the program its flag names cannot start, so a clean run over the tree
+ * carries weight only after this finding came back. The second carries a
+ * directive turning that finding off, and the stand-in's refusal comes back
+ * only when actionlint started the stand-in rather than ShellCheck itself.
+ */
+const CANARIES: readonly { readonly name: string; readonly workflow: string; readonly expected: string }[] = [
+  { name: 'finding.yml', workflow: canaryWorkflow('echo $GITHUB_REF'), expected: 'SC2086' },
+  {
+    name: 'directive.yml',
+    workflow: canaryWorkflow('# shellcheck disable=SC2086\necho $GITHUB_REF'),
+    expected: 'A ShellCheck directive is refused',
+  },
+];
+
+/**
+ * `path` as one word of the command line actionlint splits `-shellcheck` into:
+ * forward slashes, single-quoted. actionlint drops the backslashes of an
+ * unquoted Windows path and then runs no ShellCheck at all.
+ *
+ * @throws When the path holds a single quote, which the quoting cannot carry
+ */
+function shellWord(path: string): string {
+  if (path.includes("'")) {
+    throw new Error(`${quote(path)} holds a single quote, so actionlint cannot be handed it as one word`);
+  }
+  return `'${path.replaceAll('\\', '/')}'`;
+}
 
 async function workflows(): Promise<string> {
   const actionlint = await binary('actionlint');
   const shellcheck = await binary('shellcheck');
-  // -pyflakes= because no Windows package manager ships pyflakes, and
-  // actionlint skips that pass without a word when it is missing.
-  const analyzers = [`-shellcheck=${shellcheck}`, '-pyflakes='];
+  // actionlint runs ShellCheck through scripts/shellcheck.ts, which refuses a
+  // directive in the script ShellCheck reads. -pyflakes= because no Windows
+  // package manager ships pyflakes, and actionlint skips that pass without a
+  // word when it is missing.
+  const standIn = [BUN, NO_ENV_FILE, join(import.meta.dir, 'shellcheck.ts'), shellcheck]
+    .map((path) => shellWord(path))
+    .join(' ');
+  const analyzers = [`-shellcheck=${standIn}`, '-pyflakes='];
 
   const dir = await mkdtemp(join(tmpdir(), 'actionlint-canary-'));
   try {
-    const canary = join(dir, 'canary.yml');
-    await Bun.write(canary, SHELLCHECK_CANARY);
-    const finished = await run([actionlint, ...analyzers, canary], TOOL_TIMEOUT_MS);
-    if (!finished.stdout.includes(SHELLCHECK_FINDING)) {
-      throw new Error(
-        `actionlint found no ${SHELLCHECK_FINDING} in a script that carries one, so ShellCheck never ran. It ${describe(finished)}. Check that ${shellcheck} starts`,
-      );
+    for (const canary of CANARIES) {
+      const path = join(dir, canary.name);
+      await Bun.write(path, canary.workflow);
+      const finished = await run([actionlint, ...analyzers, path], TOOL_TIMEOUT_MS);
+      if (finished.exitCode !== 1 || !finished.stdout.includes(canary.expected)) {
+        throw new Error(
+          `actionlint reported no ${quote(canary.expected)} over the ${canary.name} canary, so ShellCheck did not run behind scripts/shellcheck.ts. It ${describe(finished)}. Check that ${shellcheck} starts`,
+        );
+      }
     }
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -614,60 +596,17 @@ async function workflows(): Promise<string> {
 /** What a workflow that passes `secrets: inherit` may call: this repository's reusable workflows, by either path. */
 const INHERIT_CALLEES: readonly string[] = ['./.github/workflows/', 'zachthedev/.github/.github/workflows/'];
 
-/** One job zizmor reports passing `secrets: inherit`: its file, the line of its `uses:`, and what it calls. */
-interface InheritedCall {
-  readonly path: string;
-  readonly line: number;
-  readonly callee: string;
-}
-
 /**
- * The jobs in zizmor's JSON report that pass `secrets: inherit`, read from
- * each finding's primary location.
- *
- * @throws When the report is not the shape zizmor 1.30 prints
- */
-function inheritedCalls(report: unknown): InheritedCall[] {
-  if (!Array.isArray(report)) {
-    throw new Error('zizmor printed json that is not a list of findings');
-  }
-  const calls: InheritedCall[] = [];
-  for (const finding of report as unknown[]) {
-    const { ident, locations } = (finding ?? {}) as { ident?: unknown; locations?: unknown };
-    if (ident !== 'secrets-inherit') {
-      continue;
-    }
-    const primary = (Array.isArray(locations) ? (locations as unknown[]) : []).find(
-      (location) => (location as { symbolic?: { kind?: unknown } }).symbolic?.kind === 'Primary',
-    ) as
-      | {
-          symbolic?: { key?: { Local?: { verbatim_path?: unknown } } };
-          concrete?: { feature?: unknown; location?: { start_point?: { row?: unknown } } };
-        }
-      | undefined;
-    const path = primary?.symbolic?.key?.Local?.verbatim_path;
-    const row = primary?.concrete?.location?.start_point?.row;
-    const feature = primary?.concrete?.feature;
-    if (typeof path !== 'string' || typeof row !== 'number' || typeof feature !== 'string') {
-      throw new Error('zizmor reported a secrets-inherit finding with no primary file, line and callee');
-    }
-    calls.push({ path: path.replaceAll('\\', '/'), line: row + 1, callee: feature.replace(/^["']|["']$/g, '') });
-  }
-  return calls;
-}
-
-/**
- * How many jobs pass `secrets: inherit`, each held to {@link INHERIT_CALLEES}.
+ * How many jobs pass `secrets: inherit`, each held to {@link INHERIT_CALLEES},
+ * with a call in every file the held zizmor.yml waives.
  *
  * @remarks
- * A secrets-inherit waiver in .github/zizmor.yml binds to a file or a line,
- * not to the workflow a job calls, so pointing a waived job at another
- * repository keeps the waiver and hands that repository every secret. zizmor
- * runs with no config and `--no-ignores`, which drops inline ignore comments
- * too, so it reports every such job, waived or not. It exits 10 to 14 when it
- * reports findings.
+ * zizmor runs with no config and `--no-ignores`, which drops inline ignore
+ * comments too, so it reports every such job, waived or not. ZIZMOR_CONFIG
+ * would name a config against --no-config, so it is removed. zizmor exits 10
+ * to 14 when it reports findings.
  *
- * @throws When zizmor fails or a job calls anything else
+ * @throws When zizmor fails, a job calls anything else, or a waived file holds no call
  */
 async function inheritedCallsHeld(zizmor: string): Promise<number> {
   const finished = await run(
@@ -684,6 +623,7 @@ async function inheritedCallsHeld(zizmor: string): Promise<number> {
       '.github',
     ],
     TOOL_TIMEOUT_MS,
+    { ZIZMOR_CONFIG: undefined },
   );
   if (finished.exitCode !== 0 && (finished.exitCode < 10 || finished.exitCode > 14)) {
     throw new Error(`zizmor with no config ${describe(finished)}`);
@@ -695,16 +635,9 @@ async function inheritedCallsHeld(zizmor: string): Promise<number> {
     throw new Error(`zizmor with no config printed no json: ${describe(finished)}`);
   }
   const calls = inheritedCalls(report);
-  const stray = calls.filter((call) => !INHERIT_CALLEES.some((prefix) => call.callee.toLowerCase().startsWith(prefix)));
-  if (stray.length > 0) {
-    throw new Error(
-      stray
-        .map(
-          (call) =>
-            `${quote(call.path)} line ${String(call.line)} passes secrets: inherit to ${quote(call.callee)}. Only a reusable workflow of zachthedev/.github takes a caller's secrets`,
-        )
-        .join('\n'),
-    );
+  const refused = inheritedCallFindings(calls, INHERIT_CALLEES, EXPECTED_ZIZMOR_CONFIG.rules['secrets-inherit'].ignore);
+  if (refused.length > 0) {
+    throw new Error(refused.join('\n'));
   }
   return calls.length;
 }
@@ -722,7 +655,7 @@ async function renovate(): Promise<string> {
     // The validator exits 0 on a config it never validated, so the success
     // line is required beside the exit code.
     const finished = await run(
-      [BUN, join(PACKAGES, 'renovate', 'dist', 'config-validator.js'), '--strict', '--no-global', config],
+      [BUN, NO_ENV_FILE, join(PACKAGES, 'renovate', 'dist', 'config-validator.js'), '--strict', '--no-global', config],
       TOOL_TIMEOUT_MS,
     );
     const validated = `${finished.stdout}\n${finished.stderr}`.includes('Config validated successfully');
@@ -738,7 +671,8 @@ async function renovate(): Promise<string> {
 const rows: readonly Row[] = [
   {
     name: 'scripts:test',
-    checks: "bun test over the gate's own scripts/*.test.ts, every program they start a stand-in, counting the tests",
+    checks:
+      "bun test over the gate's own scripts/*.test.ts, every program they start a stand-in, counting the tests and failing when every one was skipped",
     check: scriptsTest,
   },
   {
@@ -760,7 +694,7 @@ const rows: readonly Row[] = [
   {
     name: 'format',
     checks:
-      'prettier --check over every tracked file Prettier formats, with .prettierrc and .prettierignore alone and no .editorconfig',
+      'prettier --check over every tracked file Prettier formats, with .prettierrc and .prettierignore alone and no .editorconfig, and no Prettier ignore comment in any of them',
     check: format,
   },
   {
@@ -771,7 +705,7 @@ const rows: readonly Row[] = [
   {
     name: 'workflows',
     checks:
-      'actionlint over every tracked workflow with ShellCheck proven present, then zizmor over .github with nothing ignored and each workflow proven audited, online when gh has a token and offline otherwise, then every job passing secrets: inherit held to a reusable workflow of zachthedev/.github',
+      'actionlint over every tracked workflow with ShellCheck behind a stand-in that refuses its directives, both proven by a canary, then zizmor over .github with nothing ignored and each workflow proven audited, online when gh has a token and offline otherwise, then every job passing secrets: inherit held to a reusable workflow of zachthedev/.github',
     check: workflows,
   },
   {
@@ -816,7 +750,7 @@ async function main(): Promise<number> {
   // stands in for what bun install would put there. So no row runs beside
   // any of them. This comes before any other process the gate starts, and a
   // single row run passes through it too.
-  const refused = [...(await trackedFindings()), ...(await startupFindings()), ...(await shellFindings())];
+  const refused = [...(await trackedFindings()), ...(await startupFindings())];
   if (refused.length > 0) {
     console.log(`  ${glyph(false)} ${'preflight'.padEnd(width)}  ${dim('no row ran')}`);
     console.log(`    ${refused.join('\n    ')}`);
