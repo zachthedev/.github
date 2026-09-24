@@ -4,7 +4,8 @@ How a `zachthedev` repository is set up, whatever stack it is in. A repository i
 checklist holds, or the repository records where it differs and why.
 
 **zachthedev is designed as an organization.** Nothing here depends on one person's machine or account
-configuration. A repository that moves to an organization keeps working.
+configuration. Converting the account keeps every workflow call, preset and default file, and Apps lists what else a
+conversion needs.
 
 **A row is hard or overridable.** A hard row holds in every repository. An overridable row can differ where the
 difference is deliberate and recorded at the drift site. The drift site is a comment in the file where the
@@ -399,7 +400,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Before changing an app, its key or its installation, list what uses it.
 - Converting the `zachthedev` account into an organization uninstalls every App, and it locks the crates.io owner
   out, because crates.io signs in through GitHub. Before any conversion, every published crate gains a second
-  named crates.io owner. After it, both Apps are reinstalled and Actions is re-enabled.
+  named crates.io owner. After it, both Apps are reinstalled, Actions is re-enabled, every `.github/CODEOWNERS`
+  names the owner's new personal account in place of `@zachthedev`, and the profile README is copied to
+  `.github/profile/README.md`. A code owner is an individual or a team, and after a conversion `@zachthedev` is
+  neither.
 - The publish job uploads and flips the draft with the job token, `GITHUB_TOKEN`, and no app credential. An event
   that token raises starts no workflow run, and the token carries no tag ruleset bypass into a job that handles a
   caller's build output.
@@ -1547,8 +1551,8 @@ bears on, the defect, and the condition that removes it.
 
 - This handbook, the reusable workflows, the Renovate presets and the community files under Files:
   `zachthedev/.github`.
-- The profile README: `zachthedev/zachthedev` while `zachthedev` is a personal account. `.github/profile/README.md`
-  is the organization mechanism, and it takes over when the account becomes one.
+- The profile README: `zachthedev/zachthedev`, the account's special repository, which the owner alone edits.
+  GitHub reads `.github/profile/README.md` only for an organization, so `.github` carries none.
 - The files a repository copies: its kickstart.
 - The per-repository alignment table: `REPOS.md`, local and gitignored, because it lists repositories that are
   private or not yet on GitHub.
