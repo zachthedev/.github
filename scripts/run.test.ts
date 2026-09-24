@@ -11,15 +11,8 @@ import { trackedFindings } from './startup';
 // seconds, so a case gets longer than the runner's five-second default.
 setDefaultTimeout(30_000);
 
-const DEADLINE_MS = 30_000;
-
-// A deadline case starts a stand-in that sleeps far past its deadline. The
-// deadline leaves the stand-in time to start, so the tree kill finds it, and
-// the wait must end well inside the ten seconds run() allows the output to
-// close after a kill, so the kill ended it rather than that grace.
-const KILLED_DEADLINE_MS = 3_000;
-const KILL_SLACK_MS = 5_000;
-const STAND_IN_SLEEP_MS = 25_000;
+/** How long the planted-program fixture's own bare spawn may take. */
+const PROBE_MS = 30_000;
 
 let standIns: StandIns;
 let restore: () => void;
@@ -91,13 +84,13 @@ function carrying(fragment: string): string {
 test('a name run() is not asked to change reaches the child unchanged', async () => {
   process.env['GATE_PASS'] = 'through';
 
-  await run([standIns.path('tool')], DEADLINE_MS);
+  await run([standIns.path('tool')]);
 
   expect(standIns.calls()[0]?.env['GATE_PASS']).toBe('through');
 });
 
 test('a name run() sets reaches the child at its value', async () => {
-  await run([standIns.path('tool')], DEADLINE_MS, { GATE_SET: 'set' });
+  await run([standIns.path('tool')], { GATE_SET: 'set' });
 
   expect(standIns.calls()[0]?.env['GATE_SET']).toBe('set');
 });
@@ -106,7 +99,7 @@ test('a name run() sets replaces every inherited spelling of it', async () => {
   process.env['gate_case'] = 'inherited';
   process.env['Gate_Case'] = 'inherited';
 
-  await run([standIns.path('tool')], DEADLINE_MS, { GATE_CASE: 'set' });
+  await run([standIns.path('tool')], { GATE_CASE: 'set' });
 
   const env = standIns.calls()[0]?.env ?? {};
   expect(spellings(env, 'GATE_CASE')).toEqual(['GATE_CASE']);
@@ -117,7 +110,7 @@ test('a name passed as undefined is absent from the child in every spelling', as
   process.env['gate_gone'] = 'inherited';
   process.env['GATE_GONE'] = 'inherited';
 
-  await run([standIns.path('tool')], DEADLINE_MS, { GATE_GONE: undefined });
+  await run([standIns.path('tool')], { GATE_GONE: undefined });
 
   expect(spellings(standIns.calls()[0]?.env ?? {}, 'GATE_GONE')).toEqual([]);
 });
@@ -125,7 +118,7 @@ test('a name passed as undefined is absent from the child in every spelling', as
 test('a process started with inherit false receives the variables given and none of the gate environment', async () => {
   process.env['GATE_PASS'] = 'through';
 
-  await run([standIns.path('tool')], DEADLINE_MS, { GATE_SET: 'set' }, { inherit: false });
+  await run([standIns.path('tool')], { GATE_SET: 'set' }, { inherit: false });
 
   const env = standIns.calls()[0]?.env ?? {};
   expect(env['GATE_SET']).toBe('set');
@@ -137,7 +130,7 @@ test("a child's PATH holds the gate's absolute entries outside the working direc
   mkdirSync(inside, { recursive: true });
   process.env['PATH'] = [inside, '.', '', standIns.dir].join(delimiter);
 
-  await run([standIns.path('tool')], DEADLINE_MS);
+  await run([standIns.path('tool')]);
 
   const env = standIns.calls()[0]?.env ?? {};
   const names = spellings(env, 'PATH');
@@ -150,30 +143,18 @@ test("a child's PATH holds the gate's absolute entries outside the working direc
 test('the exit code and stdout come back as the process left them', async () => {
   standIns.answer('tool', { stdout: 'printed', exitCode: 3 });
 
-  const finished = await run([standIns.path('tool')], DEADLINE_MS);
+  const finished = await run([standIns.path('tool')]);
 
-  expect(finished).toMatchObject({ exitCode: 3, stdout: 'printed', timedOut: false });
+  expect(finished).toMatchObject({ exitCode: 3, stdout: 'printed', heldOpen: false });
 });
 
 test('a program no PATH entry holds exits 127, saying which and that the working directory is never searched', async () => {
-  const finished = await run(['gate-absent-program'], DEADLINE_MS);
+  const finished = await run(['gate-absent-program']);
 
   expect(finished.exitCode).toBe(127);
   expect(finished.stderr).toContain('gate-absent-program');
   expect(finished.stderr).toContain('working directory is never searched');
   expect(started()).toEqual([]);
-});
-
-test('a process that outlives its deadline is killed, with timedOut and exit -1', async () => {
-  standIns.answer('tool', { sleepMs: STAND_IN_SLEEP_MS });
-  const begun = performance.now();
-
-  const finished = await run([standIns.path('tool')], KILLED_DEADLINE_MS);
-  const waited = performance.now() - begun;
-
-  expect(finished.timedOut).toBe(true);
-  expect(finished.exitCode).toBe(-1);
-  expect(waited).toBeLessThan(KILLED_DEADLINE_MS + KILL_SLACK_MS);
 });
 
 /* ///// The resolver ///// */
@@ -418,11 +399,11 @@ test.each(PLANTED_CASES)(
     // The fixture holds only when a bare spawn, with the variable that hides
     // the working directory absent as on a runner, starts the planted file.
     expect(spellings(process.env, 'NoDefaultCurrentDirectoryInExePath')).toEqual([]);
-    Bun.spawnSync({ cmd: [name, 'probe'], cwd, env: { ...process.env }, timeout: DEADLINE_MS });
+    Bun.spawnSync({ cmd: [name, 'probe'], cwd, env: { ...process.env }, timeout: PROBE_MS });
     expect(started()).toEqual([`planted-${name}`]);
     standIns.clear();
 
-    await run([name, 'probe'], DEADLINE_MS);
+    await run([name, 'probe']);
 
     expect(started()).toEqual([name]);
   },

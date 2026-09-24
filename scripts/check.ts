@@ -57,9 +57,6 @@ import {
   ZIZMOR_CONFIG,
 } from './startup';
 
-/** The deadline for one linter or formatter pass over the tree. */
-const TOOL_TIMEOUT_MS = 300_000;
-
 /** The Bun running the gate, so every row runs the one `packageManager` pins. */
 const BUN = process.execPath;
 
@@ -130,7 +127,7 @@ async function expectClean(
   cmd: readonly string[],
   env: Readonly<Record<string, string | undefined>> = {},
 ): Promise<Finished> {
-  const finished = await run(cmd, TOOL_TIMEOUT_MS, env);
+  const finished = await run(cmd, env);
   if (finished.exitCode !== 0) {
     throw new Error(`${label} ${describe(finished)}`);
   }
@@ -163,7 +160,7 @@ function gitEnv(): Readonly<Record<string, undefined>> {
  * checkout holds exactly these. A new file counts once it is added.
  */
 async function trackedFiles(...pathspecs: string[]): Promise<string[]> {
-  const finished = await run(['git', 'ls-files', '-z', '--', ...pathspecs], TOOL_TIMEOUT_MS, gitEnv());
+  const finished = await run(['git', 'ls-files', '-z', '--', ...pathspecs], gitEnv());
   if (finished.exitCode !== 0) {
     throw new Error(`git ls-files ${describe(finished)}`);
   }
@@ -211,7 +208,7 @@ const TEST_ENV: Readonly<Record<string, string>> = { CI: 'true' };
 // the real gh, git, mise or the network. The row reads bun test's own count,
 // and a failure prints the whole report.
 async function scriptsTest(): Promise<string> {
-  const finished = await run([BUN, NO_ENV_FILE, 'test', './scripts/'], TOOL_TIMEOUT_MS, TEST_ENV);
+  const finished = await run([BUN, NO_ENV_FILE, 'test', './scripts/'], TEST_ENV);
   if (finished.exitCode !== 0) {
     throw new Error(`bun test ./scripts/ ${describe(finished)}`);
   }
@@ -248,10 +245,14 @@ async function typecheck(): Promise<string> {
     ['eslint.config.ts', ['--project', TSCONFIG]],
     ['scripts', ['--project', 'scripts']],
   ] as const) {
-    const finished = await run(
-      [BUN, NO_ENV_FILE, join(PACKAGES, '@typescript/native/bin/tsc'), '--noEmit', '--listFiles', ...project],
-      TOOL_TIMEOUT_MS,
-    );
+    const finished = await run([
+      BUN,
+      NO_ENV_FILE,
+      join(PACKAGES, '@typescript/native/bin/tsc'),
+      '--noEmit',
+      '--listFiles',
+      ...project,
+    ]);
     const lines = finished.stdout.split(/\r?\n/);
     const listed = lines.filter((line) => isAbsolutePath(line));
     if (finished.exitCode !== 0) {
@@ -313,20 +314,17 @@ function isLintResult(value: unknown): value is LintResult {
 // and prints each problem itself. --config names the one config, so ESLint
 // runs no eslint.config.* nearer a file than the root.
 async function lint(): Promise<string> {
-  const finished = await run(
-    [
-      BUN,
-      NO_ENV_FILE,
-      join(PACKAGES, 'eslint/bin/eslint.js'),
-      '--config',
-      ESLINT_CONFIG,
-      '.',
-      '--max-warnings=0',
-      '--format',
-      'json',
-    ],
-    TOOL_TIMEOUT_MS,
-  );
+  const finished = await run([
+    BUN,
+    NO_ENV_FILE,
+    join(PACKAGES, 'eslint/bin/eslint.js'),
+    '--config',
+    ESLINT_CONFIG,
+    '.',
+    '--max-warnings=0',
+    '--format',
+    'json',
+  ]);
   let results: unknown;
   try {
     results = JSON.parse(finished.stdout);
@@ -510,7 +508,7 @@ async function workflows(): Promise<string> {
     for (const canary of CANARIES) {
       const path = join(dir, canary.name);
       await Bun.write(path, canary.workflow);
-      const finished = await run([actionlint, ...analyzers, path], TOOL_TIMEOUT_MS);
+      const finished = await run([actionlint, ...analyzers, path]);
       if (finished.exitCode !== 1 || !finished.stdout.includes(canary.expected)) {
         throw new Error(
           `actionlint reported no ${quote(canary.expected)} over the ${canary.name} canary, so ShellCheck did not run behind scripts/shellcheck.ts. It ${describe(finished)}. Check that ${shellcheck} starts`,
@@ -532,7 +530,7 @@ async function workflows(): Promise<string> {
     throw new Error('no workflow is tracked under .github/workflows, so the row checks nothing');
   }
   for (const batch of batches(workflowFiles)) {
-    const finished = await run([actionlint, '-verbose', ...analyzers, '--', ...batch], TOOL_TIMEOUT_MS);
+    const finished = await run([actionlint, '-verbose', ...analyzers, '--', ...batch]);
     const report = { ...finished, stderr: finished.stderr.replace(/^verbose:.*\r?\n?/gm, '') };
     if (finished.exitCode !== 0) {
       throw new Error(`actionlint ${describe(report)}`);
@@ -622,7 +620,6 @@ async function inheritedCallsHeld(zizmor: string): Promise<number> {
       '--collect=all',
       '.github',
     ],
-    TOOL_TIMEOUT_MS,
     { ZIZMOR_CONFIG: undefined },
   );
   if (finished.exitCode !== 0 && (finished.exitCode < 10 || finished.exitCode > 14)) {
@@ -654,10 +651,14 @@ async function renovate(): Promise<string> {
   for (const config of configs) {
     // The validator exits 0 on a config it never validated, so the success
     // line is required beside the exit code.
-    const finished = await run(
-      [BUN, NO_ENV_FILE, join(PACKAGES, 'renovate', 'dist', 'config-validator.js'), '--strict', '--no-global', config],
-      TOOL_TIMEOUT_MS,
-    );
+    const finished = await run([
+      BUN,
+      NO_ENV_FILE,
+      join(PACKAGES, 'renovate', 'dist', 'config-validator.js'),
+      '--strict',
+      '--no-global',
+      config,
+    ]);
     const validated = `${finished.stdout}\n${finished.stderr}`.includes('Config validated successfully');
     if (finished.exitCode !== 0 || !validated) {
       throw new Error(`renovate-config-validator over ${config} ${describe(finished)}`);

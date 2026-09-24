@@ -24,7 +24,7 @@ import {
   EXPECTED_ZIZMOR_CONFIG,
   OWN_PRETTIERIGNORE_PATTERNS,
 } from './expected';
-import { describe, fold, isProgramName, quote, run, treeKillProgram } from './run';
+import { describe, fold, isProgramName, quote, run } from './run';
 
 /** The file pinning a version for every tool mise installs. */
 export const PINS = 'mise.toml';
@@ -175,9 +175,6 @@ function parseJson(text: string): unknown {
 }
 
 /* ///// The tracked files ///// */
-
-/** The deadline for the one git call that lists the tracked files. */
-const GIT_TIMEOUT_MS = 60_000;
 
 /** How many tracked paths under node_modules a finding names before it counts the rest. */
 const NODE_MODULES_SHOWN = 5;
@@ -626,7 +623,7 @@ const GIT_ENVIRONMENT: Readonly<Record<string, string>> = {
 
 /** The paths one `git ls-files` call lists, split, or a finding when git fails. */
 async function listFiles(args: readonly string[], what: string): Promise<string[] | string> {
-  const listed = await run(['git', 'ls-files', '-z', ...args], GIT_TIMEOUT_MS, GIT_ENVIRONMENT, { inherit: false });
+  const listed = await run(['git', 'ls-files', '-z', ...args], GIT_ENVIRONMENT, { inherit: false });
   if (listed.exitCode !== 0) {
     return `git could not list the ${what} the gate refuses: it ${describe(listed)}`;
   }
@@ -644,9 +641,7 @@ async function listFiles(args: readonly string[], what: string): Promise<string[
  * instead.
  */
 async function topLevelFinding(): Promise<string | undefined> {
-  const finished = await run(['git', 'rev-parse', '--show-toplevel'], GIT_TIMEOUT_MS, GIT_ENVIRONMENT, {
-    inherit: false,
-  });
+  const finished = await run(['git', 'rev-parse', '--show-toplevel'], GIT_ENVIRONMENT, { inherit: false });
   const top = finished.stdout.trim();
   if (finished.exitCode !== 0 || top.length === 0) {
     return `git could not name the work tree it reads: it ${describe(finished)}`;
@@ -1172,24 +1167,12 @@ async function programFindings(): Promise<string[]> {
   return found;
 }
 
-/** A finding when the system holds no program the tree kill runs, since a row past its deadline then leaves its tool's processes running. */
-function treeKillFindings(): string[] {
-  if (treeKillProgram() !== undefined) {
-    return [];
-  }
-  return [
-    process.platform === 'win32'
-      ? "Windows' System32 directory holds no taskkill.exe, so a row past its deadline cannot end the processes its tool started"
-      : 'neither /bin/ps nor /usr/bin/ps exists, so a row past its deadline cannot end the processes its tool started',
-  ];
-}
-
 /**
  * Every way the files Bun and the gate's tools read before they run differ
  * from what the gate expects, as findings: {@link BUNFIG}, what resolves the
  * gate's own imports, a package the manifest names that node_modules lacks,
- * the configs and ignore files the rows and hooks read, a root file named
- * like a program, and a system with no program for the tree kill.
+ * the configs and ignore files the rows and hooks read, and a root file named
+ * like a program.
  *
  * @remarks
  * The gate calls this before any row, because Bun honored its files before
@@ -1250,6 +1233,5 @@ export async function startupFindings(): Promise<string[]> {
       decides: 'commitlint runs it as a module, and it decides which commit messages pass',
     })),
     ...(await programFindings()),
-    ...treeKillFindings(),
   ];
 }

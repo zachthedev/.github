@@ -222,18 +222,3 @@ test('a missing gh is no token', async () => {
   expect(await githubToken(absent, { GH_TOKEN: undefined, GITHUB_TOKEN: undefined })).toBeUndefined();
   expect(standIns.calls()).toEqual([]);
 });
-
-test('a gh that outlives the deadline is no token, and the deadline ends the wait', async () => {
-  // The deadline leaves the stand-in time to start, so the tree kill finds it,
-  // and the wait ends well inside the ten seconds run() allows the output to
-  // close after a kill, long before the stand-in would answer.
-  const deadlineMs = 3_000;
-  standIns.answer('gh', { stdout: 'late-token\n', sleepMs: 25_000 });
-  const started = performance.now();
-
-  const token = await githubToken(standIns.path('gh'), { GH_TOKEN: undefined, GITHUB_TOKEN: undefined }, deadlineMs);
-  const waited = performance.now() - started;
-
-  expect(token).toBeUndefined();
-  expect(waited).toBeLessThan(deadlineMs + 5_000);
-});

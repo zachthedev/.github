@@ -1,4 +1,3 @@
-import { dlopen, FFIType, ptr } from 'bun:ffi';
 import { accessSync, constants, realpathSync, statSync } from 'node:fs';
 import { delimiter, extname, isAbsolute, join, sep } from 'node:path';
 
@@ -179,31 +178,23 @@ export function resolveProgram(program: string): string | undefined {
  */
 export interface Finished {
   /**
-   * The exit code, or -1 when the process was killed at its deadline or a
-   * process it started held its output open after it exited.
+   * The exit code, or -1 when a process it started held its output open after
+   * it exited.
    */
   readonly exitCode: number;
   /** Standard output, decoded as UTF-8. */
   readonly stdout: string;
   /** Standard error, decoded as UTF-8. */
   readonly stderr: string;
-  /** True when the process ran past `timeoutMs` and was killed. */
-  readonly timedOut: boolean;
   /**
    * True when the process exited and a process it started still held its
-   * output open {@link KILL_GRACE_MS} later, so what it printed may be cut
-   * short.
+   * output open {@link DRAIN_MS} later, so what it printed may be cut short.
    */
   readonly heldOpen: boolean;
 }
 
-/** How {@link run} starts a process, beyond its command, deadline and variables. */
+/** How {@link run} starts a process, beyond its command and variables. */
 export interface RunOptions {
-  /**
-   * When true the process writes to the gate's own stdout and stderr, so a
-   * report it prints reaches the log, and the captured streams are empty.
-   */
-  readonly show?: boolean;
   /**
    * When false the process starts with the given variables alone and
    * inherits nothing from the gate's environment.
@@ -225,112 +216,12 @@ export const PROXY_NAMES: readonly string[] = [
   'no_proxy',
 ];
 
-/**
- * How long the tree kill, and the reads after it, may take once a deadline
- * passes, and how long a process's output may stay open after it exits.
- */
-const KILL_GRACE_MS = 10_000;
-
-/** Windows' System32 directory, read from the system rather than the environment, or undefined when it reports none. */
-function systemDirectory(): string | undefined {
-  const kernel32 = dlopen('kernel32.dll', {
-    GetSystemDirectoryW: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.u32 },
-  });
-  try {
-    const buffer = Buffer.alloc(2 * 1024);
-    const length = kernel32.symbols.GetSystemDirectoryW(ptr(buffer), 1024);
-    return length === 0 || length > 1024 ? undefined : buffer.toString('utf16le', 0, length * 2);
-  } finally {
-    kernel32.close();
-  }
-}
+/** How long a process's output may stay open after it exits, since a process it started can hold it. */
+const DRAIN_MS = 10_000;
 
 /**
- * The system program the tree kill runs: `taskkill.exe` in Windows' System32,
- * or `ps` in /bin or /usr/bin elsewhere. Undefined when the system holds none.
- *
- * @remarks
- * It is found without PATH, so a gate or test started with a narrowed PATH
- * still reaches it, and no PATH entry or variable puts another program in its
- * place.
- */
-export function treeKillProgram(): string | undefined {
-  if (process.platform !== 'win32') {
-    return ['/bin/ps', '/usr/bin/ps'].find((candidate) => isRunnable(candidate));
-  }
-  const directory = systemDirectory();
-  const taskkill = directory === undefined ? undefined : join(directory, 'taskkill.exe');
-  return taskkill !== undefined && isRunnable(taskkill) ? taskkill : undefined;
-}
-
-/**
- * Kills `child`, which is still running, and every process it started, at a
- * deadline.
- *
- * @remarks
- * A tool can start processes of its own, as actionlint starts ShellCheck and
- * tsc's launcher starts the compiler, and killing the tool alone leaves them
- * running with no parent. Windows walks the tree with `taskkill /T`. POSIX
- * has no such command, so the tree comes from one `ps` listing of every
- * process and its parent. Either way the tree is read once, so a process
- * started after that read is missed. A process group would need a new
- * session, and a child in its own session never sees the Ctrl-C that stops
- * the gate. The child itself dies through Bun's handle, which ends nothing
- * once it exited, and it dies first, so it starts no process after the
- * listing. {@link treeKillProgram} names the program, and the preflight
- * refuses to run without one.
- */
-function killTree(child: ReturnType<typeof Bun.spawn>): void {
-  const descendants: number[] = [];
-  const program = treeKillProgram();
-  if (process.platform === 'win32') {
-    if (program !== undefined) {
-      Bun.spawnSync({
-        cmd: [program, '/T', '/F', '/PID', String(child.pid)],
-        stdout: 'ignore',
-        stderr: 'ignore',
-        timeout: KILL_GRACE_MS,
-      });
-    }
-  } else {
-    if (program !== undefined) {
-      const listed = Bun.spawnSync({
-        cmd: [program, '-A', '-o', 'pid=', '-o', 'ppid='],
-        stdout: 'pipe',
-        stderr: 'ignore',
-        timeout: KILL_GRACE_MS,
-      });
-      const children = new Map<number, number[]>();
-      for (const line of listed.stdout.toString().split('\n')) {
-        const fields = line.trim().split(/\s+/);
-        const pid = Number(fields[0]);
-        const parent = Number(fields[1]);
-        if (fields.length === 2 && Number.isInteger(pid) && Number.isInteger(parent)) {
-          children.set(parent, [...(children.get(parent) ?? []), pid]);
-        }
-      }
-      const tree = [child.pid];
-      // An array's iterator reads its length on every step, so the loop walks what it appends.
-      for (const member of tree) {
-        tree.push(...(children.get(member) ?? []).filter((pid) => !tree.includes(pid)));
-      }
-      descendants.push(...tree.slice(1));
-    }
-  }
-  child.kill('SIGKILL');
-  for (const pid of descendants) {
-    try {
-      process.kill(pid, 'SIGKILL');
-    } catch {
-      // Already gone: it ended with the child or on its own.
-    }
-  }
-}
-
-/**
- * Everything `stream` carries, decoded as UTF-8, or nothing when the process
- * writes to the gate's own streams. The read stops when `stop` settles, so a
- * process left holding a pipe open cannot hold the gate.
+ * Everything `stream` carries, decoded as UTF-8. The read stops when `stop`
+ * settles, so a process left holding a pipe open cannot hold the gate.
  */
 async function readAll(stream: unknown, stop: Promise<void>): Promise<string> {
   if (!(stream instanceof ReadableStream)) {
@@ -357,13 +248,11 @@ async function readAll(stream: unknown, stop: Promise<void>): Promise<string> {
  * Runs one command to completion with its output captured.
  *
  * @remarks
- * Every process the gate starts goes through here, so every one carries a
- * deadline. A tool that hangs is a red row, not a hung gate. At the deadline
- * a process still running is killed with every process it started. A process
- * that already exited is never killed by its pid, which the system is free to
- * give another process. When a process it started still holds its output
- * {@link KILL_GRACE_MS} after it exited, the run fails, and that process runs
- * on, since nothing Bun offers reaches a process whose parent is gone.
+ * Every process the gate starts goes through here. No row carries a deadline:
+ * the CI job's timeout-minutes bounds the gate, and Ctrl-C ends a local run.
+ * When a process it started still holds its output {@link DRAIN_MS} after it
+ * exited, the run fails, and that process runs on, since nothing Bun offers
+ * reaches a process whose parent is gone.
  *
  * The program starts from the path {@link resolveProgram} finds, never from
  * the working directory. A program no absolute PATH entry holds is a failed
@@ -375,7 +264,6 @@ async function readAll(stream: unknown, stop: Promise<void>): Promise<string> {
  * gate can read.
  *
  * @param cmd - The program and its arguments, the program first
- * @param timeoutMs - The deadline, after which the process is killed
  * @param env - Variables added to the gate's own environment for this process,
  * or its whole environment when `options.inherit` is false. Each replaces
  * every inherited spelling of its name, because Windows reads a name without
@@ -385,11 +273,9 @@ async function readAll(stream: unknown, stop: Promise<void>): Promise<string> {
  */
 export async function run(
   cmd: readonly string[],
-  timeoutMs: number,
   env: Readonly<Record<string, string | undefined>> = {},
   options: RunOptions = {},
 ): Promise<Finished> {
-  const show = options.show === true;
   const replaced = new Set(Object.keys(env).map((name) => name.toUpperCase()));
   const merged: Record<string, string> = {};
   if (options.inherit !== false) {
@@ -427,7 +313,6 @@ export async function run(
       exitCode: 127,
       stdout: '',
       stderr: `${program}: no absolute PATH entry holds it, and the working directory is never searched`,
-      timedOut: false,
       heldOpen: false,
     };
   }
@@ -438,48 +323,33 @@ export async function run(
       cwd: process.cwd(),
       env: merged,
       stdin: 'ignore',
-      stdout: show ? 'inherit' : 'pipe',
-      stderr: show ? 'inherit' : 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    return { exitCode: 127, stdout: '', stderr: `${program}: ${message}`, timedOut: false, heldOpen: false };
+    return { exitCode: 127, stdout: '', stderr: `${program}: ${message}`, heldOpen: false };
   }
-  let timedOut = false;
   let heldOpen = false;
-  let exited = false;
   let settled = false;
   let stopReading: () => void = () => undefined;
   const stopped = new Promise<void>((resolve) => {
     stopReading = resolve;
   });
-  let grace: ReturnType<typeof setTimeout> | undefined;
   let drain: ReturnType<typeof setTimeout> | undefined;
   void child.exited.then(() => {
-    exited = true;
     if (!settled) {
       drain = setTimeout(() => {
         heldOpen = true;
         stopReading();
-      }, KILL_GRACE_MS);
+      }, DRAIN_MS);
     }
   });
-  const deadline = setTimeout(() => {
-    // An exited child's pid can belong to another process by now, and the drain above ends the reads.
-    if (exited) {
-      return;
-    }
-    timedOut = true;
-    killTree(child);
-    grace = setTimeout(stopReading, KILL_GRACE_MS);
-  }, timeoutMs);
   const [stdout, stderr] = await Promise.all([readAll(child.stdout, stopped), readAll(child.stderr, stopped)]);
   const exitCode = await Promise.race([child.exited, stopped.then(() => -1)]);
   settled = true;
-  clearTimeout(deadline);
-  clearTimeout(grace);
   clearTimeout(drain);
-  return { exitCode: timedOut || heldOpen ? -1 : exitCode, stdout, stderr, timedOut, heldOpen };
+  return { exitCode: heldOpen ? -1 : exitCode, stdout, stderr, heldOpen };
 }
 
 /**
@@ -488,10 +358,8 @@ export async function run(
  */
 export function describe(finished: Finished): string {
   const printed: string = [finished.stdout, finished.stderr].join('\n').trim();
-  const ending: string = finished.timedOut
-    ? 'was killed at its deadline'
-    : finished.heldOpen
-      ? `exited, and a process it started still held its output ${String(KILL_GRACE_MS / 1000)} s later and runs on, so its output may be cut short. Find and end that process`
-      : `exited ${String(finished.exitCode)}`;
+  const ending: string = finished.heldOpen
+    ? `exited, and a process it started still held its output ${String(DRAIN_MS / 1000)} s later and runs on, so its output may be cut short. Find and end that process`
+    : `exited ${String(finished.exitCode)}`;
   return `${ending} saying: ${printed.length === 0 ? 'nothing' : printed}`;
 }

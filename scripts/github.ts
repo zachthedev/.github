@@ -26,9 +26,6 @@ export const TOKEN_NAMES: readonly string[] = [
   'GITHUB_API_TOKEN',
 ];
 
-/** The deadline for `gh auth token`, past which the gate reads gh as holding no token. */
-export const GH_TIMEOUT_MS = 5_000;
-
 /**
  * Takes every {@link TOKEN_NAMES} name out of `environment`, in every spelling,
  * and returns gh's own two as `environment` held them.
@@ -55,20 +52,17 @@ export const GH_ENVIRONMENT: Readonly<Record<string, string | undefined>> = take
 
 /**
  * The token `gh auth token` answers with, for zizmor's online audits, or none.
- * A gh that is missing, fails, prints nothing or outlives `timeoutMs` reads as
- * no token.
+ * A gh that is missing, fails or prints nothing reads as no token.
  *
  * @param gh - The gh to ask, found as run() finds any program. The gate passes
  * `gh`. A test passes the path of a stand-in, so it can never reach a real gh
  * @param environment - gh's own token names, handed to gh alone
- * @param timeoutMs - How long gh may take to answer
  */
 export async function githubToken(
   gh: string,
   environment: Readonly<Record<string, string | undefined>> = GH_ENVIRONMENT,
-  timeoutMs: number = GH_TIMEOUT_MS,
 ): Promise<string | undefined> {
-  const printed = await run([gh, 'auth', 'token'], timeoutMs, environment);
+  const printed = await run([gh, 'auth', 'token'], environment);
   const found = printed.stdout.trim();
   return printed.exitCode === 0 && found.length > 0 ? found : undefined;
 }

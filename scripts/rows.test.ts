@@ -19,7 +19,7 @@ function carrying(fragment: string): string {
 
 /** A bun test run that exited 0 printing `summary` on stderr, where bun test prints it. */
 function ended(summary: string): Finished {
-  return { exitCode: 0, stdout: '', stderr: summary, timedOut: false, heldOpen: false };
+  return { exitCode: 0, stdout: '', stderr: summary, heldOpen: false };
 }
 
 interface CountCase {
