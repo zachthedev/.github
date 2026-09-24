@@ -513,9 +513,13 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     otherwise redirect the gate's imports;
   - a tracked `.npmrc` at any depth, because it redirects even the frozen, script-free install. An untracked one
     holds personal credentials and changes no row, so it passes;
-  - a package the root `package.json` names that the checkout's `node_modules` lacks, or holds through a link out
-    of the checkout, because Bun then loads a parent directory's copy.
+  - a package `bun.lock` installs for the platform that the checkout's `node_modules` lacks at its lockfile path,
+    or holds through a link out of the checkout, because Bun then loads a parent directory's copy. That covers
+    every locked package, not only the manifest's names, since a missing optional one, such as the platform's
+    compiler, resolves from a parent directory too.
 - Those checks import only built-in modules, so no package loads before they pass.
+- A Bun gate's ESLint refuses an import attribute other than `type: 'json'`. Bun runs any file as a module under
+  `with { type: 'js' }`, a `.txt` included, and no row reads such a file.
 - Every gate refuses a `patchedDependencies` key in any tracked `package.json`. A patch rewrites a pinned
   package's code under a frozen, script-free install and passes the lockfile's integrity check. A scope as narrow
   as the gate's own imports misses lint configs and tools.
@@ -574,7 +578,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     that marks every test explicit exits 0 with every test skipped. A runner config that can skip or filter tests
     falls under the tool config search above, in every stack.
   - A Bun test row runs with `CI=true`, so a file holding `test.only` fails the row, where it would otherwise run
-    that test alone and leave the rest out of the count.
+    that test alone and leave the rest out of the count. The row reads bun test's summary from stderr alone, the
+    last block, since a test's own output goes to stdout and can print a line shaped like a summary.
   - A row that parses tool output strips ANSI CSI sequences before it matches, and the gate hands every child
     `NO_COLOR=1`. A summary colored on the runner alone turned a gate red there.
   - A row's printed sentence escapes control characters in anything it quotes.
@@ -617,7 +622,13 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - The flag's value is single-quoted with forward slashes. An unquoted Windows backslash path turns the rule off
     with no error.
   - The shared job's stand-in comes from `.github`'s own pinned workflow text, never from the caller's checkout.
-  - A stand-in writes nothing to stdout until it has read its input whole and ShellCheck has exited.
+  - A stand-in writes nothing to stdout until it has read its input whole and ShellCheck has exited. One that
+    writes ShellCheck's stdout and then fails leaves `[]` beside its exit 2, and actionlint reads `[]` as a clean
+    script.
+  - Every gate and the shared job refuse a root entry named `'`, a single quote, tracked or on disk. actionlint
+    looks the whole `-shellcheck` value up as one program path before it splits the words, so on Linux and macOS a
+    value starting `'/` reads as a relative path under that directory. A file there runs in place of the stand-in
+    and answers both canaries.
 - Every gate and the shared `workflows` job refuse a `shell:` value, on a step or under `defaults.run`, other than
   `bash`, `sh` or `pwsh`. actionlint runs ShellCheck for bash and sh alone, so a custom shell such as
   `/bin/bash -e {0}` runs bash unchecked.
