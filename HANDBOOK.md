@@ -475,7 +475,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The refusals keep such a file off the default branch. They cannot stop the first local run of an unread branch:
   a `bunfig.toml` preload, a `paths` redirect in the gate's own `scripts/tsconfig.json` or a Task `dotenv` runs
   before any row does. Under `bunx --bun` a preload also runs before each commit hook's tool and in any script
-  that calls it. `eslint.config.ts` and `commitlint.config.js` are code the rows run by design.
+  that calls it. `eslint.config.ts` and `commitlint.config.js` run as code in a gate only in the form its
+  constant holds (below).
 - A Bun gate refuses a tracked env file Bun loads on its own, `.env` and its variants, because Bun loads it into
   the gate's environment (Known defects). The names match without regard to case. A template such as
   `.env.example` passes.
@@ -511,9 +512,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every ignore file a row reads, such as `.prettierignore` and the excludes in `.taplo.toml`, is compared whole
   against a constant in that repository's gate. A change to what a row skips is then a gate change a reviewer
   sees.
-  - A lint config that carries exclusions or the linter list, such as `.golangci.yml` or an `eslint.config.ts`
-    with `ignores`, is compared whole the same way, because a change to it narrows what the row checks. Changing
-    one means changing the constant in the gate beside it, which a reviewer sees.
+  - A lint config that carries exclusions, rules or the linter list is compared whole too: `.golangci.yml`, an
+    `eslint.config.ts` with `ignores` and `commitlint.config.js`. A change to one narrows what its tool checks.
+    The preflight compares each before any row, as it does `.prettierrc`, so a changed config is refused before
+    its tool loads it. Changing one means changing the constant in the gate beside it, which a reviewer sees.
 - `.github/zizmor.yml` is compared whole against a constant in that repository's gate as well, because it can
   disable an audit. A waiver is then a gate change a reviewer sees.
 - The gate refuses a committed `.github/actionlint.yaml`, because its `paths` block can silence every finding. A
