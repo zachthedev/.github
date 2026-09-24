@@ -11,6 +11,9 @@ difference is deliberate and recorded at the drift site. The drift site is a com
 deviation is made, beside the deviating line. Where that file has no comment syntax, the row names the file that
 carries the record. A hard row can carry a setting the repository chooses, and its section names it.
 
+**Every rule targets the finished repository, and a gap a repository cannot close yet is a declaration in its gate
+that fails once the gap closes.**
+
 **The kickstart templates are the source of truth for files.** This handbook states the rules. Each kickstart
 holds the files that satisfy them for its stack.
 
@@ -597,17 +600,32 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `--config` never reaches it.
 - Every row that walks the tree prints what it checked, the files or their count, and fails on zero. A row that
   checked nothing reads green otherwise: taplo and Prettier each exit 0 on empty input.
-  - A test row also fails when every test it counted was skipped. Under Microsoft.Testing.Platform, a runner config
-    that marks every test explicit exits 0 with every test skipped. A runner config that can skip or filter tests
-    falls under the tool config search above, in every stack.
+  - A test row fails on zero, on every test skipped, and on a filtered run. Where the runner reports a filter as a
+    skip, as vitest and Microsoft.Testing.Platform do, the row fails on any skip beyond an allowance the gate
+    declares, 0 by default. A platform-only skip is declared the same way.
+  - Under Microsoft.Testing.Platform, a runner config that marks every test explicit exits 0 with every test
+    skipped. A runner config that can skip or filter tests falls under the tool config search above, in every
+    stack.
+  - The Rust doctests row is that rule's Rust form. It counts examples from every `test result:` line, and fails on
+    zero, on any example filtered out, on every example ignored, and on a `Doc-tests` header with no result block.
+    `cargo test --doc` exits 0 on each, and it has no stable machine format.
+  - The doctests row's one allowance is a declared zero: a constant beside the step table, which itself fails once
+    the row counts an example, so it leaves in the pull request that adds the first one. A `rust-app` with no
+    library target declares zero, and the row skips the cargo call, since `cargo test --doc` exits 101 there.
+  - The doctests row withholds `RUSTDOCFLAGS`, `CARGO_BUILD_RUSTDOCFLAGS` and `CARGO_ENCODED_RUSTDOCFLAGS`. Each
+    can pass `--test-args` that filters or lists every example while the row stays green. The count catches the
+    same filter set through `build.rustdocflags`.
   - A Bun test row runs with `CI=true`, so a file holding `test.only` fails the row, where it would otherwise run
     that test alone and leave the rest out of the count. The row reads bun test's summary from stderr alone, the
     last block, since a test's own output goes to stdout and can print a line shaped like a summary.
   - A row that parses tool output strips ANSI CSI sequences before it matches, and the gate hands every child
     `NO_COLOR=1`. A summary colored on the runner alone turned a gate red there.
   - A row's printed sentence escapes control characters in anything it quotes.
-- A row that runs repository code, such as tests or a generator, never runs ahead of a row that reads a config
-  that code could write, unless the tree rules run again before each later row.
+- Rows that only read files run first, then rows that run repository code, and the preflight or tree rules run
+  again after each code row, because repository code can write any file a later row reads. A code row is any row
+  that loads repository code: ESLint's config, a test runner, clippy, which builds build scripts and proc macros,
+  and `wrangler types`, which runs `wrangler.jsonc`'s `build.command`. The Rust order is the example: fmt, taplo,
+  deny, machete, prettier, actionlint, zizmor, tsc, then tools, clippy, tests, doctests, doc.
   - The actionlint row hands actionlint the workflow files by name. With no file argument actionlint also needs a
     `.git`, so it fails in an archive copy of the tree.
   - The actionlint and zizmor rows fail unless every file they handed over appears in the tool's own per-file
@@ -696,6 +714,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     `.cargo/config.toml` is the one checkout config cargo reads. cargo has no named form, so a config above the
     checkout or in `CARGO_HOME` is a named residual, the one such read in a Rust gate.
   - The gate refuses a `rust-toolchain` or `rust-toolchain.toml` anywhere but the root `rust-toolchain.toml`.
+  - The doctests row follows the test-row rule above.
 - A test or script that spawns git drops every inherited `GIT_*` variable for that process and names the
   repository with `-C <root>`. git exports `GIT_DIR` and `GIT_INDEX_FILE` to a hook, so a gate the hook runs
   otherwise writes into the hook's own repository.
