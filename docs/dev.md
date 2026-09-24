@@ -5,8 +5,8 @@
 - [Bun](https://bun.sh), at the version `packageManager` in `package.json` names.
 - [mise](https://mise.jdx.dev). It installs the tools `mise.toml` pins at the versions `mise.lock` records.
 - [git](https://git-scm.com). The gate starts it to list the tracked files it refuses.
-- [gh](https://cli.github.com), optional. When `gh auth token` succeeds, the gate runs zizmor online; otherwise
-  zizmor runs offline and no token is needed.
+- [gh](https://cli.github.com), optional. When `gh auth token` answers within five seconds, the gate runs zizmor
+  online. Otherwise zizmor runs offline and no token is needed.
 
 ## First run
 
