@@ -110,6 +110,7 @@ command. A row that a section owns names that section.
 | `mise.toml`, `mise.lock`                   | shape     | Tools                                                                                                                                                                    |
 | `mise.semver.toml`, `mise.semver.lock`     | shape     | `rust-crates` and `rust-app` alone, Releases                                                                                                                             |
 | `.cargo/config.toml`                       | shape     | `rust-crates` and `rust-app` alone, the `xtask` alias under Gate, the cooldown under Updates                                                                             |
+| `clippy.toml`                              | shape     | `rust-crates` and `rust-app` alone, comments only, so clippy stops its search at the root (Gate)                                                                         |
 | `.github/CODEOWNERS`                       | identical | one comment line plus `* @zachthedev`                                                                                                                                    |
 | `.github/PULL_REQUEST_TEMPLATE.md`         | shape     |                                                                                                                                                                          |
 | `.github/ISSUE_TEMPLATE/config.yml`        | shape     | `blank_issues_enabled: false` plus the contact links                                                                                                                     |
@@ -440,6 +441,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   recorded at the drift site, a comment beside the matrix in `ci.yml`.
 - A local run proves one operating system, and CI proves the others. A template therefore runs its first CI
   before it is called done.
+- An expectation that branches on the platform, such as a `cfg!` branch in a Rust test or a `cfg_attr` `expect`,
+  is unverified until the CI leg for that platform runs. Each branch is derived from the function's contract, never
+  from reasoning about the host. Two such faults passed a Windows gate and failed on Linux and macOS.
 - No gate row resolves a tool from the machine's `PATH`. The programs the gate expects on `PATH` are the
   prerequisites `docs/dev.md` names.
 - No gate, hook or shared job starts a tool on a `node` from `PATH`, and none starts one through `bunx`. Every
@@ -569,8 +573,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   named form stops every read that tool makes. Each tool below has that measurement, and keeps a refusal only for
   the exception measured beside it:
   - Prettier: `--config .prettierrc` stops every other config search. It still reads a nested `.editorconfig`, so
-    every Prettier run passes `--no-editorconfig` (Formatting), or the gate refuses a nested one. A plugin the
-    named `.prettierrc` lists is config content under `CODEOWNERS`.
+    every Prettier run passes `--no-editorconfig` (Formatting), or the gate refuses a nested one. What the named
+    `.prettierrc` may hold is under Formatting.
   - commitlint: `--config commitlint.config.js` stops `.commitlintrc*`, the other `commitlint.config.*` names,
     `package.yaml` and the `package.json` key. cosmiconfig still builds its meta config from the root `.config`,
     which stays refused.
@@ -579,8 +583,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     flags, with no exception.
   - rustfmt reads a `rustfmt.toml` or `.rustfmt.toml` at any depth, in any case and above the checkout. The row
     runs `cargo fmt --check -- --config-path rustfmt.toml`, which stops every one of those reads.
-  - clippy reads a `clippy.toml` or `.clippy.toml` from a crate's directory, the workspace root and above the
-    checkout, and it takes no config flag. `CLIPPY_CONF_DIR=<absolute root>` names it and stops the rest.
+  - clippy reads a `clippy.toml` or `.clippy.toml` and takes no config flag. It searches from each crate's
+    directory, or from `CLIPPY_CONF_DIR` where that is set, and walks upward until it finds one, so a config above
+    the checkout reached the gate. The row sets `CLIPPY_CONF_DIR=<absolute root>`. Each Rust repository commits a
+    root `clippy.toml` holding comments alone, which ends the walk at the root, and the gate refuses `.clippy.toml`,
+    the other name clippy reads there.
   - cargo-deny reads the nearest `deny.toml`, `.deny.toml` or `.cargo/deny.toml`. The row passes
     `--config deny.toml`, a global flag that goes ahead of `check`, and it stops the rest.
 - A gate that calls Prettier's `getFileInfo` passes `resolveConfig: false`. The API otherwise resolves the nearest
@@ -941,8 +948,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `.prettierignore` too.
 - Every `.prettierignore` pattern is anchored to the root, with a leading slash where it has no other, so it
   cannot hide a same-named file deeper in the tree.
-- A Prettier config can name a plugin, and Prettier loads it before it checks anything, so `.prettierrc` is gate
-  config under `CODEOWNERS` (Gate).
+- A Prettier config can name a plugin or a shared config, and Prettier loads either as code before it checks
+  anything. Every gate therefore refuses a `plugins` key in `.prettierrc`, at the top level and in
+  `overrides[].options`, and refuses a `.prettierrc` that is not a JSON object, since a string there names a shared
+  config. `.prettierrc` is gate config under `CODEOWNERS` (Gate).
 - C# is formatted by CSharpier at the same width.
 - taplo formats every TOML file in every kind, from `.taplo.toml`. A repository carrying TOML pins taplo in
   `mise.toml` and runs it as a gate row.
@@ -1004,11 +1013,14 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   any lint attribute naming `allow_attributes_without_reason` or `allow_attributes`.
 - With any lint set under `[workspace.lints.clippy]`, the `all` and `pedantic` groups take `priority = -1`, or
   clippy fails with `lint_groups_priority`.
-- The gate refuses:
+- The gate reads each Rust source as tokens (proc-macro2), never as text, so its refusals catch an attribute inside
+  `cfg_attr` too. It refuses every `allow`, bare or gated. clippy's `allow_attributes` sees only the attributes the
+  host's cfg keeps, and a `#[cfg_attr(not(windows), allow(...))]` passed both it and a text match on Windows.
+- The gate also refuses:
   - a root `Cargo.toml` that does not set both lints to `deny`;
   - an empty or whitespace `reason`;
-  - an `allow` or `expect` naming a lint group, such as `warnings`, `unused` or `clippy::pedantic`, since a group is
-    not a rule and clippy accepts one;
+  - an `expect` naming a lint group, such as `warnings`, `unused` or `clippy::pedantic`, since a group is not a rule
+    and clippy accepts one;
   - `rustfmt::skip` in every form;
   - cargo-machete's ignore metadata in any `Cargo.toml`, a waiver no tool asks a reason for;
   - a member manifest whose `[lints]` is anything but `workspace = true` alone, since such a crate escapes the
