@@ -435,15 +435,15 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `node_modules`. `bun run` starts a `package.json` script's bare bin the same way, so such a script calls
   `bunx --bun --no-install` too.
 - A gate resolves every program it spawns to an absolute path from `PATH` alone, and spawns that path. It drops
-  empty and relative `PATH` entries, any entry inside the repository and any entry inside the running
-  executable's directory. Inside compares file identity, never spelling. It never runs a bare name, and it never
-  uses a directory the repository tracks or the process starts in as a lookup location. On Windows a bare name
-  can otherwise resolve from the current directory or a tracked tool directory before `PATH`.
+  empty and relative `PATH` entries and any entry inside the repository. Inside compares canonical paths or file
+  identity, never an entry's spelling. It never runs a bare name, and it never uses a directory the repository
+  tracks or the process starts in as a lookup location. On Windows a bare name can otherwise resolve from the
+  current directory or a tracked tool directory before `PATH`.
 - Every gate hands its children a `PATH` with no entry inside the checkout, so a child resolving a bare name
   cannot reach one either.
 - Where a stack's spawn searches such a directory, the gate also refuses a committed file named like a program it,
   its hooks or an install start: `bun`, `bunx`, `gh`, `git`, `mise` or `node`, with an executable extension or
-  none. A red row then fires before any spawn reaches one. Per stack:
+  none. The preflight refuses one before any row, so no spawn reaches it. Per stack:
   - Bun: `Bun.spawnSync` searches the current directory first, in CreateProcess's order. `scripts/run.ts`
     therefore resolves every program itself and runs Bun as `process.execPath`, and the gate refuses committed
     tool-named files.
@@ -508,10 +508,15 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     `package.json` `commitlint` key and a `package.yaml`.
 - Every row that walks the tree prints what it checked, the files or their count, and fails on zero. A row that
   checked nothing reads green otherwise: taplo and Prettier each exit 0 on empty input.
-  - The actionlint row names the workflow files. With no file argument actionlint also needs a `.git`, so it fails
-    in an archive copy of the tree.
-  - The zizmor row checks the count of files it reports as completed.
+  - The actionlint row hands actionlint the workflow files by name. With no file argument actionlint also needs a
+    `.git`, so it fails in an archive copy of the tree.
+  - The actionlint and zizmor rows fail unless every file they handed over appears in the tool's own per-file
+    output: actionlint's `-verbose` line for each file and zizmor's `completed` line.
   - The toml row fails unless taplo's own list of found files matches the files the row handed it (Formatting).
+  - A row that reads taplo's or zizmor's per-file output sets `RUST_LOG=info` itself. Both print those lines at
+    that level, so a contributor's stricter `RUST_LOG` hides them.
+  - Rows hand files as plain paths after `--`, never with a `./` prefix. A `./` path slips past taplo's excludes
+    and actionlint's config globs, and `--` keeps a file named like a flag a path.
 - Every ignore file a row reads, such as `.prettierignore` and the excludes in `.taplo.toml`, is compared whole
   against a constant in that repository's gate. A change to what a row skips is then a gate change a reviewer
   sees.
@@ -521,8 +526,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     its tool loads it. Changing one means changing the constant in the gate beside it, which a reviewer sees.
 - `.github/zizmor.yml` is compared whole against a constant in that repository's gate as well, because it can
   disable an audit. A waiver is then a gate change a reviewer sees.
-- The gate refuses a committed `.github/actionlint.yaml`, because its `paths` block can silence every finding. A
-  canonical one is added the day a repository needs it.
+- The gate refuses a committed `.github/actionlint.yaml` or `.github/actionlint.yml`, in any case. actionlint
+  reads either one, and its `paths` block can silence every finding. A canonical one is added the day a
+  repository needs it.
+- When a row passes its deadline, the gate's run helper kills the row's whole process tree: `taskkill /T` on
+  Windows, a process walk elsewhere. A timed-out row then leaves nothing running, a detached descendant such as
+  `workerd` included.
 - Where a runtime loads an env file before the gate starts, such as Task's `dotenv`, CI and the `pre-push` hook
   run the tracked-file refusal as their own step, before that runtime starts.
 - A test or script that spawns git drops every inherited `GIT_*` variable for that process and names the
