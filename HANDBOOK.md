@@ -636,8 +636,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The same step refuses a tracked `.npmrc` at any depth, also without regard to case, because it redirects the
   install's registry. It refuses a `package.json` `patchedDependencies` entry for an `@commitlint` package or a
   package `commitlint.config.js` imports, because a frozen install without scripts still applies it.
-- The same step refuses `paths` and `baseUrl` in any tracked `tsconfig.json` or `jsconfig.json`, because the job
-  runs commitlint under `bunx --bun` (Gate).
+- A step of its own, also before the install, refuses `paths` and `baseUrl` in any tracked `tsconfig.json` or
+  `jsconfig.json` and in every file its `extends` names, because the job runs commitlint under `bunx --bun` (Gate).
+  It also refuses an `extends` naming a package, a file outside the checkout or a file the checkout lacks, since
+  the step cannot read any of those.
 - The `workflows` workflow runs actionlint and zizmor. The gate proves ShellCheck ran by writing a canary
   workflow with an unquoted variable and requiring the finding back. actionlint exits 0 with ShellCheck absent,
   and no flag changes that.
