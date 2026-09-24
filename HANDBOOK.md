@@ -831,6 +831,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every lefthook repository refuses a tracked `lefthook-local`, `.lefthook-local` or `.config/lefthook-local`
   file, any extension, and gitignores all three. lefthook merges one over `lefthook.yml`, so a tracked one can
   turn `piped` off and replace a hook's jobs.
+- lefthook merges a branch's `.config/lefthook-local.*` too, and a local job with a guard job's name replaces it
+  before any job runs. A hook job that guards against something therefore catches an accident, never a hostile
+  branch. Reading the diff before running anything on a pull request branch covers `commit-msg` as well (Gate).
 - A Go repository's hook runs lefthook through `go tool`, which refuses when lefthook cannot run.
 - lefthook skips `pre-push` on the first push of a new branch to an empty remote. A first push therefore rests on
   the gate run before it.
