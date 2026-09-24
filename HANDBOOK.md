@@ -790,12 +790,16 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   lint and the commit hook keep the caller's ignores. A `Revert "..."` or merge subject fails the subject lint.
   The revert form (Commits) and squash-only merging make that right, and a pull request GitHub's revert button
   opens passes once it is retitled.
+- The wrapper is written to `RUNNER_TEMP`, outside the checkout, so no tracked path takes part. It resolves each
+  `extends` of the caller's config from the caller's config file and hands commitlint absolute paths. Outside any
+  `node_modules`, Bun answers a bare name from its install cache or the registry, whatever `bun.lock` pins.
 - Before its install, the workflow refuses a root `.config` (Gate). Both commitlint steps name
   `commitlint.config.js`, which stops commitlint's other config names and package keys.
-- Before its install, the `commits` workflow refuses any tracked path with a `node_modules` segment, nested ones
-  included, without regard to case. `bun install` keeps a tracked package directory at the locked version, and
-  Bun then runs that copy. The job runs beside every caller's gate, whatever the caller's stack, so it holds
-  the refusal itself.
+- Before its install, the `commits` workflow refuses a tracked `node_modules` and any tracked path below one, at
+  any depth and without regard to case, and every tracked symbolic link. `bun install` keeps a tracked package
+  directory at the locked version and a tracked `node_modules` link as it finds it, with no check against
+  `bun.lock`, and Bun then runs that copy. Through any other link Bun reads a file `bun.lock` never named. The
+  job runs beside every caller's gate, whatever the caller's stack, so it holds the refusal itself.
 - The same step refuses a tracked `.npmrc` at any depth, also without regard to case, because it redirects the
   install's registry. It refuses a `patchedDependencies` key in any tracked `package.json` (Gate), because a
   frozen install without scripts still applies a patch.
@@ -821,7 +825,13 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   Before any mise command reads the checkout, the job refuses what the gate refuses: another mise config, lock or
   rc file, a root file named like a program a gate starts, and a link at the root or under `.config`, `.mise` or
   `mise`. Its `Refused keys` step then reads `mise.toml` and `mise.lock` with Python's `tomllib` and refuses any
-  key outside the gate's allow-lists (Tools). A job holding a token loads no `mise.toml` whose keys are unchecked.
+  key outside the gate's allow-lists (Tools), `[settings.aqua]` included, which holds `github_attestations`
+  alone. A job holding a token loads no `mise.toml` whose keys are unchecked.
+- The step also refuses a form the gate does not read: a `[tools]` entry that is neither a version nor a table,
+  the `[[tools.<name>]]` array of tables included, a `[tools]`, `[tool_config]` or `[settings]` that is not a
+  table, and a `mise.lock` tool that is not a list of tables. mise reads an array-of-tables entry, a postinstall
+  included. The step checks the fields of a nested `platforms` table as it checks a quoted `"platforms.<name>"`
+  one.
   `jdx/mise-action` exports `MISE_TRUSTED_CONFIG_PATHS` for the workspace to every later step, and mise evaluates
   exec templates on any load of a trusted config.
 - zizmor's online audits run in the shared `workflows` job alone, on every pull request and daily from
