@@ -359,11 +359,14 @@ API reports the value only on a `required_reviewers` rule.
   workflow that consumes it says why in a comment beside the read.
 - A `uses:` job takes the called workflow's job-level environment. The caller runs in no environment, so it
   cannot name an environment secret. A caller whose called workflow reads one passes `secrets: inherit`, and
-  `.github/zizmor.yml` waives the `secrets-inherit` audit by naming that file, such as `deps.yml` or `cd.yml`,
-  under `rules.secrets-inherit.ignore` (Gate). Every other caller passes nothing through.
-- A zizmor waiver binds to a file or a position, never to what a job calls. Every gate and the shared
-  `workflows` job therefore fail unless each job passing `secrets: inherit` calls a reusable workflow in
-  `zachthedev/.github`, read from a zizmor pass with no config.
+  `.github/zizmor.yml` waives the `secrets-inherit` audit by file name, as
+  `rules.secrets-inherit.ignore: [cd.yml, deps.yml]` for the files that pass it (Gate). Every other caller passes
+  nothing through.
+- No zizmor waiver binds the callee. A `file:line` entry matches the finding's `uses:` line or its `secrets:`
+  line, not the lines between. Every gate and the shared `workflows` job therefore fail unless each job passing
+  `secrets: inherit` calls `zachthedev/.github/.github/workflows/`, read from a zizmor pass with no config.
+- With that hold in place a line entry adds nothing, and an edit above the job would turn the gate red for no
+  reason. The waiver therefore names the file.
 
 ### Apps
 
@@ -487,8 +490,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - `eslint.config.ts` and `commitlint.config.js` run as code in a gate only in the form its constant holds
   (below). The `commits` job runs a pull request's `commitlint.config.js` in CI, contained by the same read-only,
   tokenless shape as the gate job.
-- A Bun gate refuses a tracked env file Bun loads on its own, `.env` and its variants, because Bun loads it into
-  the gate's environment (Known defects). The names match without regard to case. A template such as
+- A Bun gate refuses a tracked env file Bun loads on its own, `.env` and its variants, at any depth, because Bun
+  loads it into the gate's environment (Known defects). The names match without regard to case. A template such as
   `.env.example` passes.
 - `bunx --bun` also loads `.env`, `.env.local` and `.env.development` into the tools it runs, and only a `bunfig.toml`
   `env = false` stops that. `bunfig.toml` stays the cooldown alone (Updates), so a contributor's own untracked env
@@ -502,21 +505,21 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     otherwise redirect the gate's imports;
   - a `package.json` `patchedDependencies` entry for a package the gate imports, because a frozen
     `--ignore-scripts` install still applies it;
-  - a tracked `.npmrc`, because it redirects even the frozen, script-free install.
+  - a tracked `.npmrc` at any depth, because it redirects even the frozen, script-free install. An untracked one
+    holds personal credentials and changes no row, so it passes.
 - Those checks import only built-in modules, so no package loads before they pass.
-- A Bun gate refuses `paths` and `baseUrl` in a `tsconfig.json` or `jsconfig.json`, `extends` chains included.
-  Under `bunx --bun` Bun applies the root one to a tool's own imports, so a `paths` entry for a package
-  commitlint imports ran repository code in the commit hook. A project aliases through `package.json` `imports`,
-  whose `#` names cannot redirect a bare package name.
-- A Go repository, and any other with no TypeScript, refuses a `tsconfig.json` or `jsconfig.json` outright.
-  `.github` refuses every one but `scripts/tsconfig.json`, which its gate compares whole.
-- Both tsconfig refusals read the root file and `scripts/tsconfig.json` on disk, committed or not, and a deeper
-  file when it is tracked. A tool in the root `node_modules` resolves through the config found walking up from
-  its own files, which reaches only its package's own and the root's. A nested one reaches only its project's
-  code, which the test row runs anyway, and a walk of every depth on disk would reach `node_modules`.
-- Where a repository keeps a root `tsconfig.json`, the gate compares it whole against that repository's own
-  constant, beside `scripts/tsconfig.json`. A `noCheck: true` there let the typecheck row pass over a type error
-  while it printed its full count.
+- A Bun gate refuses every `tsconfig.json` and `jsconfig.json` on disk, at any depth outside `node_modules` and
+  `.claude/worktrees`, unless the gate holds it whole. typescript-eslint reads the nearest tsconfig for each file,
+  so an untracked nested one changed lint results. `scripts/expected.ts` holds the repository's own, the root one
+  included, and the shared `startup.ts` holds `scripts/tsconfig.json`. A root `noCheck: true` let the typecheck
+  row pass over a type error while it printed its full count.
+- The gate walks each held one along its `extends` chain. It refuses `paths` or `baseUrl` there, and an `extends`
+  naming a package, an absolute path, a missing file or a file outside the checkout. Under `bunx --bun` Bun
+  applies the root one to a tool's own imports, so a `paths` entry for a package commitlint imports ran
+  repository code in the commit hook. A project aliases through `package.json` `imports`, whose `#` names cannot
+  redirect a bare package name.
+- A Go gate, and any other over no TypeScript, refuses a `tsconfig.json` or `jsconfig.json` tracked at any depth
+  or on disk at the root, since none of its tools reads a nested one.
 - Every tracked `tsconfig.json` and `jsconfig.json` is plain JSON with no comments, because every gate and the
   `commits` job read one with a strict parser.
 - Every gate refuses a duplicated key, at any depth, in any JSON file it parses to decide a refusal. Bun's own
@@ -527,6 +530,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   is refused only when committed, and `.gitignore` names it.
 - The gate refuses a root `.config` directory outright, in any letter case. mise, the dotnet tool manifest,
   cosmiconfig's meta config and lefthook all read it.
+- The root `.config` and a `package.json` `cosmiconfig` key are refused before any commitlint step, the shared
+  `commits` job included. cosmiconfig builds its meta config in the working directory even under `--config`.
 - Every gate tool that searches for its own config runs with the one config named explicitly. The tools are
   Prettier, commitlint, golangci-lint, ESLint, taplo and zizmor, CSharpier in C#, and rustfmt and clippy in Rust.
 - The gate refuses every other name such a tool searches, at every depth it searches, without regard to case. A
@@ -607,6 +612,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   at worst.
 - The stack's own runner drives the gate: Bun scripts in `package.json`, `xtask` for Rust, Cake for C#, go-task
   for Go. A `Makefile` is a violation.
+- In a Bun repository `scripts/startup.ts`, `scripts/run.ts` and `scripts/tools.ts` are byte-identical across
+  the set. The repository's own constants, such as its held project configs and its `.github/zizmor.yml`, live in
+  `scripts/expected.ts`.
 - `cargo xtask` is `cargo run --package xtask`, and the outer cargo resolves the workspace before any row runs.
   The alias in `.cargo/config.toml` therefore carries `--locked`: `run --locked --package xtask --quiet --`.
 - The Bun linter is ESLint with typescript-eslint, configured in `eslint.config.ts` (Known defects).
@@ -659,6 +667,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   opens passes once it is retitled.
 - Before its install, the workflow refuses the commitlint configs every gate refuses (Gate), at any depth and
   without regard to case. It reads every tracked `package.json`, nested ones included, for a `commitlint` key.
+  It also refuses a root `.config` and a `package.json` `cosmiconfig` key (Gate).
 - Before its install, the `commits` workflow refuses any tracked path with a `node_modules` segment, nested ones
   included, without regard to case. `bun install` keeps a tracked package directory at the locked version, and
   `bunx` then runs that copy. The job runs beside every caller's gate, whatever the caller's stack, so it holds
