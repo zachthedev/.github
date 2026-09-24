@@ -860,15 +860,15 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   author therefore writes 64 to 67 characters, fewer as the pull request number grows. The `commit-msg` hook checks
   72 as written.
 - Renovate's headers are shortened by the presets' `commitMessageAction` and `commitMessageTopic`, never by
-  exempting the bot.
+  exempting the bot. A Renovate or Dependabot pull request whose landed header runs past 72 fails, so it is closed
+  and its bump is taken by hand.
 - The shared `commitlint.config.js` ignores a message signed off by `dependabot[bot]`, because its body carries
   release notes past the line limit. It reads `.github/dependabot.yml` through the `yaml` package and takes each
   `updates[].commit-message.prefix` and `prefix-development`. It skips a commit only when the header starts with one
   of those, then a colon and a space, and a line after the header starts with the
   `Signed-off-by: dependabot[bot] <` trailer. A header or title that merely carries the text is still linted. A
   repository with no `dependabot.yml` skips nothing, and a file that does not parse fails the lint. The pull request
-  title and the landed-subject lint still check a Dependabot header. A Dependabot pull request whose landed header
-  runs past 72 fails, so it is closed and its bump is taken by hand.
+  title and the landed-subject lint still check a Dependabot header.
 - A commit's type names its effect on the people who use what the repository ships.
 - `feat`, `fix`, `perf` and `revert` are user-facing. Every other type is hidden from the changelog (Releases).
 - A gate, hook or tooling change is `chore`, and a change to the repository's own workflows is `ci`, because
