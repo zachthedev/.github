@@ -923,8 +923,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - an `allow` or `expect` naming a lint group, such as `warnings`, `unused` or `clippy::pedantic`, since a group is
     not a rule and clippy accepts one;
   - `rustfmt::skip` in every form;
-  - a member manifest without `[lints] workspace = true`, or with its own `[lints]` table, since such a crate
-    escapes the workspace setting.
+  - a member manifest whose `[lints]` is anything but `workspace = true` alone, since such a crate escapes the
+    workspace setting.
 - `@generated` needs no refusal while the held `rustfmt.toml` leaves `format_generated_files` at its default,
   `true`.
 
