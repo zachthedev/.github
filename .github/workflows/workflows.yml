@@ -281,15 +281,16 @@ jobs:
         run: '"$ACTIONLINT" -pyflakes= -shellcheck="$SHELLCHECK"'
       # A secrets-inherit waiver in .github/zizmor.yml binds to a file or a line, not to the
       # workflow a job calls, so pointing a waived job at another repository keeps the waiver and
-      # hands that repository every secret. zizmor runs here with no config, so it reports every
-      # job that passes secrets: inherit, waived or not, and each one must call a reusable workflow
-      # of zachthedev/.github. That repository's own run also accepts its ./.github/workflows/
-      # calls. zizmor exits 10 to 14 when it reports findings; any other nonzero exit is an error.
+      # hands that repository every secret. zizmor runs here with no config and --no-ignores, which
+      # drops inline ignore comments too, so it reports every job that passes secrets: inherit,
+      # waived or not, and each one must call a reusable workflow of zachthedev/.github. That
+      # repository's own run also accepts its ./.github/workflows/ calls. zizmor exits 10 to 14
+      # when it reports findings; any other nonzero exit is an error.
       - name: Held secrets-inherit callees
         run: |
           zizmor=$(mise which zizmor)
           status=0
-          report=$("$zizmor" --no-progress --offline --no-config --strict-collection --format json --collect=all .github) || status=$?
+          report=$("$zizmor" --no-progress --offline --no-config --no-ignores --strict-collection --format json --collect=all .github) || status=$?
           if [ "$status" -ne 0 ] && { [ "$status" -lt 10 ] || [ "$status" -gt 14 ]; }; then
             echo "::error::zizmor could not audit .github (exit $status)."
             exit 1
