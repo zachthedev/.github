@@ -20,7 +20,8 @@ you did not write, read its diff, then install it with `bun install --ignore-scr
 `node_modules/.bin` first on `PATH`. A tracked `node_modules/.bin/bun` then runs before the gate's refusal can.
 Bun also runs a `bunfig.toml` preload before the gate's first line, whichever way the gate starts, and before the
 commit hook's commitlint and in the `format` and `prepare` scripts, since each runs under `bunx --bun`.
-`eslint.config.ts` and `commitlint.config.js` are code too: the `lint` row and the commit hook run them. The
+`eslint.config.ts` and `commitlint.config.js` are code too: the `lint` row and the commit hook run them. The gate
+holds both whole, so a change to either changes its copy under `scripts/` in the same commit. The
 gate's refusals keep such a branch from merging, and nothing in the gate can stop its first run on your machine,
 so the diff read is what catches one there.
 
@@ -46,6 +47,12 @@ The gate starts git with no system or global config. In a checkout another accou
 repository as dubious ownership, and the gate stops. Fix it by making your account the directory's owner. The gate
 reads no `safe.directory` entry, by design.
 
+Every tool that searches for its own config runs with that config named: ESLint with `--config eslint.config.ts`,
+Prettier with `--config .prettierrc` and `--no-editorconfig`, taplo with `--config .taplo.toml`, zizmor with
+`--config .github/zizmor.yml`, tsc with `--project scripts`, and the commit hook's commitlint with
+`--config commitlint.config.js`. The gate clears `SHELLCHECK_OPTS` for every process it starts, since it reaches
+ShellCheck through actionlint.
+
 Every row that walks the tree says how many files it checked, and fails when that is none. The `format`, `toml`,
 `workflows` and `renovate` rows hand their tool the tracked files, so a new file counts once `git add` names it,
 and `.gitignore` never hides a tracked one. The `toml` row checks that taplo reports each file it was handed, and
@@ -53,40 +60,61 @@ the `workflows` row that actionlint and zizmor each report every tracked workflo
 unless every job passing `secrets: inherit` calls a reusable workflow of this repository, because a zizmor waiver
 binds to a file, never to what a job calls.
 
-Before any row, the gate's preflight refuses to run beside what Bun or Prettier reads before a row starts:
+Before any row, the gate refuses to run beside what Bun reads before the gate's first line:
 
-- a tracked env file Bun loads, in any case;
-- a tracked `.npmrc`, which names the registry `bun install` fetches from;
+- a tracked env file Bun loads (`.env`, `.env.local`, and the `development`, `production` and `test` pairs), at
+  any depth;
+- a tracked `.npmrc` at any depth, which names the registry `bun install` fetches from;
 - a tracked `node_modules`, or a tracked path under one, at any depth;
 - a `bunfig.toml` holding anything but `[install] minimumReleaseAge`, since Bun runs a `preload` it names and
   applies a `[define]` table;
 - a `scripts/tsconfig.json` that differs from the copy in `scripts/startup.ts`, and any other `tsconfig.json`,
   `jsconfig.json`, `package.json` or `node_modules` under `scripts/`, since Bun resolves the gate's imports through
   them;
+- any other `tsconfig.json` or `jsconfig.json` on disk, at any depth outside `node_modules` and Claude Code's
+  worktrees. The gate is this repository's only
+  TypeScript, so `scripts/expected.ts` holds no other and the `typecheck` row reads `scripts/tsconfig.json` alone.
+  Bun applies a config's `paths` and `baseUrl` to every import below it, `node_modules` code included, so either
+  can send a package a commit hook's tool imports to repository code;
 - a `patchedDependencies` entry in `package.json` for a package the gate's scripts import, and a `package.json`
   that does not parse;
+- a key repeated within one object of any JSON file the gate reads, since Bun reads the first where a JSON parser
+  reads the last.
+
+It also refuses a config a tool would read in place of the one the gate names, and a change to what a row skips or
+waives, so that change is always a change to the gate. A config that changes what a row reports is refused on
+disk, tracked or not, so the gate on your machine agrees with CI:
+
 - a `.prettierrc` that differs from the copy in `scripts/startup.ts`, any other Prettier config file anywhere in the
-  tree, in any case, a `prettier` key in any `package.json` and a `package.yaml`, since Prettier loads a config
-  written as code and any plugin a config names. The `format` row and the `format` script pass
-  `--config .prettierrc`, which stops Prettier's search for any other;
+  tree, a `package.yaml`, and a `prettier` key in any tracked `package.json`, since Prettier loads a config written
+  as code and any plugin a config names;
+- an `eslint.config.ts` that differs from the copy in `scripts/expected.ts`, and any other `eslint.config.*`
+  anywhere, since ESLint runs the one nearest each file it lints when no config is named;
+- a `commitlint.config.js` that differs from the copy in `scripts/startup.ts`, any other `.commitlintrc*` or
+  `commitlint.config.*` anywhere, and a `commitlint` or `cosmiconfig` key in any tracked `package.json`;
+- a `.prettierignore` whose patterns differ from the shared ones in `scripts/startup.ts` and this repository's own
+  `/REPOS.md` in `scripts/expected.ts`. Every Prettier run passes `--ignore-path .prettierignore`, so `.gitignore`
+  never narrows Prettier;
+- a `.taplo.toml` that differs from the copy in `scripts/startup.ts`, and any other `.taplo.toml` or `taplo.toml`;
+- a `.github/zizmor.yml` that differs from the copy in `scripts/expected.ts`, any other `zizmor.yml` or
+  `zizmor.yaml`, and a tracked file under `.github` carrying a `zizmor: ignore[...]` comment. A waiver is an entry
+  in `.github/zizmor.yml`, under that audit's ignore list, naming the file it waives;
+- a `shellcheck disable` directive in a tracked workflow. ShellCheck has no waiver file, so rewrite the script
+  until ShellCheck passes it;
+- a `.github/actionlint.yaml` or `.github/actionlint.yml`, which can silence any actionlint finding;
+- a lefthook config beside `lefthook.yml` (`lefthook.*` or `.lefthook.*`), which lefthook reads when
+  `lefthook.yml` is missing, and a tracked `lefthook-local.*` or `.lefthook-local.*`, which lefthook merges over
+  `lefthook.yml`. `.gitignore` lists the local ones for your own use;
+- a `.config` directory at the root, which mise, lefthook and commitlint's cosmiconfig each read;
+- a tracked workflow whose path is not `.github/workflows/<name>.yml` exactly, and a tracked path under a `.git`,
+  `.sl`, `.svn`, `.hg` or `.jj` directory, since the workflows or format row would count it and never check it;
 - a root file whose name before the first dot is a program the gate, its hooks or an install start, `bun`, `bunx`,
   `gh`, `git`, `mise` or `node`, whatever its extension. `bun.lock`, `mise.toml` and `mise.lock` pass.
 
-It also refuses a change to what a row skips or waives, so that change is always a change to the gate:
-
-- a `.prettierignore` whose patterns differ from the ones `scripts/startup.ts` lists. Every Prettier run passes
-  `--ignore-path .prettierignore`, so `.gitignore` never narrows Prettier;
-- a `.taplo.toml` or `.github/zizmor.yml` that differs from the copy in `scripts/startup.ts`;
-- a tracked `.github/actionlint.yaml` or `.github/actionlint.yml`, which can silence any actionlint finding;
-- an inline `zizmor: ignore[` comment in a tracked file under `.github`, in any case or spacing. A zizmor waiver
-  goes in `.github/zizmor.yml`, under that audit's ignore list;
-- a `shellcheck disable` directive in a tracked workflow. ShellCheck has no waiver file, so rewrite the script
-  until ShellCheck passes it.
-
-A template such as `.env.example` passes, and so does your own untracked env file or `.npmrc`. The gate loads
-nothing from `node_modules/` until these checks pass, so a planted package never runs ahead of its refusal. The
-gate is this repository's only TypeScript, so `scripts/tsconfig.json` is the one TypeScript config, and the
-`typecheck` row reads it.
+Each name is compared through Unicode case folding, broader than any filesystem's, so a spelling that a
+case-insensitive filesystem opens as a refused name is refused too. A template such as `.env.example` passes, and
+so does your own untracked env file, `.npmrc` or `lefthook-local.yml`. The gate loads nothing from `node_modules/`
+until these checks pass, so a planted package never runs ahead of its refusal.
 
 A few checks run only in CI, each because it needs something a working machine does not have. The `commits`
 job lints a pull request's commit range and the subject its squash writes, which do not exist before the pull
@@ -170,9 +198,10 @@ git log --oneline v0.1.0..v0.2.0
 
 - `.github/workflows/`: the reusable workflows and this repository's own callers.
 - `renovate/`: the base preset and one preset per kind.
-- `scripts/`: the gate. `check.ts` is the runner, `startup.ts` holds the preflight checks, `tools.ts` holds the
-  mise expectations, `run.ts` starts every process with a deadline, and `tsconfig.json` is the gate's own
-  TypeScript config.
+- `scripts/`: the gate. `check.ts` is the runner, `startup.ts` holds the preflight checks, `expected.ts` holds
+  what this repository's own configs must say, `tools.ts` holds the mise expectations, `run.ts` starts every
+  process with a deadline, and `tsconfig.json` is the gate's own TypeScript config. `run.ts`, `tools.ts` and
+  `startup.ts` are the same in every Bun repository of the set.
 - The root and `.github/`: the community files GitHub serves as defaults, and this repository's own boilerplate.
 - `docs/`: the documents [README.md#documentation](README.md#documentation) indexes.
 
@@ -182,12 +211,14 @@ None. The gate's rows are the checks, and the break round in the alignment recor
 
 ## Code
 
-- Every process the gate starts goes through `scripts/run.ts`, so every one carries a deadline. At the deadline
-  the gate kills the process and the processes it started. A descendant whose parent already exited is out of
-  that reach: only a Windows job object reaches one, and Bun exposes none, so such an orphan can outlive a row.
+- Every process the gate starts goes through `scripts/run.ts`, so every one carries a deadline. A process still
+  running at its deadline is killed with every process it started. A process that exits while one it started
+  still holds its output fails its row, which says so. That process runs on, since nothing the gate can reach
+  ends a process whose parent is gone, so end it yourself.
 - `scripts/run.ts` resolves every program to an absolute path from `PATH` alone, and Bun itself runs as
-  `process.execPath`. On Windows a bare program name resolves from the current directory before `PATH`, so a
-  committed `gh.bat` would otherwise run in place of gh, which the preflight refuses ([The gate](#the-gate)).
+  `process.execPath`. A program found through a link back into the checkout is passed over. On Windows a bare
+  program name resolves from the current directory before `PATH`, so a committed `gh.bat` would otherwise run in
+  place of gh, which the preflight refuses ([The gate](#the-gate)).
 - Every process the gate starts gets `PATH` narrowed to its absolute entries outside the checkout, so a program
   one starts by name never resolves inside it.
 - The gate starts mise with an environment built from an allow-list, never the one it inherited.
@@ -199,7 +230,7 @@ None. The gate's rows are the checks, and the break round in the alignment recor
 - Every package runs from its absolute path under `node_modules`, and every tool `mise.toml` pins from the path
   `mise which` prints. mise, gh and git each start from an absolute `PATH` entry outside the checkout.
 - ESLint lints and Prettier formats. An ESLint rule that is wrong for this code is turned off in
-  `eslint.config.ts` with its reason beside it.
+  `eslint.config.ts` with its reason beside it, and its copy in `scripts/expected.ts` changes in the same commit.
 
 ## Dependencies
 
