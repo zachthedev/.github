@@ -15,8 +15,10 @@ commit-msg:
     # {1} is the message file git hands the hook. The type list comes from the
     # Conventional Commits specification and the scopes from
     # .github/commit-scopes.json, both by way of commitlint.config.js.
+    # --config names that one config, so no name commitlint searches before it
+    # can stand in for it.
     - name: commitlint
-      run: bunx --bun --no-install commitlint --edit {1}
+      run: bunx --bun --no-install commitlint --config commitlint.config.js --edit {1}
 
 pre-push:
   jobs:
