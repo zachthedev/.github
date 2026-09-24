@@ -12,20 +12,46 @@ if (scopes.length === 0) {
   throw new Error(`${vocabularyPath.href} must list at least one scope.`);
 }
 
+// The headers Dependabot starts a commit with: each commit-message prefix
+// .github/dependabot.yml sets, then a colon and a space. A prefix is set per
+// updates entry, so every prefix and prefix-development line counts. The lines
+// are read as text, in block style, since no YAML parser is a pinned dependency
+// here. A repository without the file has no Dependabot header.
+const dependabotPath = new URL('.github/dependabot.yml', import.meta.url);
+let dependabotConfig = '';
+try {
+  dependabotConfig = readFileSync(dependabotPath, 'utf8');
+} catch (error) {
+  if (error.code !== 'ENOENT') {
+    throw error;
+  }
+}
+const dependabotHeaders = [
+  ...dependabotConfig.matchAll(/^[ \t]*prefix(?:-development)?:[ \t]*(['"]?)([^'"#\r\n]*?)\1[ \t]*(?:#.*)?$/gm),
+]
+  .map((match) => match[2])
+  .filter((prefix) => prefix.length > 0)
+  .map((prefix) => `${prefix}: `);
+
 export default {
   extends: ['@commitlint/config-conventional'],
   // Dependabot writes body lines past the 72-column limit that hold no URL, such
   // as a grouped update's "Updates `<package>` from <old> to <new>", and that is
-  // the update path the cooldown protects. A repository without Dependabot never
-  // matches it. The match reads the lines after the header alone, so a title
-  // carrying the text is still linted, and the squash subject lint in CI checks
-  // the header where it lands.
+  // the update path the cooldown protects. A commit is skipped only when its
+  // header starts with a Dependabot header above and a line after the header
+  // starts with Dependabot's trailer. A one-commit pull request lands under its
+  // commit's header, so a skipped header that lands still carries the type and
+  // scope Dependabot is configured with. The rest of that header goes unchecked.
+  // A one-line pull request title has no line after its header, so the title
+  // lint checks it.
   ignores: [
-    (message) =>
-      message
-        .split('\n')
-        .slice(1)
-        .some((line) => line.startsWith('Signed-off-by: dependabot[bot] <')),
+    (message) => {
+      const [header, ...rest] = message.split('\n');
+      return (
+        dependabotHeaders.some((prefix) => header.startsWith(prefix)) &&
+        rest.some((line) => line.startsWith('Signed-off-by: dependabot[bot] <'))
+      );
+    },
   ],
   rules: {
     'scope-enum': [2, 'always', scopes],

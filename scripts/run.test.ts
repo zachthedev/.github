@@ -3,7 +3,7 @@ import { dlopen, FFIType, ptr } from 'bun:ffi';
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join, sep } from 'node:path';
-import { resolveProgram, run } from './run';
+import { fold, resolveProgram, run } from './run';
 import { isolate, launcherName, spellings, StandIns, WINDOWS } from './stand-ins';
 import { trackedFindings } from './startup';
 
@@ -155,6 +155,28 @@ test('a program no PATH entry holds exits 127, saying which and that the working
   expect(finished.stderr).toContain('gate-absent-program');
   expect(finished.stderr).toContain('working directory is never searched');
   expect(started()).toEqual([]);
+});
+
+/* ///// Name folding ///// */
+
+// Each character is built from its code point, so no editor or formatter can
+// turn an escape into the character or the character into an escape.
+const at = (codePoint: number): string => String.fromCodePoint(codePoint);
+
+const FOLDS: readonly (readonly [string, string, string])[] = [
+  ['ASCII case', 'MISE.TOML', 'mise.toml'],
+  ['a zero-width space, stripped', `mi${at(0x200b)}se.toml`, 'mise.toml'],
+  ['a soft hyphen, stripped', `.np${at(0xad)}mrc`, '.npmrc'],
+  ['long s, mapped to s', `${at(0x17f)}hellcheck`, 'shellcheck'],
+  ['the Kelvin sign, mapped to k', `${at(0x212a)}ey`, 'key'],
+  ['the fi ligature, expanded', `${at(0xfb01)}le`, 'file'],
+  ['sharp s, expanded', `stra${at(0xdf)}e`, 'strasse'],
+  ['dotless i, mapped to i', `m${at(0x131)}se`, 'mise'],
+  ['a fullwidth letter, left as it is', `${at(0xff4d)}ise`, `${at(0xff4d)}ise`],
+];
+
+test.each([...FOLDS])('fold: %s', (_label: string, name: string, folded: string) => {
+  expect(fold(name)).toBe(folded);
 });
 
 /* ///// The resolver ///// */

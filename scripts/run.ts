@@ -20,23 +20,21 @@ export function quote(value: string): string {
 const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
 
 /**
- * `name` keyed for comparison against a name a tool reads: compatibility
- * normalized, default-ignorable code points removed, then mapped to upper and
- * back to lower case, and normalized again.
+ * `name` keyed for comparison against a name a tool reads: default-ignorable
+ * code points removed, then mapped to upper and back to lower case. This is
+ * the set's one folding rule, the same in every stack's gate.
  *
  * @remarks
  * A case-insensitive filesystem hands a tool a tracked file under a spelling
- * that differs from the one the tool asks for. The key merges everything
- * simple case folding merges with an ASCII letter, which is ſ with s and the
- * Kelvin sign with k, beside ASCII case. It also merges full case folding's
- * expansions such as ß with ss, compatibility forms such as ﬁ with fi,
- * dotless ı with i, and the ignorable marks HFS+ skips. Every name the gate
- * refuses is ASCII and every file it names passes in its exact spelling
- * alone, so a merge beyond what a filesystem does costs a false refusal at
- * worst.
+ * that differs from the one the tool asks for. The key merges ASCII case, the
+ * letters that map to an ASCII one such as ſ with s and the Kelvin sign with
+ * k, full case mapping's expansions such as ß with ss and ﬁ with fi, dotless ı
+ * with i, and the ignorable marks HFS+ skips. Every name the gate refuses is
+ * ASCII and every file it names passes in its exact spelling alone, so a merge
+ * beyond what a filesystem does costs a false refusal at worst.
  */
 export function fold(name: string): string {
-  return name.normalize('NFKC').replace(IGNORABLE, '').toUpperCase().toLowerCase().normalize('NFKC');
+  return name.replace(IGNORABLE, '').toUpperCase().toLowerCase();
 }
 
 /**
