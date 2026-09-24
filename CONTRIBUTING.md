@@ -6,39 +6,139 @@ If another `zachthedev` repository sent you here, read that repository's `README
 
 ## Setup
 
-Install before committing. [docs/dev.md#prerequisites](docs/dev.md#prerequisites) names what the machine needs,
-and `bun install` installs the dependencies and the git hooks. The commit hook checks every commit message
-before it is recorded, and the push hook runs the gate and refuses the push when it fails.
+The machine needs:
 
-The commit hook runs commitlint as `bun --no-env-file ./node_modules/@commitlint/cli/cli.js`, under Bun rather
-than a `node` on `PATH`, and it fails when the package is missing. The `format` and `prepare` scripts start their
-tools the same way, by path under `node_modules/`. None of them uses `bunx`, which falls back to `PATH`, a parent
-`node_modules/.bin` or its own cache when a package is missing. The push hook runs
+- [Bun](https://bun.sh), at the version `packageManager` in `package.json` names.
+- [mise](https://mise.jdx.dev). It installs the tools `mise.toml` pins at the versions `mise.lock` records.
+- [git](https://git-scm.com). The gate starts it to list the tracked files it refuses.
+- [gh](https://cli.github.com), optional, for zizmor's online audits ([The gate](#the-gate)).
+
+The first run:
+
+```sh
+bun install
+bun run check
+```
+
+`bun install` installs the dependencies and the git hooks, and the first gate run installs the mise tools from the
+lockfile. Run `bun install --frozen-lockfile` after every pull and in every new worktree, before you run the gate
+or commit, because the gate and the hooks load packages from this checkout's `node_modules/`. Before you install a
+branch you did not write, read [Safety](#safety).
+
+The commit hook checks every commit message before it is recorded, and the push hook runs the gate and refuses the
+push when it fails. The commit hook runs commitlint as `bun --no-env-file ./node_modules/@commitlint/cli/cli.js`,
+under Bun rather than a `node` on `PATH`, and it fails when the package is missing. The `format` and `prepare`
+scripts start their tools the same way, by path under `node_modules/`. None of them uses `bunx`, which falls back
+to `PATH`, a parent `node_modules/.bin` or its own cache when a package is missing. The push hook runs
 `bun --no-env-file scripts/check.ts`. Both hooks, the `check` and `check:rows` scripts, CI's gate step and every
-Bun a gate row starts pass `--no-env-file`, so Bun loads no `.env` into them. The `format` and `prepare` scripts
-are for your own use and keep env loading.
-A `BUN_OPTIONS` holding `--env-file` or a preload undoes the flag, and `BUN_INSPECT_PRELOAD` runs a module in
-every Bun start. On Windows Bun reads each in any spelling. So each hook first unsets `BUN_OPTIONS`,
-`BUN_INSPECT`, `BUN_INSPECT_CONNECT_TO` and `BUN_INSPECT_PRELOAD` in every spelling, then starts its Bun. No
-`package.json` script can do the same: `bun run` reads them before the script starts, and Bun's script shell on
-Windows has no `env`. Keep the four unset while you run a script.
-The hook script `lefthook install` writes fails open. When it finds no lefthook binary, as in a checkout whose
-`node_modules/` is gone, it prints `Can't find lefthook in PATH` and exits 0, and the commit or push goes through
-unchecked. A fresh clone runs no hook at all until `bun install` runs. CI's `commits` job and gate hold both
-cases. The hooks catch an accident, never a hostile branch: lefthook merges a branch's `lefthook-local.*` or
-`.config/lefthook-local.*` over `lefthook.yml`, and a job there with a hook job's name replaces it before any job
-runs.
+Bun a gate row starts pass `--no-env-file`, so Bun loads no `.env` into them. Each hook first unsets the four Bun
+variables [Safety](#safety) names, in every spelling, then starts its Bun. The hooks are no control, and Safety
+says why.
+
+## Safety
 
 A pull request controls its own install scripts and gate code. Before running anything on a pull request branch
 you did not write, read its diff, then install it with `bun install --ignore-scripts`, so no install script runs.
 `bun run check` on that branch still goes through Bun's script runner, which puts the branch's own
-`node_modules/.bin` first on `PATH`. A tracked `node_modules/.bin/bun` then runs before the gate's refusal can.
-Bun also runs a `bunfig.toml` preload before the gate's first line, whichever way the gate starts, and before the
-commit hook's commitlint and in the `format` and `prepare` scripts, since each runs under Bun.
-`eslint.config.ts` and `commitlint.config.js` are code too: the `lint` row and the commit hook run them. The
-gate's refusals keep such a branch from merging, and nothing in the gate can stop its first run on your machine,
-so the diff read is what catches one there. Read it before you commit on the branch too, since the commit hook
-runs the branch's own code.
+`node_modules/.bin` first on `PATH`, so a tracked `node_modules/.bin/bun` runs before the gate's refusal can. Bun
+also runs a `bunfig.toml` preload before the gate's first line, whichever way the gate starts, and before the
+commit hook's commitlint and in the `format` and `prepare` scripts. `eslint.config.ts` and `commitlint.config.js`
+are code too: the `lint` row and the commit hook run them. The gate's refusals keep such a branch from merging,
+and nothing in the gate can stop its first run on your machine, so the diff read is what catches one there. Read
+it before you commit on the branch too, since the commit hook runs the branch's own code.
+
+What reaches the tools from your own environment:
+
+- `BUN_OPTIONS`, `BUN_INSPECT`, `BUN_INSPECT_CONNECT_TO` and `BUN_INSPECT_PRELOAD`. Leave all four unset. A
+  `BUN_OPTIONS` holding `--env-file` or a preload undoes `--no-env-file`, and `BUN_INSPECT_PRELOAD` runs a module
+  in every Bun start. On Windows Bun reads each in any spelling. The hooks and the gate clear them, but no
+  `package.json` script can: `bun run` reads them before the script starts, and Bun's script shell on Windows has
+  no `env`.
+- A personal env file. The `format` and `prepare` scripts are for your own use and keep env loading, so an
+  untracked `.env` reaches Prettier and lefthook there.
+- `MISE_BACKENDS_<TOOL>`. Leave it unset. It overrides a tool's backend from the environment, no setting reports
+  it, and the gate does not close that gap.
+
+The hooks are no control:
+
+- They fail open. The hook script `lefthook install` writes prints `Can't find lefthook in PATH` and exits 0 when
+  it finds no lefthook binary, as in a checkout whose `node_modules/` is gone, and the commit or push goes through
+  unchecked. A fresh clone runs no hook at all until `bun install` runs. CI's `commits` job and gate hold both
+  cases.
+- They catch an accident, never a hostile branch. lefthook merges a branch's `lefthook-local.*` or
+  `.config/lefthook-local.*` over `lefthook.yml`, and a job there with a hook job's name replaces it before any
+  job runs.
+
+## Running it
+
+The repository ships no program. The reusable workflows run on GitHub, and the gate is the one thing that runs
+here ([The gate](#the-gate)).
+
+Generated files, and the command that writes each:
+
+- `mise.lock`: `mise lock`. The taplo checksum lines are the exception `mise.toml` records.
+- `bun.lock`: `bun install`.
+
+## Where code goes
+
+- `.github/workflows/`: the reusable workflows and this repository's own callers.
+- `renovate/`: the base preset and one preset per kind.
+- `scripts/`: the gate. `check.ts` is the runner, `startup.ts` holds the preflight checks, `expected.ts` holds
+  this repository's project config paths and untyped sources, `tools.ts` holds the mise expectations, `run.ts`
+  starts every process, `rows.ts` reads what each row's tool printed, `github.ts` reads gh's token,
+  `shellcheck.ts` is the ShellCheck stand-in the `workflows` row hands actionlint, and `tsconfig.json` is the
+  gate's own TypeScript config. The `*.test.ts` files are the gate's own tests, and `stand-ins.ts` holds the
+  programs they start in place of the real ones. Which of these every Bun repository shares byte for byte is
+  under [Gate](HANDBOOK.md#gate).
+- The root `tsconfig.json`: the TypeScript config for `eslint.config.ts`, the one TypeScript file outside
+  `scripts/`.
+- The root and `.github/`: the community files GitHub serves as defaults, and this repository's own boilerplate.
+  [README.md#documentation](README.md#documentation) indexes the documents.
+
+## Code
+
+- Every process the gate starts goes through `scripts/run.ts`. No row has a deadline of its own: CI's job timeout
+  bounds the gate, and on your machine Ctrl-C ends a hung tool. A row fails when a process its tool started still
+  holds the tool's output 10 seconds after the tool exits, and says so.
+- `scripts/run.ts` resolves every program to an absolute path from `PATH` alone, and Bun itself runs as
+  `process.execPath`. A program found through a link back into the checkout is passed over. On Windows a bare
+  program name resolves from the current directory before `PATH`, so a committed `gh.bat` would otherwise run in
+  place of gh, which the preflight refuses ([The gate](#the-gate)).
+- Every process the gate starts gets `PATH` narrowed to its absolute entries outside the checkout, so a program
+  one starts by name never resolves inside it.
+- The gate starts mise with an environment built from an allow-list, never the one it inherited.
+- Bun's script runner puts `node_modules/.bin` first on `PATH`, so under `bun run` a committed
+  `node_modules/.bin/bun` would replace the gate. CI installs with `bun install --frozen-lockfile --ignore-scripts`,
+  and CI and the push hook call `bun --no-env-file scripts/check.ts` directly, which skips the script runner, so
+  the preflight's `node_modules` refusal runs before every merge.
+- A row throws with the tool's own output, so a red row reads the same as running the tool by hand.
+- Every process the gate starts gets `NO_COLOR=1`, and a row strips ANSI sequences from its tool's output before
+  it reads it, since a tool can color its output on one runner alone. Every line the gate prints shows a control
+  character or an invisible mark as an escape of its code point, so a name in a finding cannot rewrite the lines
+  above it.
+- Every package runs from its absolute path under `node_modules`, and every tool `mise.toml` pins from the path
+  `mise which` prints. mise, gh and git each start from an absolute `PATH` entry outside the checkout.
+- ESLint lints and Prettier formats. An ESLint rule that is wrong for this code is turned off in
+  `eslint.config.ts` with its reason beside it.
+- An inline `eslint-disable` names its rules and gives a reason after `--`, which the eslint-comments plugin
+  checks, and an unused one fails the `lint` row.
+- `eslint.config.ts` refuses an import attribute other than `type: 'json'`, and any options on a dynamic import.
+  Bun runs any file as code under a loader attribute, such as `with { type: 'js' }` on a `.txt` import, which no
+  row reads as code.
+
+## Tests
+
+The `lint` row runs `eslint.config.ts`, and the `scripts:test` row runs the gate's own suite,
+`bun test ./scripts/`. They are the last two rows, since each runs repository code that can write any file a row
+reads. After each, when another row follows, the checks before the first row run again, and a finding there
+prints as `preflight  after <row>, no later row ran`. `bun run check:rows` prints the order. Every program a test
+would start is a stand-in from `scripts/stand-ins.ts`, never the real gh, git, mise or the network. The
+`scripts:test` row reads skipped, todo and filtered tests beside the passing ones, and it fails when it counts no
+test, when every test it counts was skipped, and when a name pattern filtered any test out. It runs with
+`CI=true`, so a file holding `test.only` fails the row. The other rows are the checks on the rest of the tree, and
+the break round in the alignment record proves they go red.
+
+No test needs a real service.
 
 ## The gate
 
@@ -48,7 +148,7 @@ bun run check
 
 One command, and it is the whole gate. It has no quick form, because no row is slow, so the push hook runs it
 whole. CI's gate job runs the same script on Linux, macOS and Windows, so a green run on your machine is a green
-run there.
+run there. When a local run fails or disagrees with CI, [Troubleshooting](#troubleshooting) says why.
 
 `bun run check:rows` lists the rows. `bun run check <row>` runs one row, resolving the pinned binaries without
 installing them.
@@ -59,10 +159,6 @@ that token to zizmor's process alone. Otherwise it runs zizmor offline, and the 
 reads its token from the system credential store, so an empty `GH_CONFIG_DIR` leaves it reachable. When the gate
 starts, it takes every variable gh, zizmor or mise reads a GitHub token from out of its own environment, in every
 spelling, and hands gh's own two to gh alone.
-
-The gate starts git with no system or global config. In a checkout another account owns, git then refuses the
-repository as dubious ownership, and the gate stops. Fix it by making your account the directory's owner. The gate
-reads no `safe.directory` entry, by design.
 
 Every tool that searches for its own config runs with that config named: ESLint with `--config eslint.config.ts`,
 Prettier with `--config .prettierrc` and `--no-editorconfig`, taplo with `--config .taplo.toml`, zizmor with
@@ -246,65 +342,6 @@ lists every change in the release, hidden types included. The same list locally:
 git log --oneline v0.1.0..v0.2.0
 ```
 
-## Where code goes
-
-- `.github/workflows/`: the reusable workflows and this repository's own callers.
-- `renovate/`: the base preset and one preset per kind.
-- `scripts/`: the gate. `check.ts` is the runner, `startup.ts` holds the preflight checks, `expected.ts` holds
-  this repository's project config paths and untyped sources, `tools.ts` holds the mise expectations, `run.ts`
-  starts every process, `rows.ts` reads what each row's tool printed, `github.ts` reads gh's token,
-  `shellcheck.ts` is the ShellCheck stand-in the `workflows` row hands actionlint, and `tsconfig.json` is the
-  gate's own TypeScript config. The `*.test.ts` files are the gate's own tests, and `stand-ins.ts` holds the
-  programs they start in place of the real ones. Which of these every Bun repository shares byte for byte is
-  under [Gate](HANDBOOK.md#gate).
-- The root `tsconfig.json`: the TypeScript config for `eslint.config.ts`, the one TypeScript file outside
-  `scripts/`.
-- The root and `.github/`: the community files GitHub serves as defaults, and this repository's own boilerplate.
-- `docs/`: the documents [README.md#documentation](README.md#documentation) indexes.
-
-## Tests
-
-The `lint` row runs `eslint.config.ts`, and the `scripts:test` row runs the gate's own suite,
-`bun test ./scripts/`. They are the last two rows, since each runs repository code that can write any file a row
-reads. After each, when another row follows, the checks before the first row run again, and a finding there
-prints as `preflight  after <row>, no later row ran`. `bun run check:rows` prints the order. Every program a test
-would start is a stand-in from `scripts/stand-ins.ts`, never the real gh, git, mise or the network. The
-`scripts:test` row reads skipped, todo and filtered tests beside the passing ones, and it fails when it counts no
-test, when every test it counts was skipped, and when a name pattern filtered any test out. It runs with
-`CI=true`, so a file holding `test.only` fails the row. The other rows are the checks on the rest of the tree, and
-the break round in the alignment record proves they go red.
-
-## Code
-
-- Every process the gate starts goes through `scripts/run.ts`. No row has a deadline of its own: CI's job timeout
-  bounds the gate, and on your machine Ctrl-C ends a hung tool. A row fails when a process its tool started still
-  holds the tool's output 10 seconds after the tool exits, and says so. That process runs on, so end it yourself.
-- `scripts/run.ts` resolves every program to an absolute path from `PATH` alone, and Bun itself runs as
-  `process.execPath`. A program found through a link back into the checkout is passed over. On Windows a bare
-  program name resolves from the current directory before `PATH`, so a committed `gh.bat` would otherwise run in
-  place of gh, which the preflight refuses ([The gate](#the-gate)).
-- Every process the gate starts gets `PATH` narrowed to its absolute entries outside the checkout, so a program
-  one starts by name never resolves inside it.
-- The gate starts mise with an environment built from an allow-list, never the one it inherited.
-- Bun's script runner puts `node_modules/.bin` first on `PATH`, so under `bun run` a committed
-  `node_modules/.bin/bun` would replace the gate. CI installs with `bun install --frozen-lockfile --ignore-scripts`,
-  and CI and the push hook call `bun --no-env-file scripts/check.ts` directly, which skips the script runner, so
-  the preflight's `node_modules` refusal runs before every merge.
-- A row throws with the tool's own output, so a red row reads the same as running the tool by hand.
-- Every process the gate starts gets `NO_COLOR=1`, and a row strips ANSI sequences from its tool's output before
-  it reads it, since a tool can color its output on one runner alone. Every line the gate prints shows a control
-  character or an invisible mark as an escape of its code point, so a name in a finding cannot rewrite the lines
-  above it.
-- Every package runs from its absolute path under `node_modules`, and every tool `mise.toml` pins from the path
-  `mise which` prints. mise, gh and git each start from an absolute `PATH` entry outside the checkout.
-- ESLint lints and Prettier formats. An ESLint rule that is wrong for this code is turned off in
-  `eslint.config.ts` with its reason beside it.
-- An inline `eslint-disable` names its rules and gives a reason after `--`, which the eslint-comments plugin
-  checks, and an unused one fails the `lint` row.
-- `eslint.config.ts` refuses an import attribute other than `type: 'json'`, and any options on a dynamic import.
-  Bun runs any file as code under a loader attribute, such as `with { type: 'js' }` on a `.txt` import, which no
-  row reads as code.
-
 ## Dependencies
 
 Every dependency is pinned to an exact version and moved by Renovate under a three-day cooldown. The
@@ -339,9 +376,6 @@ Each tool the gate runs, and how its bytes are held to their source:
 - Bun itself: a version alone. `packageManager` plus the cooldown is the control, because the setup action
   verifies no download.
 
-`MISE_BACKENDS_<TOOL>` overrides a tool's backend from the environment, and no setting reports it. The gate does
-not close that gap.
-
 ## Releases
 
 release-please opens one release pull request from the commits on `main` and keeps it current. Merging it
@@ -352,6 +386,22 @@ changelog is empty. release-please owns `CHANGELOG.md`, the version in `package.
 `.release-please-manifest.json`.
 
 Nothing is published to a registry. The owner flips each draft public by hand.
+
+## Troubleshooting
+
+A local run that fails or disagrees with CI:
+
+- A row that refuses a package `node_modules/` lacks, or a hook that cannot find its tool, means a stale or
+  missing install. Run `bun install --frozen-lockfile` ([Setup](#setup)).
+- A `workflows` row that differs from CI can come from zizmor's online audits. They run on your machine when gh
+  answers with a token and never in CI's gate job ([The gate](#the-gate)). `ZIZMOR_OFFLINE=1` runs what CI runs.
+- A `bun run format` that disagrees with the `format` row can come from a personal env file, which the script
+  loads and the gate does not ([Safety](#safety)).
+- In a checkout another account owns, git refuses the repository as dubious ownership, and the gate stops. Make
+  your account the directory's owner. The gate starts git with no system or global config, so it reads no
+  `safe.directory` entry, by design.
+- A row that fails because a process its tool started still holds the tool's output leaves that process running.
+  Find it and end it.
 
 ## What never happens
 
