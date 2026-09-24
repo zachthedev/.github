@@ -147,6 +147,7 @@ command. A row that a section owns names that section.
   runs, reads or changes in a session. It reaches everything about the tree by a relative link. A session rule
   is written with its reason. A tree rule is one imperative line with a link to
   `CONTRIBUTING.md#what-never-happens` and no reason.
+- `AGENTS.md` never references this handbook. Agents do not read it, and it is the owner's alignment tool.
 - `CLAUDE.md` is one line, `@AGENTS.md`. Claude Code expands the import, so the same file is read once in every
   session, on every platform.
 - `docs/` is flat, apart from `docs/images/` for the images a document shows. `docs/dev.md` is in every
@@ -528,9 +529,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A tracked env file Bun loads on its own, `.env` and its variants, is refused before a merge (the one CI copy,
   above), because Bun loads it into the gate's environment (Known defects). The names match without regard to
   case. A template such as `.env.example` passes.
-- Every `bun <file>` start in a gate row, the gate's own entry, a hook or a check script passes `--no-env-file`, so
-  Bun loads no `.env` into it. Bun otherwise loads `.env`, `.env.local` and `.env.development` into each tool it
-  runs, and an env value can turn a row red, as `PRETTIER_EXPERIMENTAL_CLI` does. A dev or deploy script keeps env
+- Every `bun test`, `bun -e` and `bun <file>` start in a gate row, the gate's own entry, a hook or a check script
+  passes `--no-env-file`, so Bun loads no `.env` into it. Bun otherwise loads `.env`, `.env.local` and
+  `.env.development` into each tool it runs, and an env value can turn a row red, as `PRETTIER_EXPERIMENTAL_CLI`
+  does. `bunx` ignores the flag in every position, so a JS tool it starts loads an untracked env file on a
+  contributor's machine (Troubleshooting in `CONTRIBUTING.md`). A dev or deploy script keeps env
   loading. `bunfig.toml` stays the cooldown alone (Updates), so it never sets `env = false`.
 - A `bunfig.toml` holding any key but `[install] minimumReleaseAge` is refused before a merge (the one CI copy,
   above), because a top-level `preload`, a `[test] preload` and `[define]` each run or rewrite code.
