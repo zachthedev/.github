@@ -554,6 +554,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     `CLIPPY_CONF_DIR=<absolute root>` names it.
   - cargo-deny: every `deny.toml` but the root one, a `.deny.toml` and a `.cargo/deny.toml`. cargo-deny reads the
     nearest, so the row passes `--config deny.toml`, a global flag that goes ahead of `check`.
+  - Each of those three named forms stops every read its tool makes, above the checkout included.
 - A gate that calls Prettier's `getFileInfo` passes `resolveConfig: false`. The API otherwise resolves the nearest
   config in the gate's own process, a nested `package.json` `prettier` key and its plugins included, and
   `--config` never reaches it.
@@ -623,7 +624,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - In a Rust repository:
   - cargo started at the root reads the root `.cargo/config` and `.cargo/config.toml`, the extensionless one
     winning, and every one above the checkout, never a crate's. The gate holds `.cargo/config.toml` whole and
-    refuses `.cargo/config`. A config above the checkout or in `CARGO_HOME` is a named residual.
+    refuses `.cargo/config`. cargo has no named form, so a config above the checkout or in `CARGO_HOME` is a
+    named residual, the one such read in a Rust gate.
   - The gate refuses a `rust-toolchain` or `rust-toolchain.toml` anywhere but the root `rust-toolchain.toml`.
 - A test or script that spawns git drops every inherited `GIT_*` variable for that process and names the
   repository with `-C <root>`. git exports `GIT_DIR` and `GIT_INDEX_FILE` to a hook, so a gate the hook runs
