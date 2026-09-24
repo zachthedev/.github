@@ -732,9 +732,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   word. A broader fold costs a false refusal at worst.
 - The stack's own runner drives the gate: Bun scripts in `package.json`, `xtask` for Rust, Cake for C#, go-task
   for Go. A `Makefile` is a violation.
-- In a Bun repository `scripts/startup.ts`, `scripts/run.ts` and `scripts/tools.ts` are byte-identical across
-  the set. The repository's own two lists, its project config paths and its untyped sources, live in
-  `scripts/expected.ts`.
+- In a Bun repository every file under `scripts/` but `check.ts`, `expected.ts` and `tsconfig.json` is
+  byte-identical across the set, the tests and their stand-ins included. The repository's own two lists, its
+  project config paths and its untyped sources, live in `scripts/expected.ts`.
 - A Rust repository's gate modules are shared by copy the same way, never through a shared crate.
 - `cargo xtask` is `cargo run --package xtask`, and the outer cargo resolves the workspace before any row runs.
   The alias in `.cargo/config.toml` therefore carries `--locked`: `run --locked --package xtask --quiet --`.
