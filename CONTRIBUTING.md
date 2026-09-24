@@ -12,7 +12,9 @@ their tools the same way. The push hook runs `bun scripts/check.ts`.
 The hook script `lefthook install` writes fails open. When it finds no lefthook binary, as in a checkout whose
 `node_modules/` is gone, it prints `Can't find lefthook in PATH` and exits 0, and the commit or push goes through
 unchecked. A fresh clone runs no hook at all until `bun install` runs. CI's `commits` job and gate hold both
-cases.
+cases. The hooks catch an accident, never a hostile branch: lefthook merges a branch's `lefthook-local.*` or
+`.config/lefthook-local.*` over `lefthook.yml`, and a job there with a hook job's name replaces it before any job
+runs.
 
 A pull request controls its own install scripts and gate code. Before running anything on a pull request branch
 you did not write, read its diff, then install it with `bun install --ignore-scripts`, so no install script runs.
@@ -23,7 +25,8 @@ commit hook's commitlint and in the `format` and `prepare` scripts, since each r
 `eslint.config.ts` and `commitlint.config.js` are code too: the `lint` row and the commit hook run them. The gate
 holds both whole, so a change to either changes its copy under `scripts/` in the same commit. The
 gate's refusals keep such a branch from merging, and nothing in the gate can stop its first run on your machine,
-so the diff read is what catches one there.
+so the diff read is what catches one there. Read it before you commit on the branch too, since the commit hook
+runs the branch's own code.
 
 ## The gate
 
