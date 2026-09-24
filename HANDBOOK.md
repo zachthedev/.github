@@ -939,7 +939,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - typescript-eslint's `ban-ts-comment`, in `strictTypeChecked`, bans `@ts-ignore` and `@ts-nocheck` and requires a
   description on `@ts-expect-error`. It reports every directive shape tsc honors. `@ts-expect-error` cannot name a
   TypeScript error code that anything checks, so its description is the reason.
-- The gate refuses `prettier-ignore` outside the paths the held `.prettierignore` names.
+- The gate refuses the text of Prettier's ignore comment, in any case and in prose too, in every file the format
+  row checks. A path the held `.prettierignore` names is not checked.
 
 ### Rust
 
