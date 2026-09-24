@@ -527,14 +527,16 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every gate refuses a `patchedDependencies` key in any tracked `package.json`. A patch rewrites a pinned
   package's code under a frozen, script-free install and passes the lockfile's integrity check. A scope as narrow
   as the gate's own imports misses lint configs and tools.
-- A Bun gate walks every `tsconfig.json` and `jsconfig.json` on disk, at any depth outside `node_modules` and
-  `.claude/worktrees`, along its `extends` chain. typescript-eslint reads the nearest tsconfig for each file, so a
-  nested one, tracked or not, changes lint results.
-- The walk refuses `paths` or `baseUrl`, and an `extends` naming a package, an absolute path, a missing file or a
-  file outside the checkout. A `noCheck: true` lets the typecheck row pass over a type error while it prints its
-  full count, so a project config is gate config under `CODEOWNERS`. Bun applies the root one to a tool's own
-  imports, so a `paths` entry for a package commitlint imports ran repository code in the commit hook. A project
-  aliases through `package.json` `imports`, whose `#` names cannot redirect a bare package name.
+- A Bun gate refuses a `tsconfig.json` or `jsconfig.json` on disk, tracked or not, at any depth outside
+  `node_modules` and `.claude/worktrees`, except at the paths the gate names. typescript-eslint's project service
+  reads the nearest one for each file, so this is a location rule for a tool with no named config form, with no
+  hold on the text.
+- The gate walks each named one along its `extends` chain. It refuses `paths` or `baseUrl`, and an `extends`
+  naming a package, an absolute path, a missing file or a file outside the checkout. A `noCheck: true` lets the
+  typecheck row pass over a type error while it prints its full count, so a project config is gate config under
+  `CODEOWNERS`. Bun applies the root one to a tool's own imports, so a `paths` entry for a package commitlint
+  imports ran repository code in the commit hook. A project aliases through `package.json` `imports`, whose `#`
+  names cannot redirect a bare package name.
 - A Go gate, and any other over no TypeScript, refuses a `tsconfig.json` or `jsconfig.json` tracked at any depth
   or on disk at the root, since none of its tools reads a nested one.
 - Every tracked `tsconfig.json` and `jsconfig.json` is plain JSON with no comments, because every gate and the
@@ -559,22 +561,23 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A config the tool finds first replaces the shared one: a committed `.golangci.json` beside `.golangci.yml`
   replaced the lint config and hid a `govet` finding while the row named no config.
 - The gate refuses the other names a tool reads only where the tool has no named-config form: cargo's config, the
-  toolchain file, the actionlint config, lefthook's configs, the env files, `.npmrc`, cosmiconfig's root `.config`
-  and mise's configs. Refusals match at every depth the tool reads, without regard to case.
+  toolchain file, the actionlint config, lefthook's configs, the env files, `.npmrc`, cosmiconfig's root `.config`,
+  mise's configs, and the project configs typescript-eslint reads (above). Refusals match at every depth the tool
+  reads, without regard to case.
 - A tool whose row names its config drops the refusal of its other names, but only where a measurement shows the
-  named form stops every read that tool makes. Until then the refusal stands:
-  - Prettier: every config file name but the root `.prettierrc`, a `package.json` `prettier` key and a
-    `package.yaml`.
-  - commitlint: a `.commitlintrc*`, a `commitlint.config.*` other than the root `commitlint.config.js`, a
-    `package.json` `commitlint` key and a `package.yaml`.
-- The Rust rows name their configs, and each named form stops every read its tool makes, above the checkout
-  included, so their other names carry no refusal:
+  named form stops every read that tool makes. Each tool below has that measurement, and keeps a refusal only for
+  the exception measured beside it:
+  - Prettier: `--config .prettierrc` stops every other config search. It still reads a nested `.editorconfig`, so
+    every Prettier run passes `--no-editorconfig` (Formatting), or the gate refuses a nested one. A plugin the
+    named `.prettierrc` lists is config content under `CODEOWNERS`.
+  - commitlint: `--config commitlint.config.js` stops `.commitlintrc*`, the other `commitlint.config.*` names and
+    the `package.json` key. cosmiconfig still builds its meta config from the root `.config`, which stays refused.
   - rustfmt reads a `rustfmt.toml` or `.rustfmt.toml` at any depth, in any case and above the checkout. The row
-    runs `cargo fmt --check -- --config-path rustfmt.toml`.
+    runs `cargo fmt --check -- --config-path rustfmt.toml`, which stops every one of those reads.
   - clippy reads a `clippy.toml` or `.clippy.toml` from a crate's directory, the workspace root and above the
-    checkout, and it takes no config flag. `CLIPPY_CONF_DIR=<absolute root>` names it.
+    checkout, and it takes no config flag. `CLIPPY_CONF_DIR=<absolute root>` names it and stops the rest.
   - cargo-deny reads the nearest `deny.toml`, `.deny.toml` or `.cargo/deny.toml`. The row passes
-    `--config deny.toml`, a global flag that goes ahead of `check`.
+    `--config deny.toml`, a global flag that goes ahead of `check`, and it stops the rest.
 - A gate that calls Prettier's `getFileInfo` passes `resolveConfig: false`. The API otherwise resolves the nearest
   config in the gate's own process, a nested `package.json` `prettier` key and its plugins included, and
   `--config` never reaches it.
@@ -748,9 +751,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   lint and the commit hook keep the caller's ignores. A `Revert "..."` or merge subject fails the subject lint.
   The revert form (Commits) and squash-only merging make that right, and a pull request GitHub's revert button
   opens passes once it is retitled.
-- Before its install, the workflow refuses the commitlint configs every gate refuses (Gate), at any depth and
-  without regard to case. It reads every tracked `package.json`, nested ones included, for a `commitlint` key.
-  It also refuses a root `.config` and a `package.json` `cosmiconfig` key (Gate).
+- Before its install, the workflow refuses a root `.config` and a `package.json` `cosmiconfig` key (Gate). Both
+  commitlint steps name `commitlint.config.js`, which stops commitlint's other config names.
 - Before its install, the `commits` workflow refuses any tracked path with a `node_modules` segment, nested ones
   included, without regard to case. `bun install` keeps a tracked package directory at the locked version, and
   Bun then runs that copy. The job runs beside every caller's gate, whatever the caller's stack, so it holds
@@ -761,9 +763,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - It refuses a tracked env file at the root, any of the eight names Bun loads, without regard to case.
   `bun install` loads one even frozen and without scripts, and no flag stops that. A tracked `.env` pointing
   `BUN_INSTALL_CACHE_DIR` at a committed folder installed a changed package with `bun.lock` unchanged.
-- A step of its own, before the install, refuses a tracked `bunfig.toml`, in any case, unless it holds
-  `[install] minimumReleaseAge` alone at the cooldown or higher, because a preload in it runs inside commitlint. A
-  link or a file that does not parse is refused too. Every `bun` start in the job passes `--no-env-file` (Gate).
+- A step of its own, before the install, refuses a tracked `bunfig.toml`, in any case, holding any key but
+  `[install] minimumReleaseAge`, because a preload in it runs inside commitlint and `[install.cache] dir` redirects
+  the install's cache. A link or a file that does not parse is refused too. Every `bun` start in the job passes
+  `--no-env-file` (Gate).
 - A step of its own, also before the install, refuses `paths` and `baseUrl` in any tracked `tsconfig.json` or
   `jsconfig.json` and in every file its `extends` names, because the job runs commitlint under Bun (Gate).
   It also refuses an `extends` naming a package, a file outside the checkout or a file the checkout lacks, since
