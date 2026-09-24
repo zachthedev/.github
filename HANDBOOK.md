@@ -967,9 +967,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   the category keys never reach it, and it fails a build that treats warnings as errors.
 - The gate requires StyleCop at its pin, as a direct dependency, in every C# lock file. Removing the reference and
   relocking turns SA1404 off with the gate green.
-- The gate refuses `#pragma warning disable` in every form, because no analyzer checks a pragma for an ID or a
-  reason. A compiler warning (`CSxxxx`) then has no inline waiver, only the held `.editorconfig`, since
-  `[SuppressMessage]` cannot suppress one.
+- The gate refuses `#pragma warning` in every form, `restore` included, because no analyzer checks a pragma for an
+  ID or a reason. A `restore` alone does nothing, so refusing it keeps the rule to one sentence at no cost.
+  `#pragma checksum` stays allowed. A compiler warning (`CSxxxx`) then has no inline waiver, only the held
+  `.editorconfig`, since `[SuppressMessage]` cannot suppress one.
 - The gate also refuses:
   - `#nullable disable` in every form;
   - `#line hidden`, which hides every analyzer finding below it;
