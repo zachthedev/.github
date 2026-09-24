@@ -90,10 +90,9 @@ command. A row that a section owns names that section.
 | ------------------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `LICENSE`                                  | shape     | Identity                                                                                                                                                                 |
 | `README.md`                                | own       | what it is, how to get it in one line, the documentation table, the gate command, no copy of a printed list                                                              |
-| `CONTRIBUTING.md`                          | shape     | Setup, The gate, Commit messages, Where code goes, Tests, Code, Dependencies, Releases, What never happens, Troubleshooting                                              |
+| `CONTRIBUTING.md`                          | shape     | Setup, Safety, Running it, Where code goes, Code, Tests, The gate, Commit messages, Dependencies, Releases, Troubleshooting, What never happens                          |
 | `SECURITY.md`                              | shape     | Security, Reporting, What is supported, In scope, Out of scope, After a report, `hey@`                                                                                   |
 | `CHANGELOG.md`                             | own       | written by the release tool alone, one per crate under release-plz                                                                                                       |
-| `docs/dev.md`                              | shape     | Prerequisites, First run, Running it, Generated files, Tests that need a real thing                                                                                      |
 | `docs/install.md`                          | shape     | `rust-crates`, `rust-app`, `csharp-installer`, `go-cli`; Requirements, Install, Check the download, Upgrade, Uninstall                                                   |
 | `docs/deploy.md`                           | shape     | `bun-service`; Your own deployment, Releasing deploys, Operating it                                                                                                      |
 | `docs/usage.md`                            | own       | every kind but `bun-tooling`; what `--help` and the README do not carry                                                                                                  |
@@ -138,20 +137,31 @@ command. A row that a section owns names that section.
   every repository's default. A repository carries its own only to differ.
 - Every document is written for a human contributor first: `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, and
   anything under `docs/`. Links between them are relative markdown links, clickable on github.com.
-- `CONTRIBUTING.md`'s Troubleshooting section holds every caveat and residual a contributor acts on locally, and
-  no other section repeats one. It says at least that `bunx` may run another copy of a tool when the install is
-  stale or missing, so a local run can disagree with CI. It says to run the frozen install after every pull and
-  in each worktree, and to leave `BUN_OPTIONS` and the `BUN_INSPECT` names unset.
+- `CONTRIBUTING.md` reads top to bottom as learning to contribute, and each topic lives in one section. Setup
+  holds the prerequisites, the first run, the hooks and the frozen install in each worktree. Running it holds how
+  to run the repository locally and its generated files. Code holds style and waivers. Tests includes the tests
+  that need a real service. What never happens holds the tree rules `AGENTS.md` links.
+- Safety says what a contributor does to stay safe locally. A pull request's diff is read before anything runs
+  on its branch, because the branch supplies the install, the hooks and the gate. The section names what reaches
+  the tools from the contributor's own environment: `BUN_OPTIONS` and the `BUN_INSPECT` names stay unset, and
+  `bunx` ignores `--no-env-file`, so a personal env file reaches the JS tools. It says hooks are not a control.
+- Troubleshooting covers a local run that fails or differs from CI: a stale install, the other copy `bunx` may
+  run, env files and a proxy that catches loopback.
+- A cross-reference stands wherever an agent that skims would otherwise miss an item. Setup points at the Safety
+  items it touches, and The gate points at Troubleshooting for a local and CI mismatch.
 - `AGENTS.md` lives at the repository root under the vendor-neutral name, so every vendor's agent reads one
   editable file. It writes out what an agent alone needs: the gate commands and the rules about what an agent
   runs, reads or changes in a session. It reaches everything about the tree by a relative link. A session rule
   is written with its reason. A tree rule is one imperative line with a link to
   `CONTRIBUTING.md#what-never-happens` and no reason.
+- Its Read first section is the same base list in every repository, in order: `README.md`, `CONTRIBUTING.md`,
+  `SECURITY.md`, then each kind document present, `docs/install.md`, `docs/deploy.md` and `docs/usage.md`. A
+  repository may extend the list.
 - `AGENTS.md` never references this handbook. Agents do not read it, and it is the owner's alignment tool.
 - `CLAUDE.md` is one line, `@AGENTS.md`. Claude Code expands the import, so the same file is read once in every
   session, on every platform.
-- `docs/` is flat, apart from `docs/images/` for the images a document shows. `docs/dev.md` is in every
-  repository. A kind adds the files its Files rows name. Any other file under `docs/` is the repository's own.
+- `docs/` is flat, apart from `docs/images/` for the images a document shows. A kind adds the files its Files
+  rows name. Any other file under `docs/` is the repository's own.
   `README.md` indexes every document. A workspace member's own documentation sits beside it and the index reaches
   it.
 - A YAML file takes `.yml`. GitHub documents that spelling for every file it reads. It reads the issue chooser's
@@ -459,7 +469,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   is unverified until the CI leg for that platform runs. Each branch is derived from the function's contract, never
   from reasoning about the host. Two such faults passed a Windows gate and failed on Linux and macOS.
 - No gate row resolves a tool from the machine's `PATH`. The programs the gate expects on `PATH` are the
-  prerequisites `docs/dev.md` names.
+  prerequisites Setup in `CONTRIBUTING.md` names.
 - No gate, hook or shared job starts a tool on a `node` from `PATH`. Every hook, `package.json` script and gate
   row starts a JS tool as `bunx --bun --no-install <tool>`. A bare `bunx` starts a bin whose shebang names `node`,
   such as Prettier's or commitlint's, under the `node` on `PATH` when one exists, and GitHub's runners carry Node.
@@ -533,7 +543,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   passes `--no-env-file`, so Bun loads no `.env` into it. Bun otherwise loads `.env`, `.env.local` and
   `.env.development` into each tool it runs, and an env value can turn a row red, as `PRETTIER_EXPERIMENTAL_CLI`
   does. `bunx` ignores the flag in every position, so a JS tool it starts loads an untracked env file on a
-  contributor's machine (Troubleshooting in `CONTRIBUTING.md`). A dev or deploy script keeps env
+  contributor's machine (Safety in `CONTRIBUTING.md`). A dev or deploy script keeps env
   loading. `bunfig.toml` stays the cooldown alone (Updates), so it never sets `env = false`.
 - A `bunfig.toml` holding any key but `[install] minimumReleaseAge` is refused before a merge (the one CI copy,
   above), because a top-level `preload`, a `[test] preload` and `[define]` each run or rewrite code.
@@ -700,7 +710,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every gate withholds `BUN_OPTIONS` and `SHELLCHECK_OPTS` from every child it starts, in every spelling. An
   ordinary shell sets either. Bun reads `BUN_OPTIONS` as flags ahead of its own, a test name filter or a preload
   among them. `SHELLCHECK_OPTS` reaches ShellCheck past actionlint's `--norc`. The `BUN_INSPECT` names have no
-  ordinary use, so the contributor leaves them unset (Troubleshooting in `CONTRIBUTING.md`).
+  ordinary use, so the contributor leaves them unset (Safety in `CONTRIBUTING.md`).
 - The gate refuses a workflow file whose extension is not a lowercase `.yml`. actionlint's file list and zizmor's
   collection each missed a `.github/workflows/UP.YML`.
 - The CI job's `timeout-minutes` bounds the gate. A gate sets no deadline of its own on a row and kills no
@@ -1237,7 +1247,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The .NET SDK is pinned exactly. `global.json` names the exact SDK with `rollForward: patch`. CI's setup-dotnet
   then installs and builds with that SDK alone, and a contributor's machine one patch ahead still runs the gate.
   `global.json`'s `errorMessage` names the install command and points at `sdk.version` without repeating the
-  number, and `docs/dev.md` reads the version from `global.json`. Renovate rewrites `sdk.version` alone, so a
+  number, and Setup in `CONTRIBUTING.md` reads the version from `global.json`. Renovate rewrites `sdk.version` alone, so a
   literal version anywhere else goes stale on every bump.
 - A self-contained installer ships the runtime of the SDK that builds it, so a looser pin lets two builds of one
   commit ship different runtimes. The pin is the SDK carrying the newest runtime past the cooldown, never one
