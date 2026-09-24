@@ -39,8 +39,11 @@ jobs:
       # package directory at the locked version in place of the one it would fetch, and commitlint
       # then runs that copy. A tracked .npmrc, at any depth, redirects the install's registry. A
       # package.json patchedDependencies key is applied even by a frozen install without scripts,
-      # so the key is refused in every tracked package.json, whatever it patches.
-      # commitlint takes the first config it finds, and a package.json commitlint key, a
+      # so the key is refused in every tracked package.json, whatever it patches. bun install loads
+      # an env file at the root, frozen and without scripts, and no flag stops that. A variable there
+      # can move its registry, skip the lockfile or point its cache at a committed folder, which
+      # swaps a package with no bun.lock change. So each of the eight names Bun loads is refused at
+      # the root, the one place the install reads them. commitlint takes the first config it finds, and a package.json commitlint key, a
       # package.yaml and a .commitlintrc file each come before commitlint.config.js in its search.
       # So every commitlint config but the root commitlint.config.js is refused at any depth, a
       # package.yaml whole, since the step reads no YAML, and every tracked package.json is read for
@@ -55,6 +58,7 @@ jobs:
           found=$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)node_modules/|(^"?|/)\.npmrc"?$' || true)
           configs=$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)(\.commitlintrc[^/]*|commitlint\.config\.[^/]*|package\.yaml"?)$' | grep -vxF commitlint.config.js || true)
           meta=$(printf '%s\n' "$tracked" | grep -iE '^"?\.config(/|"?$)' || true)
+          envs=$(printf '%s\n' "$tracked" | grep -iE '^"?\.env(\.local|\.(development|production|test)(\.local)?)?"?$' || true)
           keyed=""
           patched=""
           while IFS= read -r manifest; do
@@ -67,7 +71,7 @@ jobs:
               patched+="$(printf '%q' "$manifest")"$'\n'
             fi
           done <<< "$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)package\.json"?$' || true)"
-          if [ -n "$found" ] || [ -n "$configs" ] || [ -n "$meta" ] || [ -n "$keyed" ] || [ -n "$patched" ]; then
+          if [ -n "$found" ] || [ -n "$configs" ] || [ -n "$meta" ] || [ -n "$envs" ] || [ -n "$keyed" ] || [ -n "$patched" ]; then
             while IFS= read -r path; do
               [ -n "$path" ] && echo "::error::$(printf '%q' "$path") is tracked, and bun install would read it in place of what bun.lock names."
             done <<< "$found"
@@ -77,6 +81,9 @@ jobs:
             while IFS= read -r path; do
               [ -n "$path" ] && echo "::error::$(printf '%q' "$path") is under the root .config, where cosmiconfig reads a config before commitlint loads the one named."
             done <<< "$meta"
+            while IFS= read -r path; do
+              [ -n "$path" ] && echo "::error::$(printf '%q' "$path") is an env file bun install loads, which can swap a package with no bun.lock change."
+            done <<< "$envs"
             while IFS= read -r finding; do
               [ -n "$finding" ] && echo "::error::$finding, and commitlint.config.js at the root is the one commitlint config."
             done <<< "$keyed"
