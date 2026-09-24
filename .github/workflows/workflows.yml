@@ -115,6 +115,20 @@ jobs:
             done <<< "$waivers"
             exit 1
           fi
+      # actionlint reads .github/actionlint.yaml or .yml from the checkout, and a paths ignore there
+      # drops any finding by pattern, ShellCheck's and the stand-in's refusal included. So a
+      # tracked one is refused, matched without regard to case, as the caller's gate refuses it.
+      # A failed git call stops the step.
+      - name: Refused actionlint config
+        run: |
+          tracked=$(git ls-files)
+          configs=$(printf '%s\n' "$tracked" | grep -iE '^"?\.github/actionlint\.ya?ml"?$' || true)
+          if [ -n "$configs" ]; then
+            while IFS= read -r path; do
+              echo "::error::$(printf '%q' "$path") is an actionlint config, which can ignore any finding this job reports. Remove it."
+            done <<< "$configs"
+            exit 1
+          fi
       # actionlint hands ShellCheck a script only when its shell is bash or sh, or starts with
       # "bash " or "sh ", so a step or defaults.run shell such as /bin/bash -e {0} runs bash with
       # no ShellCheck at all. Every shell key in a tracked workflow is held to bash, sh or pwsh,
