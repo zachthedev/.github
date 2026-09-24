@@ -100,7 +100,8 @@ disk, tracked or not, so the gate on your machine agrees with CI:
 - a `.taplo.toml` that differs from the copy in `scripts/startup.ts`, and any other `.taplo.toml` or `taplo.toml`;
 - a `.github/zizmor.yml` that differs from the copy in `scripts/expected.ts`, any other `zizmor.yml` or
   `zizmor.yaml`, and a tracked file under `.github` carrying a `zizmor: ignore[...]` comment. A waiver is an entry
-  in `.github/zizmor.yml`, under that audit's ignore list, naming the file it waives;
+  in `.github/zizmor.yml`, under that audit's ignore list. It names `file:line`, so a move of the finding turns the
+  gate red, except a `secrets-inherit` waiver, which names the file because the `workflows` row holds its callee;
 - a `shellcheck disable` directive in a tracked workflow. ShellCheck has no waiver file, so rewrite the script
   until ShellCheck passes it;
 - a `.github/actionlint.yaml` or `.github/actionlint.yml`, which can silence any actionlint finding;
