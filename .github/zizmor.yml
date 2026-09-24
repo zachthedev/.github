@@ -11,6 +11,12 @@ rules:
   # refuses $/ as a malformed call (rhysd/actionlint#711). Off until actionlint accepts $/.
   self-repository:
     disable: true
+  # cd.yml passes secrets: inherit to release-pr.yml, whose job reads its environment's secret,
+  # which a caller in no environment cannot name. The waiver covers that file alone. Every waiver
+  # lives here, since the workflows job refuses an inline ignore comment.
+  secrets-inherit:
+    ignore:
+      - cd.yml
   # An advisory published against an unchanged action pin turns every pull request's workflows
   # check red until the pin moves. A waiver is one GHSA id per entry, with a comment beside it
   # naming the advisory, what it blocks, why shipping is safer and the condition that removes it.

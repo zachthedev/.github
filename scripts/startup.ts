@@ -298,12 +298,14 @@ export const ZIZMOR_CONFIG = '.github/zizmor.yml';
 /**
  * What {@link ZIZMOR_CONFIG} holds, compared whole. `self-repository` is off
  * here alone: ci.yml and cd.yml call the reusable workflows beside them with
- * `./`, which actionlint accepts and that audit refuses.
+ * `./`, which actionlint accepts and that audit refuses. `secrets-inherit` is
+ * waived for cd.yml, whose release-pr job needs an environment secret.
  */
 const EXPECTED_ZIZMOR_CONFIG = {
   rules: {
     'unpinned-uses': { config: { policies: { '*': 'hash-pin' } } },
     'self-repository': { disable: true },
+    'secrets-inherit': { ignore: ['cd.yml'] },
     'known-vulnerable-actions': { config: { allow: [] } },
   },
 } as const;
