@@ -514,7 +514,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   included, and the shared `startup.ts` holds `scripts/tsconfig.json`. A root `noCheck: true` let the typecheck
   row pass over a type error while it printed its full count.
 - The gate walks each held one along its `extends` chain. It refuses `paths` or `baseUrl` there, and an `extends`
-  naming a package, an absolute path, a missing file or a file outside the checkout. Under `bunx --bun` Bun
+  naming a package, an absolute path, a missing file or a file outside the checkout. Every `extends` target must
+  itself be held, because an unheld base file can carry `noCheck`. Under `bunx --bun` Bun
   applies the root one to a tool's own imports, so a `paths` entry for a package commitlint imports ran
   repository code in the commit hook. A project aliases through `package.json` `imports`, whose `#` names cannot
   redirect a bare package name.
@@ -541,6 +542,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     `package.yaml`.
   - commitlint: a `.commitlintrc*`, a `commitlint.config.*` other than the root `commitlint.config.js`, a
     `package.json` `commitlint` key and a `package.yaml`.
+- A gate that calls Prettier's `getFileInfo` passes `resolveConfig: false`. The API otherwise resolves the nearest
+  config in the gate's own process, a nested `package.json` `prettier` key and its plugins included, and
+  `--config` never reaches it.
 - Every row that walks the tree prints what it checked, the files or their count, and fails on zero. A row that
   checked nothing reads green otherwise: taplo and Prettier each exit 0 on empty input.
   - The actionlint row hands actionlint the workflow files by name. With no file argument actionlint also needs a
@@ -591,8 +595,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     past the root's `<clear />`. A nested `.editorconfig` passes only where the gate names it and holds it byte
     for byte.
   - The build, test and installer rows pass `DirectoryBuildPropsPath`, `DirectoryBuildTargetsPath` and
-    `DirectoryPackagesPropsPath` as absolute paths at the root, and `-noAutoResponse`, so MSBuild reads the
-    root's files alone and no response file.
+    `DirectoryPackagesPropsPath` as absolute paths at the root, so MSBuild reads the root's files alone.
+  - The build and installer rows also pass `-noAutoResponse`, so MSBuild reads no response file. The test row
+    does not: `dotnet test` reads no `Directory.Build.rsp`, and in MTP mode it hands the flag to the test app,
+    which exits 5 with zero tests.
   - CSharpier runs over named files with `--config-path`, `--ignore-path` and `--include-generated`, and the row
     compares its checked count. A root `.csharpierignore` of `*` gave `Checked 0 files` and exit 0.
     `.csharpierrc` and `.csharpierignore` are held whole.
