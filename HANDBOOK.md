@@ -553,8 +553,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   a list in its gate, since tsc checks neither, and a Go gate refuses a tracked Go file no build compiles.
 - The gate refuses a root `.config` directory outright, in any letter case. mise, the dotnet tool manifest,
   cosmiconfig's meta config and lefthook all read it.
-- The root `.config` and a `package.json` `cosmiconfig` key are refused before any commitlint step, the shared
-  `commits` job included. cosmiconfig builds its meta config in the working directory even under `--config`.
+- The root `.config` is refused before any commitlint step, the shared `commits` job included, because
+  cosmiconfig builds its meta config there even under `--config`. A `package.json` `cosmiconfig` key changes
+  nothing under `--config`, so it passes.
 - Every gate tool that searches for its own config runs with the one config named explicitly. The tools are
   Prettier, commitlint, golangci-lint, ESLint, taplo and zizmor, CSharpier in C#, and rustfmt, clippy and
   cargo-deny in Rust.
@@ -570,8 +571,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - Prettier: `--config .prettierrc` stops every other config search. It still reads a nested `.editorconfig`, so
     every Prettier run passes `--no-editorconfig` (Formatting), or the gate refuses a nested one. A plugin the
     named `.prettierrc` lists is config content under `CODEOWNERS`.
-  - commitlint: `--config commitlint.config.js` stops `.commitlintrc*`, the other `commitlint.config.*` names and
-    the `package.json` key. cosmiconfig still builds its meta config from the root `.config`, which stays refused.
+  - commitlint: `--config commitlint.config.js` stops `.commitlintrc*`, the other `commitlint.config.*` names,
+    `package.yaml` and the `package.json` key. cosmiconfig still builds its meta config from the root `.config`,
+    which stays refused.
+  - ESLint `--config eslint.config.ts`, taplo `--config .taplo.toml` and zizmor `--config .github/zizmor.yml`: each
+    stops the tool's other config names, measured with the row's own flags, with no exception.
   - rustfmt reads a `rustfmt.toml` or `.rustfmt.toml` at any depth, in any case and above the checkout. The row
     runs `cargo fmt --check -- --config-path rustfmt.toml`, which stops every one of those reads.
   - clippy reads a `clippy.toml` or `.clippy.toml` from a crate's directory, the workspace root and above the
@@ -653,8 +657,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The gate refuses a tracked path with a `.git`, `.sl`, `.svn`, `.hg` or `.jj` segment. Prettier's CLI skips a
   named file under one without a word, while `getFileInfo` accepts it.
 - The CI job's `timeout-minutes` bounds the gate. A gate sets no deadline of its own on a row and kills no
-  process tree, and on a contributor's machine Ctrl-C ends a hung tool. A Go gate can bound a pipe a leftover
-  process holds with `exec.Cmd.WaitDelay`.
+  process tree, and on a contributor's machine Ctrl-C ends a hung tool.
+- A gate can still bound a pipe a leftover process holds after its tool exits, and fail the row: a Go gate through
+  `exec.Cmd.WaitDelay`, a Bun gate through a short drain in its run helper.
 - Where a runtime loads an env file before the gate starts, such as Task's `dotenv`, CI and the `pre-push` hook
   run the tracked-file refusal as their own step, before that runtime starts.
 - In a Go repository the gate job and the `pre-push` hook set `GOWORK=off` and `GOFLAGS=-mod=readonly`, and the
@@ -699,7 +704,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The stack's own runner drives the gate: Bun scripts in `package.json`, `xtask` for Rust, Cake for C#, go-task
   for Go. A `Makefile` is a violation.
 - In a Bun repository `scripts/startup.ts`, `scripts/run.ts` and `scripts/tools.ts` are byte-identical across
-  the set. The repository's own lists, such as its untyped sources, live in `scripts/expected.ts`.
+  the set. The repository's own two lists, its project config paths and its untyped sources, live in
+  `scripts/expected.ts`.
 - A Rust repository's gate modules are shared by copy the same way, never through a shared crate.
 - `cargo xtask` is `cargo run --package xtask`, and the outer cargo resolves the workspace before any row runs.
   The alias in `.cargo/config.toml` therefore carries `--locked`: `run --locked --package xtask --quiet --`.
@@ -751,8 +757,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   lint and the commit hook keep the caller's ignores. A `Revert "..."` or merge subject fails the subject lint.
   The revert form (Commits) and squash-only merging make that right, and a pull request GitHub's revert button
   opens passes once it is retitled.
-- Before its install, the workflow refuses a root `.config` and a `package.json` `cosmiconfig` key (Gate). Both
-  commitlint steps name `commitlint.config.js`, which stops commitlint's other config names.
+- Before its install, the workflow refuses a root `.config` (Gate). Both commitlint steps name
+  `commitlint.config.js`, which stops commitlint's other config names and package keys.
 - Before its install, the `commits` workflow refuses any tracked path with a `node_modules` segment, nested ones
   included, without regard to case. `bun install` keeps a tracked package directory at the locked version, and
   Bun then runs that copy. The job runs beside every caller's gate, whatever the caller's stack, so it holds
@@ -849,9 +855,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The header is at most 72 characters. Renovate's headers are shortened by the presets' `commitMessageAction`
   and `commitMessageTopic`, never by exempting the bot.
 - The shared `commitlint.config.js` ignores a message signed off by `dependabot[bot]`, because its body carries
-  release notes past the line limit. The ignore matches a `Signed-off-by: dependabot[bot] <` trailer on a line
-  after the header alone, so a header or title that merely carries the text is still linted. The pull request
-  title and the landed-subject lint still check a Dependabot header.
+  release notes past the line limit. It skips a commit only when the header starts with a commit-message prefix
+  `.github/dependabot.yml` sets, then a colon and a space, and a line after the header starts with the
+  `Signed-off-by: dependabot[bot] <` trailer. A header or title that merely carries the text is still linted, and a
+  repository with no `dependabot.yml` skips nothing. The pull request title and the landed-subject lint still
+  check a Dependabot header.
 - A commit's type names its effect on the people who use what the repository ships.
 - `feat`, `fix`, `perf` and `revert` are user-facing. Every other type is hidden from the changelog (Releases).
 - A gate, hook or tooling change is `chore`, and a change to the repository's own workflows is `ci`, because
@@ -884,8 +892,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   the gate.
 - A Go repository pins lefthook as a `go.mod` tool directive, because lefthook is a Go program and the stack
   leans on its native abilities. Its `package.json` carries commitlint and Prettier alone.
-- A hook job starts a package as `bun ./node_modules/<pkg>/<bin>`, so the lockfile's pin runs under Bun and a
-  missing package fails the job (Updates, Gate).
+- A hook job starts a package as `BUN_OPTIONS= bun --no-env-file ./node_modules/<pkg>/<bin>`. The lockfile's pin
+  then runs under Bun with no inherited flags and no env file, and a missing package fails the job (Updates, Gate).
 - The hook script `lefthook install` writes fails open where lefthook itself resolves from `node_modules`: Bun,
   and any kind installing lefthook through `package.json`. With no lefthook binary found, it prints
   `Can't find lefthook in PATH` and exits 0, and the commit or push goes through unchecked.
