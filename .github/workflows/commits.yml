@@ -36,15 +36,15 @@ jobs:
           bun-version-file: package.json
       # This job runs beside the caller's gate, whatever its stack, so before the install it refuses
       # what would hand commitlint a copy the lockfile does not name. bun install keeps a tracked
-      # package directory at the locked version in place of the one it would fetch, and bunx then
-      # runs that copy. A tracked .npmrc, at any depth, redirects the install's registry. A
-      # package.json patchedDependencies entry is applied even by a frozen install without scripts,
-      # so one naming an @commitlint package or a package commitlint.config.js imports is refused.
+      # package directory at the locked version in place of the one it would fetch, and commitlint
+      # then runs that copy. A tracked .npmrc, at any depth, redirects the install's registry. A
+      # package.json patchedDependencies key is applied even by a frozen install without scripts,
+      # so the key is refused in every tracked package.json, whatever it patches.
       # commitlint takes the first config it finds, and a package.json commitlint key, a
       # package.yaml and a .commitlintrc file each come before commitlint.config.js in its search.
       # So every commitlint config but the root commitlint.config.js is refused at any depth, a
       # package.yaml whole, since the step reads no YAML, and every tracked package.json is read for
-      # the key. cosmiconfig, which commitlint searches through, reads a meta config from a root
+      # these keys. cosmiconfig, which commitlint searches through, reads a meta config from a root
       # .config directory and a package.json cosmiconfig key when it starts, whatever --config
       # names, and runs a .config/config.js, .mjs, .cjs or .ts as code. So a tracked root .config
       # and a cosmiconfig key are refused too. Paths match without regard to case, as Windows and
@@ -56,34 +56,18 @@ jobs:
           configs=$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)(\.commitlintrc[^/]*|commitlint\.config\.[^/]*|package\.yaml"?)$' | grep -vxF commitlint.config.js || true)
           meta=$(printf '%s\n' "$tracked" | grep -iE '^"?\.config(/|"?$)' || true)
           keyed=""
+          patched=""
           while IFS= read -r manifest; do
             [ -n "$manifest" ] || continue
             carries=$(jq -r 'if type == "object" then [keys[] | select(. == "commitlint" or . == "cosmiconfig")] | join(" and ") else error("is not an object") end' "$manifest")
             if [ -n "$carries" ]; then
               keyed+="$(printf '%q' "$manifest") carries a $carries key"$'\n'
             fi
+            if [ "$(jq 'has("patchedDependencies")' "$manifest")" = true ]; then
+              patched+="$(printf '%q' "$manifest")"$'\n'
+            fi
           done <<< "$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)package\.json"?$' || true)"
-          patched=$(jq -r '(.patchedDependencies // {}) | if type == "object" then keys[] else error("patchedDependencies is not an object") end' package.json)
-          imported=""
-          if [ -f commitlint.config.js ]; then
-            imported=$(grep -oE "(from|import\(|require\()[[:space:]]*['\"][^'\"]+['\"]" commitlint.config.js | sed -E "s/^[^'\"]*['\"]//; s/['\"]$//" || true)
-          fi
-          refused=""
-          while IFS= read -r entry; do
-            [ -n "$entry" ] || continue
-            name=$(printf '%s' "$entry" | sed -E 's/^(@?[^@]+)@.*$/\1/')
-            case "$name" in
-              @commitlint/*) refused+="$entry"$'\n' ;;
-              *)
-                while IFS= read -r specifier; do
-                  case "$specifier" in
-                    "$name" | "$name"/*) refused+="$entry"$'\n' ;;
-                  esac
-                done <<< "$imported"
-                ;;
-            esac
-          done <<< "$patched"
-          if [ -n "$found" ] || [ -n "$configs" ] || [ -n "$meta" ] || [ -n "$keyed" ] || [ -n "$refused" ]; then
+          if [ -n "$found" ] || [ -n "$configs" ] || [ -n "$meta" ] || [ -n "$keyed" ] || [ -n "$patched" ]; then
             while IFS= read -r path; do
               [ -n "$path" ] && echo "::error::$(printf '%q' "$path") is tracked, and bun install would read it in place of what bun.lock names."
             done <<< "$found"
@@ -96,13 +80,13 @@ jobs:
             while IFS= read -r finding; do
               [ -n "$finding" ] && echo "::error::$finding, and commitlint.config.js at the root is the one commitlint config."
             done <<< "$keyed"
-            while IFS= read -r entry; do
-              [ -n "$entry" ] && echo "::error::package.json patches $(printf '%q' "$entry"), a package commitlint loads."
-            done <<< "$refused"
-            echo "::error::Remove each path, key and patch named above."
+            while IFS= read -r manifest; do
+              [ -n "$manifest" ] && echo "::error::$manifest carries a patchedDependencies key, and bun install applies each patch it names even frozen and without scripts."
+            done <<< "$patched"
+            echo "::error::Remove each path and key named above."
             exit 1
           fi
-      # Under --bun, Bun applies a tsconfig.json or jsconfig.json to commitlint's own imports, so a
+      # Bun runs commitlint and applies a tsconfig.json or jsconfig.json to its own imports, so a
       # paths entry or a baseUrl there runs checkout code in place of a package commitlint loads.
       # Every tracked one, at any depth and in any case, and every file its extends names, is read
       # for either. An extends naming a package or a file outside the checkout is refused, since
@@ -161,15 +145,16 @@ jobs:
       # --ignore-scripts, so no lifecycle script and no prepare script from the caller's tree
       # runs here. commitlint needs none of them.
       - run: bun install --frozen-lockfile --ignore-scripts
-      # --from and --to are commitlint's own range: it walks base..head in git. --no-install runs
-      # the lockfile's commitlint and refuses to fetch another. --bun runs it under Bun, since
-      # bunx otherwise starts a bin whose shebang names node on the runner's node. --config names
-      # the caller's one config, so no name commitlint searches before it can stand in for it.
+      # --from and --to are commitlint's own range: it walks base..head in git. commitlint starts
+      # by its path under node_modules, which the install above wrote from bun.lock, so a missing
+      # copy fails the step. bunx --no-install would fall back to PATH, a parent node_modules/.bin
+      # or its cache. Bun runs the file itself, so no shebang picks a node. --config names the
+      # caller's one config, so no name commitlint searches before it can stand in for it.
       - name: Pull request commits
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: bunx --bun --no-install commitlint --config commitlint.config.js --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
+        run: bun ./node_modules/@commitlint/cli/cli.js --config commitlint.config.js --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
       # GitHub's default squash message lands a one-commit pull request under that commit's subject
       # and a longer one under the title, each with the pull request number appended. That string
       # reaches the default branch, so it is the one the header length rule reads. Every value
@@ -195,4 +180,4 @@ jobs:
           rm -f -- "$config"
           printf '%s\n' "import config from './commitlint.config.js';" \
             'export default { ...config, ignores: [], defaultIgnores: false };' > "$config"
-          printf '%s (#%s)\n' "$subject" "$NUMBER" | bunx --bun --no-install commitlint --config "$config" --verbose
+          printf '%s (#%s)\n' "$subject" "$NUMBER" | bun ./node_modules/@commitlint/cli/cli.js --config "$config" --verbose
