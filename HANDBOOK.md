@@ -102,7 +102,7 @@ command. A row that a section owns names that section.
 | `.prettierrc`                              | identical | Formatting                                                                                                                                                               |
 | `.prettierignore`                          | own       | Formatting; the release tool's output: `CHANGELOG.md` under both tools, `.release-please-manifest.json` under release-please                                             |
 | `.taplo.toml`                              | shape     | Formatting; excludes `node_modules/**`, `.claude/worktrees/**` and the stack's build output                                                                              |
-| `package.json`, `bun.lock`, `bunfig.toml`  | shape     | commitlint, Prettier and lefthook pinned, `packageManager` set, the cooldown under Updates. Go pins lefthook in `go.mod`                                                 |
+| `package.json`, `bun.lock`, `bunfig.toml`  | shape     | commitlint, `yaml`, Prettier and lefthook pinned, `packageManager` set, the cooldown under Updates. Go pins lefthook in `go.mod`                                         |
 | `eslint.config.ts`                         | shape     | `bun-service` and `bun-tooling` alone, Gate                                                                                                                              |
 | `commitlint.config.js`                     | identical | Commits                                                                                                                                                                  |
 | `.github/commit-scopes.json`               | own       | Commits                                                                                                                                                                  |
@@ -649,10 +649,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every gate and the shared `workflows` job refuse a `.github/actionlint.yaml` or `.github/actionlint.yml`, in any
   case, the job a tracked one. actionlint reads either, and a `paths` ignore in it drops any finding, the
   stand-in's refusal included. A canonical one is added the day a repository needs it.
-- Every tool a gate starts runs with `SHELLCHECK_OPTS` cleared, because that variable reaches ShellCheck past
-  actionlint's `--norc`.
-- Every gate withholds `BUN_OPTIONS` from each Bun it starts, in any stack that starts Bun for Prettier or
-  commitlint. Bun reads it as flags ahead of its own, a test name filter or a preload among them.
+- Every gate withholds `BUN_OPTIONS`, `BUN_INSPECT`, `BUN_INSPECT_CONNECT_TO`, `BUN_INSPECT_PRELOAD` and
+  `SHELLCHECK_OPTS` from every child it starts, in every spelling. Bun reads `BUN_OPTIONS` as flags ahead of its
+  own, a test name filter or a preload among them, and the `BUN_INSPECT` names attach an inspector or preload a
+  module. `SHELLCHECK_OPTS` reaches ShellCheck past actionlint's `--norc`.
 - The gate refuses a workflow file whose extension is not a lowercase `.yml`. actionlint's file list and zizmor's
   collection each missed a `.github/workflows/UP.YML`.
 - The gate refuses a tracked path with a `.git`, `.sl`, `.svn`, `.hg` or `.jj` segment. Prettier's CLI skips a
@@ -858,11 +858,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The header is at most 72 characters. Renovate's headers are shortened by the presets' `commitMessageAction`
   and `commitMessageTopic`, never by exempting the bot.
 - The shared `commitlint.config.js` ignores a message signed off by `dependabot[bot]`, because its body carries
-  release notes past the line limit. It skips a commit only when the header starts with a commit-message prefix
-  `.github/dependabot.yml` sets, then a colon and a space, and a line after the header starts with the
-  `Signed-off-by: dependabot[bot] <` trailer. A header or title that merely carries the text is still linted, and a
-  repository with no `dependabot.yml` skips nothing. The pull request title and the landed-subject lint still
-  check a Dependabot header.
+  release notes past the line limit. It reads `.github/dependabot.yml` through the `yaml` package and takes each
+  `updates[].commit-message.prefix` and `prefix-development`. It skips a commit only when the header starts with one
+  of those, then a colon and a space, and a line after the header starts with the
+  `Signed-off-by: dependabot[bot] <` trailer. A header or title that merely carries the text is still linted. A
+  repository with no `dependabot.yml` skips nothing, and a file that does not parse fails the lint. The pull request
+  title and the landed-subject lint still check a Dependabot header.
 - A commit's type names its effect on the people who use what the repository ships.
 - `feat`, `fix`, `perf` and `revert` are user-facing. Every other type is hidden from the changelog (Releases).
 - A gate, hook or tooling change is `chore`, and a change to the repository's own workflows is `ci`, because
@@ -894,9 +895,13 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - lefthook in every stack. `commit-msg` lints the message. `pre-push` runs `check:quick` where it exists, else
   the gate.
 - A Go repository pins lefthook as a `go.mod` tool directive, because lefthook is a Go program and the stack
-  leans on its native abilities. Its `package.json` carries commitlint and Prettier alone.
-- A hook job starts a package as `BUN_OPTIONS= bun --no-env-file ./node_modules/<pkg>/<bin>`. The lockfile's pin
-  then runs under Bun with no inherited flags and no env file, and a missing package fails the job (Updates, Gate).
+  leans on its native abilities. Its `package.json` carries commitlint, `yaml` and Prettier alone.
+- A hook job starts a package as `bun --no-env-file ./node_modules/<pkg>/<bin>`, behind one loop that unsets
+  `BUN_OPTIONS`, `BUN_INSPECT`, `BUN_INSPECT_CONNECT_TO` and `BUN_INSPECT_PRELOAD` in any spelling. The lockfile's
+  pin then runs under Bun with no inherited flags, inspector or env file, and a missing package fails the job
+  (Updates, Gate).
+- The loop unsets rather than empties, because Bun exits 1 on an empty `BUN_INSPECT_PRELOAD`. A `package.json`
+  `prepare` script cannot clear these names, which is a named residual.
 - The hook script `lefthook install` writes fails open where lefthook itself resolves from `node_modules`: Bun,
   and any kind installing lefthook through `package.json`. With no lefthook binary found, it prints
   `Can't find lefthook in PATH` and exits 0, and the commit or push goes through unchecked.
