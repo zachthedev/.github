@@ -94,6 +94,27 @@ jobs:
             echo "::error::Remove each file and link named above."
             exit 1
           fi
+      # zizmor honors an inline ignore comment, which waives any audit on its line outside
+      # .github/zizmor.yml, the one file the caller's gate compares whole. So every waiver lives in
+      # that file, and a tracked file under .github carrying such a comment is refused, matched
+      # without regard to case or spacing. git grep exits 1 on no match.
+      - name: Refused zizmor waivers
+        run: |
+          status=0
+          waivers=$(git grep -I -n -i -E 'zizmor:[[:space:]]*ignore\[' -- .github) || status=$?
+          if [ "$status" -gt 1 ]; then
+            echo "::error::git grep could not read the tracked files under .github."
+            exit 1
+          fi
+          if [ -n "$waivers" ]; then
+            while IFS= read -r match; do
+              path=${match%%:*}
+              rest=${match#*:}
+              echo "::error::$(printf '%q' "$path") line ${rest%%:*} waives a zizmor audit inline."
+            done <<< "$waivers"
+            echo "::error::Move each waiver named above into .github/zizmor.yml, under that audit's ignore list."
+            exit 1
+          fi
       # mise runs a config's hooks, [env] and [vars] exec templates and a tool entry's
       # postinstall command whenever it loads the file, so mise.toml holds [tools], [tool_config]
       # and [settings] alone, each with the keys the caller's gate reads, and mise.lock holds the
