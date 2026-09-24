@@ -562,6 +562,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `--config` never reaches it.
 - Every row that walks the tree prints what it checked, the files or their count, and fails on zero. A row that
   checked nothing reads green otherwise: taplo and Prettier each exit 0 on empty input.
+  - A test row also fails when every test it counted was skipped. Under Microsoft.Testing.Platform, a runner config
+    that marks every test explicit exits 0 with every test skipped. A runner config that can skip or filter tests
+    falls under the tool config search above, in every stack.
   - The actionlint row hands actionlint the workflow files by name. With no file argument actionlint also needs a
     `.git`, so it fails in an archive copy of the tree.
   - The actionlint and zizmor rows fail unless every file they handed over appears in the tool's own per-file
@@ -602,8 +605,15 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every gate and the shared `workflows` job refuse a `shell:` value, on a step or under `defaults.run`, other than
   `bash`, `sh` or `pwsh`. actionlint runs ShellCheck for bash and sh alone, so a custom shell such as
   `/bin/bash -e {0}` runs bash unchecked.
-- The gate refuses a `.github/actionlint.yaml` or `.github/actionlint.yml`, in any case. actionlint reads either
-  one, and its `paths` block can silence every finding. A canonical one is added the day a repository needs it.
+  - A gate parses the workflow for that check. The shared job reads lines, since no YAML parser is pinned on the
+    runner: a `shell` key is a plain `shell: bash`, `sh` or `pwsh` line, and a value continued onto a deeper line
+    is refused, because `shell: pwsh` over `-c bash {0}` runs bash. A script line that spells `shell:` is refused
+    there too.
+- actionlint lints workflows alone, so a composite action's `run:` steps under `.github/actions` get no
+  ShellCheck. That is a named residual.
+- Every gate and the shared `workflows` job refuse a `.github/actionlint.yaml` or `.github/actionlint.yml`, in any
+  case, the job a tracked one. actionlint reads either, and a `paths` ignore in it drops any finding, the
+  stand-in's refusal included. A canonical one is added the day a repository needs it.
 - Every tool a gate starts runs with `SHELLCHECK_OPTS` cleared, because that variable reaches ShellCheck past
   actionlint's `--norc`.
 - The gate refuses a workflow file whose extension is not a lowercase `.yml`. actionlint's file list and zizmor's
@@ -635,6 +645,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     compares its checked count. A root `.csharpierignore` of `*` gave `Checked 0 files` and exit 0.
     `.csharpierrc` and `.csharpierignore` are held whole.
   - The gate refuses a root `cake.config`.
+  - The gate refuses a `testconfig.json`, `*.testconfig.json`, `xunit.runner.json` or `*.xunit.runner.json` at any
+    depth. The tests row reads the total, succeeded and skipped counts from the summary, never the exit code.
 - In a Rust repository:
   - cargo started at the root reads the root `.cargo/config` and `.cargo/config.toml`, the extensionless one
     winning, and every one above the checkout, never a crate's. The gate holds `.cargo/config.toml` whole and
@@ -647,6 +659,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The gate's own `git` child starts with an empty environment plus `GIT_CONFIG_NOSYSTEM` and
   `GIT_CONFIG_GLOBAL=/dev/null`, and `SystemRoot` on Windows where the stack's start of git needs it, as Go's does.
   Listing tracked files needs no inherited name.
+- A gate's tracked listing refuses to run unless `git rev-parse --show-toplevel` names the checkout root. An empty
+  `.git` directory at the root makes `git ls-files` list a parent repository's index without a word.
 - A checkout another account owns therefore stops the gate. git refuses it as dubious ownership and reads no
   `safe.directory` from the configs the gate turns off. The fix is the directory's owner, never a
   `safe.directory` the gate would read, and `CONTRIBUTING.md` says so.
