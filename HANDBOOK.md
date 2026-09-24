@@ -444,12 +444,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   current directory or a tracked tool directory before `PATH`.
 - Every gate hands its children a `PATH` with no entry inside the checkout, so a child resolving a bare name
   cannot reach one either.
-- Where a stack's spawn searches such a directory, the gate also refuses a committed file named like a program it,
+- Where a stack's spawn searches such a directory, the gate also refuses a file named like a program it,
   its hooks or an install start: `bun`, `bunx`, `gh`, `git`, `mise` or `node`, with an executable extension or
   none. The preflight refuses one before any row, so no spawn reaches it. Per stack:
   - Bun: `Bun.spawnSync` searches the current directory first, in CreateProcess's order. `scripts/run.ts`
-    therefore resolves every program itself and runs Bun as `process.execPath`, and the gate refuses committed
-    tool-named files.
+    therefore resolves every program itself and runs Bun as `process.execPath`, and the gate refuses tool-named
+    files at the root, committed or not.
   - C#: Cake's tool locator globs `./tools/**/<name>` before `PATH`. Each tool therefore resolves through a
     `PATH`-only lookup passed to `WithToolPath`, and the gate refuses tool-named files under `tools/` and at the
     root.
@@ -515,8 +515,13 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every gate refuses a duplicated key, at any depth, in any JSON file it parses to decide a refusal. Bun's own
   reader keeps the first copy, while `JSON.parse` and Go's `encoding/json` keep the last. A duplicate therefore
   lets the gate pass one value while Bun uses the other.
+- A config that changes a gate row's result is refused when it is present on disk, committed or not, so a local
+  gate agrees with CI. A personal override, a `lefthook-local` or `.lefthook-local` file in any form or an env file,
+  is refused only when committed, and `.gitignore` names it.
+- The gate refuses a root `.config` directory outright, in any letter case. mise, the dotnet tool manifest,
+  cosmiconfig's meta config and lefthook all read it.
 - Every gate tool that searches for its own config runs with the one config named explicitly. The tools are
-  Prettier, commitlint, golangci-lint, ESLint, taplo and zizmor, and rustfmt and clippy in Rust.
+  Prettier, commitlint, golangci-lint, ESLint, taplo and zizmor, CSharpier in C#, and rustfmt and clippy in Rust.
 - The gate refuses every other name such a tool searches, at every depth it searches, without regard to case. A
   config the tool finds first replaces the shared one: a committed `.golangci.json` beside `.golangci.yml`
   replaced the lint config and hid a `govet` finding.
@@ -547,9 +552,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every gate, and the shared `workflows` job, refuses a `zizmor: ignore[` comment in a tracked file under
   `.github`, so every waiver lives in `.github/zizmor.yml`. An inline comment waives any audit on its line,
   `unpinned-uses` included.
-- The gate refuses a committed `.github/actionlint.yaml` or `.github/actionlint.yml`, in any case. actionlint
-  reads either one, and its `paths` block can silence every finding. A canonical one is added the day a
-  repository needs it.
+- The gate refuses a `.github/actionlint.yaml` or `.github/actionlint.yml`, in any case. actionlint reads either
+  one, and its `paths` block can silence every finding. A canonical one is added the day a repository needs it.
+- Every tool a gate starts runs with `SHELLCHECK_OPTS` cleared, because that variable reaches ShellCheck past
+  actionlint's `--norc`.
 - The gate refuses a workflow file whose extension is not a lowercase `.yml`. actionlint's file list and zizmor's
   collection each missed a `.github/workflows/UP.YML`.
 - The gate refuses a tracked path with a `.git`, `.sl`, `.svn`, `.hg` or `.jj` segment. Prettier's CLI skips a
@@ -565,6 +571,17 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - In a Go repository the gate job and the `pre-push` hook set `GOWORK=off` and `GOFLAGS=-mod=readonly`, and the
   gate refuses a tracked `go.work`, `go.work.sum` and `vendor/`. Each can put checkout code in place of a module
   the gate's own `go run` builds, as a tracked `go.work` did.
+- In a C# repository:
+  - The gate refuses a nested `Directory.Build.props`, a `Directory.Build.rsp` anywhere, and a nested
+    `.globalconfig`, `.editorconfig` or `nuget.config`. Each turned a red build green or added a package source
+    past the root's `<clear />`. A tracked nested `.editorconfig` passes only where the gate holds it byte for byte.
+  - The build, test and installer rows pass `DirectoryBuildPropsPath`, `DirectoryBuildTargetsPath` and
+    `DirectoryPackagesPropsPath` as absolute paths at the root, and `-noAutoResponse`, so MSBuild reads the
+    root's files alone and no response file.
+  - CSharpier runs over named files with `--config-path`, `--ignore-path` and `--include-generated`, and the row
+    compares its checked count. A root `.csharpierignore` of `*` gave `Checked 0 files` and exit 0.
+    `.csharpierrc` and `.csharpierignore` are held whole.
+  - The gate refuses a root `cake.config`.
 - A test or script that spawns git drops every inherited `GIT_*` variable for that process and names the
   repository with `-C <root>`. git exports `GIT_DIR` and `GIT_INDEX_FILE` to a hook, so a gate the hook runs
   otherwise writes into the hook's own repository.
