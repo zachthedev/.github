@@ -42,6 +42,10 @@ zizmor's process alone. Otherwise it runs zizmor offline, and the row's label sa
 any value, forces offline. In CI the gate runs zizmor offline and holds no token. gh reads its token from the
 system credential store, so an empty `GH_CONFIG_DIR` leaves it reachable.
 
+The gate starts git with no system or global config. In a checkout another account owns, git then refuses the
+repository as dubious ownership, and the gate stops. Fix it by making your account the directory's owner. The gate
+reads no `safe.directory` entry, by design.
+
 Before any row, the gate's preflight refuses to run beside what Bun or Prettier reads before a row starts:
 
 - a tracked env file Bun loads, in any case;
