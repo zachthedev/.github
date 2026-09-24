@@ -532,9 +532,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     drops the checkout's `bunfig.toml`, while `-c <file>`, `--config <file>` and `-c=<file>` still run its preload;
   - a `scripts/` directory without its own `tsconfig.json`, or one holding a `jsconfig.json`, a `package.json` or
     a `node_modules`, because the root `tsconfig.json`'s `paths`, `extends` and `baseUrl`
-    otherwise redirect the gate's imports;
-  - a tracked `.npmrc` at any depth, because it redirects even the frozen, script-free install. An untracked one
-    holds personal credentials and changes no row, so it passes.
+    otherwise redirect the gate's imports.
+- Nothing refuses a tracked `.npmrc`, and a reviewer does. A registry it names fails every package's integrity
+  check against `bun.lock`.
 - Those checks import only built-in modules, so no package loads before they pass.
 - A Bun gate imports its own packages by path under the checkout's `node_modules`, so an absent install fails the
   gate. It does not check `node_modules` against `bun.lock`: CI installs frozen before its gate, and a stale local
@@ -562,12 +562,14 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   reader keeps the first copy, while `JSON.parse` and Go's `encoding/json` keep the last. A duplicate therefore
   lets the gate pass one value while Bun uses the other.
 - A config that changes a gate row's result is refused when it is present on disk, committed or not, so a local
-  gate agrees with CI. A personal file, a `lefthook-local` or `.lefthook-local` file in any form, an env file or
-  `.claude/settings.local.json`, is refused only when committed, and `.gitignore` names it.
-- A tracked file under a directory a row skips is refused, since no row checks it while the product can still
-  import it. Each stack names its own list, and a Bun gate's is `dist/`, `coverage/` and `.claude/worktrees/`.
-- A tracked source file no row checks is refused. A Bun gate names its untyped JavaScript and declaration files in
-  a list in its gate, since tsc checks neither, and a Go gate refuses a tracked Go file no build compiles.
+  gate agrees with CI. A personal file, a `lefthook-local` or `.lefthook-local` file in any form or an env file,
+  is refused only when committed, and `.gitignore` names it.
+- A Go gate refuses a tracked Go file no build compiles.
+- A reviewer, not the gate, refuses a tracked file no row checks: anything under `dist/`, `coverage/`,
+  `.claude/worktrees/` or a `.git`, `.sl`, `.svn`, `.hg` or `.jj` directory, a JavaScript or declaration file
+  beyond the ones a tool needs, such as `commitlint.config.js`, a path below a personal file's name,
+  `.claude/settings.local.json`, and in Go a package under an `_` directory or below a second `go.mod`. Each sits
+  in the diff and runs no code, so `CODEOWNERS` review holds it.
 - The gate refuses a root `.config` directory outright, in any letter case. mise, the dotnet tool manifest,
   cosmiconfig's meta config and lefthook all read it.
 - The root `.config` is refused before any commitlint step, the shared `commits` job included, because
@@ -579,7 +581,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A config the tool finds first replaces the shared one: a committed `.golangci.json` beside `.golangci.yml`
   replaced the lint config and hid a `govet` finding while the row named no config.
 - The gate refuses the other names a tool reads only where the tool has no named-config form: cargo's config, the
-  toolchain file, the actionlint config, lefthook's configs, the env files, `.npmrc`, cosmiconfig's root `.config`,
+  toolchain file, the actionlint config, lefthook's configs, the env files, cosmiconfig's root `.config`,
   mise's configs, and the project configs typescript-eslint reads (above). Refusals match at every depth the tool
   reads, without regard to case.
 - A tool whose row names its config drops the refusal of its other names, but only where a measurement shows the
@@ -668,10 +670,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - A stand-in writes nothing to stdout until it has read its input whole and ShellCheck has exited. One that
     writes ShellCheck's stdout and then fails leaves `[]` beside its exit 2, and actionlint reads `[]` as a clean
     script.
-  - Every gate and the shared job refuse a root entry named `'`, a single quote, tracked or on disk. actionlint
-    looks the whole `-shellcheck` value up as one program path before it splits the words, so on Linux and macOS a
-    value starting `'/` reads as a relative path under that directory. A file there runs in place of the stand-in
-    and answers both canaries.
+  - The shared job refuses a root entry named `'`, a single quote, tracked or on disk. actionlint looks the whole
+    `-shellcheck` value up as one program path before it splits the words, so on Linux and macOS a value starting
+    `'/` reads as a relative path under that directory. A file there runs in place of the stand-in and answers
+    both canaries. A gate need not refuse one: in the gate job a planted program runs pull-request code, which
+    runs there anyway, and the shared job checks the same workflows again.
 - Every gate and the shared `workflows` job refuse a `shell:` value, on a step or under `defaults.run`, other than
   `bash`, `sh` or `pwsh`. actionlint runs ShellCheck for bash and sh alone, so a custom shell such as
   `/bin/bash -e {0}` runs bash unchecked.
@@ -690,8 +693,6 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   ordinary use, so the contributor leaves them unset (Troubleshooting in `CONTRIBUTING.md`).
 - The gate refuses a workflow file whose extension is not a lowercase `.yml`. actionlint's file list and zizmor's
   collection each missed a `.github/workflows/UP.YML`.
-- The gate refuses a tracked path with a `.git`, `.sl`, `.svn`, `.hg` or `.jj` segment. Prettier's CLI skips a
-  named file under one without a word, while `getFileInfo` accepts it.
 - The CI job's `timeout-minutes` bounds the gate. A gate sets no deadline of its own on a row and kills no
   process tree, and on a contributor's machine Ctrl-C ends a hung tool.
 - A gate can still bound a pipe a leftover process holds after its tool exits, and fail the row: a Go gate through
@@ -734,15 +735,15 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A checkout another account owns therefore stops the gate. git refuses it as dubious ownership and reads no
   `safe.directory` from the configs the gate turns off. The fix is the directory's owner, never a
   `safe.directory` the gate would read, and `CONTRIBUTING.md` says so.
-- Every gate lists tracked paths once and compares names in its own code by one rule: strip default-ignorable
-  code points, then fold case. It never uses git's `:(icase)` pathspec magic. git's `icase` folds ASCII alone,
+- Every gate lists tracked paths once and compares names in its own code by one rule: map case, upper then
+  lower. It never uses git's `:(icase)` pathspec magic. git's `icase` folds ASCII alone,
   macOS's APFS folds case beyond ASCII, and an inherited `GIT_LITERAL_PATHSPECS` turns the magic off without a
   word. A broader fold costs a false refusal at worst.
 - The stack's own runner drives the gate: Bun scripts in `package.json`, `xtask` for Rust, Cake for C#, go-task
   for Go. A `Makefile` is a violation.
 - In a Bun repository every file under `scripts/` but `check.ts`, `expected.ts` and `tsconfig.json` is
-  byte-identical across the set, the tests and their stand-ins included. The repository's own two lists, its
-  project config paths and its untyped sources, live in `scripts/expected.ts`.
+  byte-identical across the set, the tests and their stand-ins included. The repository's own list, its project
+  config paths, lives in `scripts/expected.ts`.
 - A Rust repository's gate modules are shared by copy the same way, never through a shared crate.
 - `cargo xtask` is `cargo run --package xtask`, and the outer cargo resolves the workspace before any row runs.
   The alias in `.cargo/config.toml` therefore carries `--locked`: `run --locked --package xtask --quiet --`.
@@ -809,9 +810,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   directory at the locked version and a tracked `node_modules` link as it finds it, with no check against
   `bun.lock`, and Bun then runs that copy. Through any other link Bun reads a file `bun.lock` never named. The
   job runs beside every caller's gate, whatever the caller's stack, so it holds the refusal itself.
-- The same step refuses a tracked `.npmrc` at any depth, also without regard to case, because it redirects the
-  install's registry. It refuses a `patchedDependencies` key in any tracked `package.json` (Gate), because a
-  frozen install without scripts still applies a patch.
+- The same step refuses a `patchedDependencies` key in any tracked `package.json` (Gate), because a frozen install
+  without scripts still applies a patch.
 - It refuses a tracked env file at the root, any of the eight names Bun loads, without regard to case.
   `bun install` loads one even frozen and without scripts, and no flag stops that. A tracked `.env` pointing
   `BUN_INSTALL_CACHE_DIR` at a committed folder installed a changed package with `bun.lock` unchanged.
@@ -988,10 +988,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `.prettierignore` too.
 - Every `.prettierignore` pattern is anchored to the root, with a leading slash where it has no other, so it
   cannot hide a same-named file deeper in the tree.
-- A Prettier config can name a plugin or a shared config, and Prettier loads either as code before it checks
-  anything. Every gate therefore refuses a `plugins` key in `.prettierrc`, at the top level and in
-  `overrides[].options`, and refuses a `.prettierrc` that is not a JSON object, since a string there names a shared
-  config. `.prettierrc` is gate config under `CODEOWNERS` (Gate).
+- `.prettierrc` holds formatting options alone. A Prettier config can name a plugin or a shared config, and
+  Prettier loads either as code before it checks anything, so a reviewer refuses a `plugins` key or a string
+  value. `.prettierrc` is gate config under `CODEOWNERS` (Gate).
 - C# is formatted by CSharpier at the same width.
 - taplo formats every TOML file in every kind, from `.taplo.toml`. A repository carrying TOML pins taplo in
   `mise.toml` and runs it as a gate row.
