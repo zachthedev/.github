@@ -106,7 +106,11 @@ disk, tracked or not, so the gate on your machine agrees with CI:
   in `.github/zizmor.yml`, under that audit's ignore list. It names `file:line`, so a move of the finding turns the
   gate red, except a `secrets-inherit` waiver, which names the file because the `workflows` row holds its callee;
 - a `shellcheck disable` directive in a tracked workflow. ShellCheck has no waiver file, so rewrite the script
-  until ShellCheck passes it;
+  until ShellCheck passes it. CI's `workflows` job also refuses a directive the file's text hides, such as an
+  escaped or folded one, since it reads the script ShellCheck reads;
+- a workflow `shell:` other than `bash`, `sh` or `pwsh`, on a step or under a `defaults.run`, since actionlint runs
+  ShellCheck for bash and sh alone. CI's `workflows` job checks the same line by line, so a script line that
+  spells `shell:` is refused there too;
 - a `.github/actionlint.yaml` or `.github/actionlint.yml`, which can silence any actionlint finding;
 - a lefthook config beside `lefthook.yml` (`lefthook.*` or `.lefthook.*`), which lefthook reads when
   `lefthook.yml` is missing, and a tracked `lefthook-local.*` or `.lefthook-local.*`, which lefthook merges over
