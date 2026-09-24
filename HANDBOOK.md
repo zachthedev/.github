@@ -361,6 +361,9 @@ API reports the value only on a `required_reviewers` rule.
   cannot name an environment secret. A caller whose called workflow reads one passes `secrets: inherit`, and
   `.github/zizmor.yml` waives the `secrets-inherit` audit by naming that file, such as `deps.yml` or `cd.yml`,
   under `rules.secrets-inherit.ignore` (Gate). Every other caller passes nothing through.
+- A zizmor waiver binds to a file or a position, never to what a job calls. Every gate and the shared
+  `workflows` job therefore fail unless each job passing `secrets: inherit` calls a reusable workflow in
+  `zachthedev/.github`, read from a zizmor pass with no config.
 
 ### Apps
 
@@ -556,6 +559,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every gate, and the shared `workflows` job, refuses a `zizmor: ignore[` comment in a tracked file under
   `.github`, so every waiver lives in `.github/zizmor.yml`. An inline comment waives any audit on its line,
   `unpinned-uses` included.
+- Both also refuse a `shellcheck disable` directive in a tracked workflow file. One silences ShellCheck under
+  actionlint with every row green, and ShellCheck has no waiver file, so a finding is fixed in the script.
 - The gate refuses a `.github/actionlint.yaml` or `.github/actionlint.yml`, in any case. actionlint reads either
   one, and its `paths` block can silence every finding. A canonical one is added the day a repository needs it.
 - Every tool a gate starts runs with `SHELLCHECK_OPTS` cleared, because that variable reaches ShellCheck past
