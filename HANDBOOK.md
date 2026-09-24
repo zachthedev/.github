@@ -742,6 +742,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A Rust repository's gate modules are shared by copy the same way, never through a shared crate.
 - `cargo xtask` is `cargo run --package xtask`, and the outer cargo resolves the workspace before any row runs.
   The alias in `.cargo/config.toml` therefore carries `--locked`: `run --locked --package xtask --quiet --`.
+- The root `.cargo/config.toml` is data that runs code, as `bunfig.toml` and `.prettierrc` are, so the Rust gate
+  holds it to a key allow-list: `[alias]` with `xtask` alone, and each other key the Rust repositories carry. That
+  refuses an alias named after a row's subcommand, such as `fmt`, `clippy`, `nextest`, `deny` or `machete`, which
+  cargo runs in place of the tool. It also refuses `build.rustdocflags`, `build.rustflags`, `build.rustc-wrapper`
+  and `target.*.runner`.
 - The Bun linter is ESLint with typescript-eslint, configured in `eslint.config.ts` (Known defects).
 - `check` is the whole gate. A `check:quick` without the slow rows, such as the tests, is allowed for the
   `pre-push` hook, per stack: `task check:quick`, `cargo xtask check --quick`, a Cake target.
