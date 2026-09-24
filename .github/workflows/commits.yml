@@ -37,7 +37,10 @@ jobs:
       # This job runs beside the caller's gate, whatever its stack, so before the install it refuses
       # what would hand commitlint a copy the lockfile does not name. bun install keeps a tracked
       # package directory at the locked version in place of the one it would fetch, and commitlint
-      # then runs that copy. A tracked .npmrc, at any depth, redirects the install's registry. A
+      # then runs that copy. It keeps a tracked node_modules link the same way, with no check
+      # against bun.lock, so node_modules itself is refused beside any path below it. Every other
+      # tracked symbolic link is refused too: Bun reads through one to a file bun.lock never
+      # named. A tracked .npmrc, at any depth, redirects the install's registry. A
       # package.json patchedDependencies key is applied even by a frozen install without scripts,
       # so the key is refused in every tracked package.json, whatever it patches. bun install loads
       # an env file at the root, frozen and without scripts, and no flag stops that. A variable
@@ -53,7 +56,8 @@ jobs:
       - name: Refused paths
         run: |
           tracked=$(git ls-files)
-          found=$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)node_modules/|(^"?|/)\.npmrc"?$' || true)
+          found=$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)node_modules("?$|/)|(^"?|/)\.npmrc"?$' || true)
+          links=$(git ls-files -s | awk -F '\t' '$1 ~ /^120000 / { print $2 }')
           meta=$(printf '%s\n' "$tracked" | grep -iE '^"?\.config(/|"?$)' || true)
           envs=$(printf '%s\n' "$tracked" | grep -iE '^"?\.env(\.local|\.(development|production|test)(\.local)?)?"?$' || true)
           patched=""
@@ -63,10 +67,13 @@ jobs:
               patched+="$(printf '%q' "$manifest")"$'\n'
             fi
           done <<< "$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)package\.json"?$' || true)"
-          if [ -n "$found" ] || [ -n "$meta" ] || [ -n "$envs" ] || [ -n "$patched" ]; then
+          if [ -n "$found" ] || [ -n "$links" ] || [ -n "$meta" ] || [ -n "$envs" ] || [ -n "$patched" ]; then
             while IFS= read -r path; do
               [ -n "$path" ] && echo "::error::$(printf '%q' "$path") is tracked, and bun install would read it in place of what bun.lock names."
             done <<< "$found"
+            while IFS= read -r path; do
+              [ -n "$path" ] && echo "::error::$(printf '%q' "$path") is a tracked symbolic link. bun install keeps a link as it finds it, and what Bun reads through one is no file bun.lock names."
+            done <<< "$links"
             while IFS= read -r path; do
               [ -n "$path" ] && echo "::error::$(printf '%q' "$path") is under the root .config, where cosmiconfig reads a config before commitlint loads the one named."
             done <<< "$meta"
@@ -188,8 +195,11 @@ jobs:
       # word. The caller's rules apply with every ignore off: its config's own ignores and
       # commitlint's defaults (merge, revert, fixup and version subjects) each match text a
       # contributor can type into a title or subject. The config that turns them off is written
-      # fresh at the root, over anything tracked there, since commitlint resolves a config's
-      # extends from the config's own directory.
+      # to the runner's temporary directory, outside the checkout, so no tracked path takes part.
+      # commitlint resolves a config's extends from that config's own directory, and outside any
+      # node_modules Bun answers with a copy from its install cache or the registry, whatever
+      # bun.lock pins. So the written config resolves each extends of the caller's config from the
+      # caller's config file and hands commitlint absolute paths.
       - name: Squash subject
         env:
           TITLE: ${{ github.event.pull_request.title }}
@@ -202,8 +212,21 @@ jobs:
           else
             subject=$TITLE
           fi
-          config=.commitlint-landing.mjs
+          config=$RUNNER_TEMP/commitlint-landing.mjs
           rm -f -- "$config"
-          printf '%s\n' "import config from './commitlint.config.js';" \
-            'export default { ...config, ignores: [], defaultIgnores: false };' > "$config"
+          cat > "$config" <<'JS'
+          import { createRequire } from 'node:module';
+          import { join } from 'node:path';
+          import { pathToFileURL } from 'node:url';
+
+          const caller = join(process.cwd(), 'commitlint.config.js');
+          const { default: config } = await import(pathToFileURL(caller).href);
+          const require = createRequire(caller);
+          export default {
+            ...config,
+            extends: [config.extends ?? []].flat().map((id) => require.resolve(id)),
+            ignores: [],
+            defaultIgnores: false,
+          };
+          JS
           printf '%s (#%s)\n' "$subject" "$NUMBER" | bun --no-env-file ./node_modules/@commitlint/cli/cli.js --config "$config" --verbose

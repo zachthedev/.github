@@ -173,9 +173,11 @@ jobs:
       # mise runs a config's hooks, [env] and [vars] exec templates and a tool entry's
       # postinstall command whenever it loads the file, so mise.toml holds [tools], [tool_config]
       # and [settings] alone, each with the keys the caller's gate reads, and mise.lock holds the
-      # keys mise writes. The caller's gate compares the values; this step refuses a key before
-      # the install below loads the file. A key reaches the log through repr, so a control or
-      # bidirectional character prints as an escape.
+      # keys mise writes. Each [tools] entry is a version or a table, and each mise.lock tool a
+      # list of tables, as the caller's gate requires. Any other form is refused: mise reads an
+      # entry written as an array of tables, options included. The caller's gate compares the
+      # values; this step refuses a key before the install below loads the file. A key reaches the
+      # log through repr, so a control or bidirectional character prints as an escape.
       - name: Refused keys
         run: |
           python3 - <<'PY'
@@ -183,35 +185,57 @@ jobs:
           SECTIONS = {
               "tool_config": {"locked"},
               "settings": {"locked", "lockfile", "locked_verify_provenance", "provenance_api_failures_fatal",
-                           "lockfile_platforms", "url_replacements"},
+                           "lockfile_platforms", "url_replacements", "github_attestations", "aqua"},
           }
+          AQUA = {"github_attestations"}
           OPTIONS = {"version", "version_prefix"}
+          FIELDS = {"checksum", "url", "url_api", "provenance"}
           found = []
           with open("mise.toml", "rb") as file:
               pins = tomllib.load(file)
           for key, value in pins.items():
-              if key == "tools" and isinstance(value, dict):
+              if key != "tools" and key not in SECTIONS:
+                  found.append(f"mise.toml carries {key!r}")
+              elif not isinstance(value, dict):
+                  found.append(f"mise.toml gives [{key}] as a {type(value).__name__}, not a table")
+              elif key in SECTIONS:
+                  found += [f"mise.toml sets {name!r} under [{key}]" for name in value if name not in SECTIONS[key]]
+                  aqua = value.get("aqua", {}) if key == "settings" else {}
+                  if not isinstance(aqua, dict):
+                      found.append(f"mise.toml gives [settings.aqua] as a {type(aqua).__name__}, not a table")
+                  else:
+                      found += [f"mise.toml sets {name!r} under [settings.aqua]" for name in aqua if name not in AQUA]
+              else:
                   for tool, entry in value.items():
                       if isinstance(entry, dict):
                           found += [f"mise.toml gives {tool!r} the option {option!r}" for option in entry if option not in OPTIONS]
-              elif key in SECTIONS and isinstance(value, dict):
-                  found += [f"mise.toml sets {name!r} under [{key}]" for name in value if name not in SECTIONS[key]]
-              elif key != "tools" and key not in SECTIONS:
-                  found.append(f"mise.toml carries {key!r}")
+                      elif not isinstance(entry, str):
+                          found.append(f"mise.toml gives {tool!r} as a {type(entry).__name__}, neither a version nor a table")
           with open("mise.lock", "rb") as file:
               lock = tomllib.load(file)
           found += [f"mise.lock carries {key!r}" for key in lock if key not in ("lockfile_version", "tools")]
-          for tool, entries in (lock.get("tools") or {}).items():
-              for entry in entries if isinstance(entries, list) else []:
-                  for key, value in (entry.items() if isinstance(entry, dict) else ()):
-                      if key.startswith("platforms."):
-                          fields = value if isinstance(value, dict) else {}
-                          found += [f"mise.lock gives {tool!r} on {key!r} the key {field!r}" for field in fields
-                                    if field not in ("checksum", "url", "url_api", "provenance")]
+          tools = lock.get("tools", {})
+          if not isinstance(tools, dict):
+              found.append(f"mise.lock gives [tools] as a {type(tools).__name__}, not a table")
+              tools = {}
+          for tool, entries in tools.items():
+              if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
+                  found.append(f"mise.lock gives {tool!r} in a form other than a list of tables")
+                  continue
+              for entry in entries:
+                  for key, value in entry.items():
+                      if key == "platforms" or key.startswith("platforms."):
+                          nested = key == "platforms" and isinstance(value, dict)
+                          for platform, fields in (value.items() if nested else [(key, value)]):
+                              if not isinstance(fields, dict):
+                                  found.append(f"mise.lock gives {tool!r} on {platform!r} a value that is not a table")
+                              else:
+                                  found += [f"mise.lock gives {tool!r} on {platform!r} the key {field!r}" for field in fields
+                                            if field not in FIELDS]
                       elif key == "options":
                           options = value if isinstance(value, dict) else {"(not a table)": None}
                           found += [f"mise.lock gives {tool!r} the option {option!r}" for option in options if option not in OPTIONS]
-                      elif key not in ("version", "backend", "specifiers", "platforms"):
+                      elif key not in ("version", "backend", "specifiers"):
                           found.append(f"mise.lock gives {tool!r} the key {key!r}")
           for finding in found:
               print(f"::error::{finding}, which no rule reads. Remove it.")
