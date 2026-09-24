@@ -536,7 +536,104 @@ async function workflows(): Promise<string> {
       `zizmor completed ${files(completed.size)}, and these tracked workflows were not among them: ${unaudited.join(', ') || 'none'}`,
     );
   }
-  return `${files(workflowFiles.length)}, zizmor ${online ? 'online' : 'offline'} over ${files(completed.size)}`;
+  const held = await inheritedCallsHeld(await binary('zizmor'));
+  return `${files(workflowFiles.length)}, zizmor ${online ? 'online' : 'offline'} over ${files(completed.size)}, ${String(held)} secrets-inherit ${held === 1 ? 'call' : 'calls'} held`;
+}
+
+/** What a workflow that passes `secrets: inherit` may call: this repository's reusable workflows, by either path. */
+const INHERIT_CALLEES: readonly string[] = ['./.github/workflows/', 'zachthedev/.github/.github/workflows/'];
+
+/** One job zizmor reports passing `secrets: inherit`: its file, the line of its `uses:`, and what it calls. */
+interface InheritedCall {
+  readonly path: string;
+  readonly line: number;
+  readonly callee: string;
+}
+
+/**
+ * The jobs in zizmor's JSON report that pass `secrets: inherit`, read from
+ * each finding's primary location.
+ *
+ * @throws When the report is not the shape zizmor 1.30 prints
+ */
+function inheritedCalls(report: unknown): InheritedCall[] {
+  if (!Array.isArray(report)) {
+    throw new Error('zizmor printed json that is not a list of findings');
+  }
+  const calls: InheritedCall[] = [];
+  for (const finding of report as unknown[]) {
+    const { ident, locations } = (finding ?? {}) as { ident?: unknown; locations?: unknown };
+    if (ident !== 'secrets-inherit') {
+      continue;
+    }
+    const primary = (Array.isArray(locations) ? (locations as unknown[]) : []).find(
+      (location) => (location as { symbolic?: { kind?: unknown } }).symbolic?.kind === 'Primary',
+    ) as
+      | {
+          symbolic?: { key?: { Local?: { verbatim_path?: unknown } } };
+          concrete?: { feature?: unknown; location?: { start_point?: { row?: unknown } } };
+        }
+      | undefined;
+    const path = primary?.symbolic?.key?.Local?.verbatim_path;
+    const row = primary?.concrete?.location?.start_point?.row;
+    const feature = primary?.concrete?.feature;
+    if (typeof path !== 'string' || typeof row !== 'number' || typeof feature !== 'string') {
+      throw new Error('zizmor reported a secrets-inherit finding with no primary file, line and callee');
+    }
+    calls.push({ path: path.replaceAll('\\', '/'), line: row + 1, callee: feature.replace(/^["']|["']$/g, '') });
+  }
+  return calls;
+}
+
+/**
+ * How many jobs pass `secrets: inherit`, each held to {@link INHERIT_CALLEES}.
+ *
+ * @remarks
+ * A secrets-inherit waiver in .github/zizmor.yml binds to a file or a line,
+ * not to the workflow a job calls, so pointing a waived job at another
+ * repository keeps the waiver and hands that repository every secret. zizmor
+ * runs with no config, so it reports every such job, waived or not. It exits
+ * 10 to 14 when it reports findings.
+ *
+ * @throws When zizmor fails or a job calls anything else
+ */
+async function inheritedCallsHeld(zizmor: string): Promise<number> {
+  const finished = await run(
+    [
+      zizmor,
+      '--no-progress',
+      '--offline',
+      '--no-config',
+      '--strict-collection',
+      '--format',
+      'json',
+      '--collect=all',
+      '.github',
+    ],
+    TOOL_TIMEOUT_MS,
+  );
+  if (finished.exitCode !== 0 && (finished.exitCode < 10 || finished.exitCode > 14)) {
+    throw new Error(`zizmor with no config ${describe(finished)}`);
+  }
+  let report: unknown;
+  try {
+    report = JSON.parse(finished.stdout);
+  } catch {
+    throw new Error(`zizmor with no config printed no json: ${describe(finished)}`);
+  }
+  const calls = inheritedCalls(report);
+  const stray = calls.filter((call) => !INHERIT_CALLEES.some((prefix) => call.callee.toLowerCase().startsWith(prefix)));
+  if (stray.length > 0) {
+    throw new Error(
+      stray
+        .map(
+          (call) =>
+            `${quote(call.path)} line ${String(call.line)} passes secrets: inherit to ${quote(call.callee)}. Only a reusable workflow of zachthedev/.github takes a caller's secrets`,
+        )
+        .join('\n'),
+    );
+  }
+  return calls.length;
 }
 
 /* ///// renovate ///// */
