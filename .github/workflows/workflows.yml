@@ -291,11 +291,18 @@ jobs:
       # the program it names cannot start, so two canaries run with the same -shellcheck value:
       # one needs SC2086 back, which proves ShellCheck runs behind the stand-in, and one needs the
       # refusal back, which proves the stand-in is wired. The value quotes each path, since
-      # actionlint splits it as a command line. -pyflakes= turns the Python linter off. No caller
-      # pins one, so a finding from it would be one the caller's gate never reports.
+      # actionlint splits it as a command line. actionlint first looks the whole value up as one
+      # program path, relative to the checkout, so a root entry named ' would run in place of the
+      # stand-in, answer both canaries and run pull-request code here. Such an entry is refused.
+      # -pyflakes= turns the Python linter off. No caller pins one, so a finding from it would be
+      # one the caller's gate never reports.
       - name: ShellCheck stand-in
         id: shellcheck
         run: |
+          if [ -e "'" ] || [ -L "'" ]; then
+            echo "::error::A root entry named ' would run in place of the ShellCheck stand-in, since actionlint looks the whole -shellcheck value up as one path. Remove it."
+            exit 1
+          fi
           shellcheck=$(mise which shellcheck)
           actionlint=$(mise which actionlint)
           standin="$RUNNER_TEMP/shellcheck-stand-in.sh"
