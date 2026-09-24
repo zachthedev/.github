@@ -910,10 +910,15 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 
 ### Rust
 
-- The workspace sets `allow_attributes_without_reason = "forbid"` under `[workspace.lints.clippy]`, so every
-  `allow` and `expect` carries a `reason`. It is `forbid`, not `deny`: under `deny` a crate-level, reasoned `allow`
-  of that lint switches the check off.
+- The workspace sets `allow_attributes_without_reason = "deny"` under `[workspace.lints.clippy]`, so every
+  `allow` and `expect` carries a `reason`. `forbid` fails the build wherever a derive macro emits a group `allow`,
+  as clap's `#[derive(Parser)]` emits `#[allow(clippy::restriction)]`, which rustc refuses (E0453).
+- Under `deny` a crate-level, reasoned `allow` of that lint switches the check off. The gate therefore refuses any
+  lint attribute naming `allow_attributes_without_reason`.
+- With any lint set under `[workspace.lints.clippy]`, the `all` and `pedantic` groups take `priority = -1`, or
+  clippy fails with `lint_groups_priority`.
 - The gate refuses:
+  - a root `Cargo.toml` that does not set `allow_attributes_without_reason` to `deny`;
   - an empty or whitespace `reason`;
   - an `allow` or `expect` naming a lint group, such as `warnings`, `unused` or `clippy::pedantic`, since a group is
     not a rule and clippy accepts one;
