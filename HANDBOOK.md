@@ -1087,8 +1087,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   waivers, since `generated_code = true` stops every analyzer and leaves no SARIF record. No gate refuses those
   keys. The gate keeps its location rule for a nested `.editorconfig` and its refusal of `.globalconfig` names
   (Gate), and the SARIF audit below catches a key that silences a rule that fires.
-- The gate requires StyleCop at its pin, as a direct dependency, in every C# lock file. Removing the reference and
-  relocking turns SA1404 off with the gate green.
+- Removing the StyleCop reference and relocking turns SA1404 off. The analyzer canary (below) then turns the gate
+  red: winget-nudge's refused all four projects with "loaded no SA1404". The canary is therefore the control. A
+  gate without it requires StyleCop at its pin, as a direct dependency, in every C# lock file.
 - The gate refuses `#pragma warning` in every form, `restore` included, because no analyzer checks a pragma for an
   ID or a reason. A `restore` alone does nothing, so refusing it keeps the rule to one sentence at no cost.
   `#pragma checksum` stays allowed. A compiler warning (`CSxxxx`) then has no inline waiver, only the root
