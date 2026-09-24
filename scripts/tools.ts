@@ -22,14 +22,8 @@ import { dlopen, FFIType, type Pointer, ptr, toArrayBuffer } from 'bun:ffi';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { describe, type Finished, isProgramName, quote, run } from './run';
-import { directoryEntries, isTable, quoteValue, sameValue } from './startup';
-
-/** The file pinning a version for every tool mise installs. */
-export const PINS = 'mise.toml';
-
-/** The file holding a checksum, a url and a backend per platform for every pinned tool. */
-export const LOCK = 'mise.lock';
+import { describe, type Finished, PROXY_NAMES, quote, run } from './run';
+import { directoryEntries, isTable, LOCK, PINS, quoteValue, sameValue } from './startup';
 
 /** The command that rewrites {@link LOCK} after an edit to {@link PINS}. */
 const RELOCK = 'mise lock';
@@ -85,9 +79,6 @@ const EXPECTED_SETTINGS = {
   aqua: { github_attestations: true },
 } as const;
 
-/** The root files a repository carries under a program's name: the lockfile Bun writes and the two mise files. */
-const ROOT_FILES: readonly string[] = ['bun.lock', PINS, LOCK];
-
 /** The tables {@link PINS} may hold. mise runs `[hooks]`, `[env]` and `[vars]` on install, so none of them is one. */
 const PIN_SECTIONS: readonly string[] = ['tools', 'tool_config', 'settings'];
 
@@ -117,8 +108,8 @@ const TOOL_OPTION_KEYS: readonly string[] = ['version', 'version_prefix'];
  * own value wherever the machine sets it.
  */
 const MISE_INHERITED: Readonly<Record<'posix' | 'windows', readonly string[]>> = {
-  posix: ['HOME', 'TMPDIR', 'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY', 'https_proxy', 'http_proxy', 'no_proxy'],
-  windows: ['TEMP', 'TMP', 'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY', 'https_proxy', 'http_proxy', 'no_proxy'],
+  posix: ['HOME', 'TMPDIR', ...PROXY_NAMES],
+  windows: ['TEMP', 'TMP', ...PROXY_NAMES],
 };
 
 /** A Windows known folder's id, laid out as the GUID structure the Shell reads. */
@@ -377,9 +368,8 @@ async function linksUnder(path: string): Promise<string[]> {
 /**
  * Every file in the repository root the gate refuses to run beside, as
  * findings: a mise config or lock file other than {@link PINS} and
- * {@link LOCK}, a file named like a program the gate, its hooks or an install
- * start, and a symbolic link or junction at the root or under the directories
- * mise reads.
+ * {@link LOCK}, and a symbolic link or junction at the root or under the
+ * directories mise reads.
  *
  * @remarks
  * mise merges every config file it discovers, and each one's sibling
@@ -390,10 +380,6 @@ async function linksUnder(path: string): Promise<string[]> {
  * directory are every place a file in the tree can reach it. mise follows a
  * link to whatever it names, where a name scan never looks, so the root and
  * the `.config`, `.mise` and `mise` directories hold none.
- *
- * A program runs from an absolute PATH entry alone, whatever the root holds.
- * The tools row runs this before its install, so a planted program name is a
- * red row on every platform too.
  */
 async function rootFindings(): Promise<string[]> {
   const found: string[] = [];
@@ -409,10 +395,6 @@ async function rootFindings(): Promise<string[]> {
     }
     if (isOtherMiseFile(name)) {
       found.push(`mise reads ${quote(name)} beside ${PINS} and ${LOCK}, and the gate installs from those two alone`);
-    } else if (!entry.isDirectory() && !ROOT_FILES.includes(lower) && isProgramName(name)) {
-      found.push(
-        `${quote(name)} is named like a program the gate, its hooks or an install start, and a clone carries no program at its root`,
-      );
     }
     if (lower === '.config') {
       for (const inner of await directoryEntries(name)) {
@@ -819,7 +801,7 @@ export async function resolve(): Promise<ReadonlyMap<string, string>> {
     if (located.exitCode !== 0 || path.length === 0) {
       throw new Error(`mise which ${tool.binary} found nothing. Install it with: mise install`);
     }
-    const printed = run([path, tool.versionFlag], READ_TIMEOUT_MS);
+    const printed = await run([path, tool.versionFlag], READ_TIMEOUT_MS);
     const reported = /\d+\.\d+\.\d+/.exec(`${printed.stdout}\n${printed.stderr}`)?.[0] ?? '';
     if (printed.exitCode !== 0 || reported !== version) {
       throw new Error(

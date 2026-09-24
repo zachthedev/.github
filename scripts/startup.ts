@@ -1,7 +1,7 @@
 /**
  * The files Bun and the gate's tools read before they run, held against what
- * the gate expects: bunfig.toml, what resolves the gate's own imports, and
- * .prettierrc.
+ * the gate expects: bunfig.toml, what resolves the gate's own imports, the
+ * configs and ignore files the rows read, and the root's program names.
  *
  * @remarks
  * The gate calls {@link startupFindings} before any row, so this file and
@@ -14,7 +14,22 @@
 import type { Dirent } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { PRETTIERRC, quote } from './run';
+import { isProgramName, PRETTIERRC, quote } from './run';
+
+/** The file pinning a version for every tool mise installs. */
+export const PINS = 'mise.toml';
+
+/** The file holding a checksum, a url and a backend per platform for every pinned tool. */
+export const LOCK = 'mise.lock';
+
+/** The manifest Bun and bun install read. */
+const PACKAGE_JSON = 'package.json';
+
+/** The one Prettier ignore file, which every Prettier run names with `--ignore-path`. */
+export const PRETTIERIGNORE = '.prettierignore';
+
+/** The root files a repository carries under a program's name: the lockfile Bun writes and the two mise files. */
+const PROGRAM_NAMED_FILES: readonly string[] = ['bun.lock', PINS, LOCK];
 
 /* ///// Comparing parsed files ///// */
 
@@ -208,30 +223,29 @@ async function gatePackages(): Promise<Set<string>> {
  * entry beside it is not applied, so package.json is the file read.
  */
 async function scriptsFindings(): Promise<string[]> {
-  const found: string[] = [];
-  const config = Bun.file(SCRIPTS_TSCONFIG);
-  if (!(await config.exists())) {
-    found.push(`${SCRIPTS_TSCONFIG} is missing, and it keeps the root tsconfig.json away from the gate's imports`);
-  } else {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(await config.text());
-    } catch (error: unknown) {
-      parsed = error instanceof Error ? error.message : String(error);
-    }
-    if (!sameValue(parsed, EXPECTED_SCRIPTS_TSCONFIG)) {
-      found.push(
-        `${SCRIPTS_TSCONFIG} is ${quoteValue(parsed)}, and it must be exactly ${JSON.stringify(EXPECTED_SCRIPTS_TSCONFIG)}. Its paths, baseUrl and extends redirect the gate's imports`,
-      );
-    }
-  }
+  const found = await heldWholeFindings({
+    path: SCRIPTS_TSCONFIG,
+    parse: JSON.parse,
+    expected: EXPECTED_SCRIPTS_TSCONFIG,
+    missing: "it keeps the root tsconfig.json away from the gate's imports",
+    differs: "Its paths, baseUrl and extends redirect the gate's imports",
+  });
   for (const entry of await walk(SCRIPTS)) {
     const path = join(entry.parentPath, entry.name).replaceAll('\\', '/');
     if (RESOLUTION_NAMES.includes(entry.name.toLowerCase()) && path.toLowerCase() !== SCRIPTS_TSCONFIG) {
       found.push(`${quote(path)} is one Bun reads to resolve a gate script's imports, and ${SCRIPTS} holds none`);
     }
   }
-  const manifest: unknown = JSON.parse(await Bun.file('package.json').text());
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(await Bun.file(PACKAGE_JSON).text());
+  } catch (error: unknown) {
+    // Missing or malformed: refused, since what Bun and bun install read from it is unknown.
+    found.push(
+      `${PACKAGE_JSON} does not parse, so its patchedDependencies cannot be read: ${quote(error instanceof Error ? error.message : String(error))}`,
+    );
+    return found;
+  }
   const patches = isTable(manifest) ? manifest['patchedDependencies'] : undefined;
   if (isTable(patches)) {
     const packages = await gatePackages();
@@ -246,6 +260,8 @@ async function scriptsFindings(): Promise<string[]> {
   return found;
 }
 
+/* ///// The files the rows read ///// */
+
 /**
  * What {@link PRETTIERRC} holds, compared whole. `--config` stops Prettier's
  * search for any other config, and a `plugins` entry here would still load a
@@ -253,35 +269,176 @@ async function scriptsFindings(): Promise<string[]> {
  */
 const EXPECTED_PRETTIERRC = { singleQuote: true, printWidth: 120 } as const;
 
-/** Every way {@link PRETTIERRC} differs from {@link EXPECTED_PRETTIERRC}, as findings. */
-async function prettierrcFindings(): Promise<string[]> {
-  const file = Bun.file(PRETTIERRC);
+/**
+ * Every pattern {@link PRETTIERIGNORE} holds, each once, beside comments and
+ * blank lines. The first two are files release-please writes. The rest are
+ * directories a checkout fills locally, so `bun run format`, which walks the
+ * tree, never rewrites another worktree or build output.
+ */
+export const PRETTIERIGNORE_PATTERNS: readonly string[] = [
+  'CHANGELOG.md',
+  '.release-please-manifest.json',
+  '.claude/worktrees/',
+  'coverage/',
+  'dist/',
+];
+
+/** The taplo config the toml row names, compared whole: which TOML files taplo formats. */
+const TAPLO_CONFIG = '.taplo.toml';
+
+/** What {@link TAPLO_CONFIG} holds. */
+const EXPECTED_TAPLO_CONFIG = {
+  include: ['**/*.toml'],
+  exclude: ['node_modules/**', '.claude/worktrees/**'],
+} as const;
+
+/** The zizmor config the workflows row names. */
+export const ZIZMOR_CONFIG = '.github/zizmor.yml';
+
+/**
+ * What {@link ZIZMOR_CONFIG} holds, compared whole. `self-repository` is off
+ * here alone: ci.yml and cd.yml call the reusable workflows beside them with
+ * `./`, which actionlint accepts and that audit refuses.
+ */
+const EXPECTED_ZIZMOR_CONFIG = {
+  rules: {
+    'unpinned-uses': { config: { policies: { '*': 'hash-pin' } } },
+    'self-repository': { disable: true },
+    'known-vulnerable-actions': { config: { allow: [] } },
+  },
+} as const;
+
+/** A file the gate holds whole: how to read it, what it must hold, and why. */
+interface HeldWhole {
+  readonly path: string;
+  readonly parse: (text: string) => unknown;
+  readonly expected: unknown;
+  /** Why the file must be there, after "is missing, and". */
+  readonly missing: string;
+  /** What a change to it would do. */
+  readonly differs: string;
+}
+
+/** Every way `held.path` differs from `held.expected`, as findings. */
+async function heldWholeFindings(held: HeldWhole): Promise<string[]> {
+  const file = Bun.file(held.path);
   if (!(await file.exists())) {
-    return [`${PRETTIERRC} is missing from the root, and the format row names it`];
+    return [`${held.path} is missing, and ${held.missing}`];
   }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await file.text());
+    parsed = held.parse(await file.text());
   } catch (error: unknown) {
     parsed = error instanceof Error ? error.message : String(error);
   }
-  return sameValue(parsed, EXPECTED_PRETTIERRC)
+  return sameValue(parsed, held.expected)
     ? []
     : [
-        `${PRETTIERRC} is ${quoteValue(parsed)}, and it must be exactly ${JSON.stringify(EXPECTED_PRETTIERRC)}. Prettier loads a plugin it names`,
+        `${held.path} is ${quoteValue(parsed)}, and it must be exactly ${JSON.stringify(held.expected)}. ${held.differs}`,
       ];
+}
+
+/**
+ * Every way {@link PRETTIERIGNORE} differs from
+ * {@link PRETTIERIGNORE_PATTERNS}, as findings.
+ *
+ * @remarks
+ * Every line is a comment starting with `#`, an empty line, or one of the
+ * patterns exactly, and each pattern appears once. A line with a leading or
+ * trailing space, a negation or any other pattern is a finding, so what the
+ * format row skips changes only with this file.
+ */
+async function prettierignoreFindings(): Promise<string[]> {
+  const file = Bun.file(PRETTIERIGNORE);
+  if (!(await file.exists())) {
+    return [`${PRETTIERIGNORE} is missing, and the format row passes it as the one ignore file`];
+  }
+  const found: string[] = [];
+  const seen = new Set<string>();
+  const lines = (await file.text()).split('\n');
+  if (lines.at(-1) === '') {
+    lines.pop();
+  }
+  for (const line of lines) {
+    if (line === '' || line.startsWith('#')) {
+      continue;
+    }
+    if (!PRETTIERIGNORE_PATTERNS.includes(line) || seen.has(line)) {
+      found.push(
+        `${PRETTIERIGNORE} carries ${quote(line)}, and it holds ${PRETTIERIGNORE_PATTERNS.join(', ')} alone, each once. A pattern there hides files from the format row`,
+      );
+    }
+    seen.add(line);
+  }
+  for (const pattern of PRETTIERIGNORE_PATTERNS.filter((entry) => !seen.has(entry))) {
+    found.push(`${PRETTIERIGNORE} lacks ${quote(pattern)}`);
+  }
+  return found;
+}
+
+/**
+ * Every root file named like a program the gate, its hooks or an install
+ * start, as findings: its name before the first dot is one of the program
+ * names, with any extension or none.
+ *
+ * @remarks
+ * The gate starts a program from an absolute PATH entry outside the
+ * repository alone. Windows runs a file from the working directory ahead of
+ * PATH for a bare name that anything else starts, so a clone carries none,
+ * and the gate refuses one before any row.
+ */
+async function programFindings(): Promise<string[]> {
+  const found: string[] = [];
+  for (const entry of await readdir('.', { withFileTypes: true })) {
+    if (!entry.isDirectory() && !PROGRAM_NAMED_FILES.includes(entry.name.toLowerCase()) && isProgramName(entry.name)) {
+      found.push(
+        `${quote(entry.name)} is named like a program the gate, its hooks or an install start, and a clone carries no program at its root. Remove it`,
+      );
+    }
+  }
+  return found;
 }
 
 /**
  * Every way the files Bun and the gate's tools read before they run differ
  * from what the gate expects, as findings: {@link BUNFIG}, what resolves the
- * gate's own imports, and {@link PRETTIERRC}.
+ * gate's own imports, {@link PRETTIERRC}, {@link PRETTIERIGNORE},
+ * {@link TAPLO_CONFIG}, {@link ZIZMOR_CONFIG} and a root file named like a
+ * program.
  *
  * @remarks
  * The gate calls this before any row, because Bun honored its files before
  * the gate's first line: a finding keeps a changed file from merging, and it
- * cannot stop what the file already ran.
+ * cannot stop what the file already ran. The last three decide what the
+ * format, toml and workflows rows skip or waive, so a change to any of them
+ * is a change to this file, which a reviewer reads as a gate change.
  */
 export async function startupFindings(): Promise<string[]> {
-  return [...(await bunfigFindings()), ...(await scriptsFindings()), ...(await prettierrcFindings())];
+  return [
+    ...(await bunfigFindings()),
+    ...(await scriptsFindings()),
+    ...(await heldWholeFindings({
+      path: PRETTIERRC,
+      parse: JSON.parse,
+      expected: EXPECTED_PRETTIERRC,
+      missing: 'the format row names it',
+      differs: 'Prettier loads a plugin it names',
+    })),
+    ...(await prettierignoreFindings()),
+    ...(await heldWholeFindings({
+      path: TAPLO_CONFIG,
+      parse: Bun.TOML.parse,
+      expected: EXPECTED_TAPLO_CONFIG,
+      missing: 'the toml row names it',
+      differs: 'Its include and exclude decide which TOML files the toml row checks',
+    })),
+    ...(await heldWholeFindings({
+      path: ZIZMOR_CONFIG,
+      parse: Bun.YAML.parse,
+      expected: EXPECTED_ZIZMOR_CONFIG,
+      missing: 'the workflows row names it',
+      differs: 'It can turn an audit off or waive an advisory',
+    })),
+    ...(await programFindings()),
+  ];
 }

@@ -1,6 +1,16 @@
+# The one ignore file every Prettier run names with --ignore-path, held whole
+# by scripts/startup.ts, so a pattern added here is a gate change.
+#
 # Written by release-please on every release. Its bullets are `*` and its
 # version headers carry a blank line prettier would collapse, so formatting it
 # turns each release into a failing check on main. The manifest is written on
 # one line by the same tool.
 CHANGELOG.md
 .release-please-manifest.json
+
+# Directories a checkout fills locally, which `bun run format` walks into
+# because .gitignore no longer narrows Prettier: Claude Code's worktrees, each
+# a whole checkout of its own, and test and build output.
+.claude/worktrees/
+coverage/
+dist/

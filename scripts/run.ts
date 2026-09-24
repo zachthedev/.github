@@ -24,6 +24,12 @@ const BUN_ENV_FILES: readonly string[] = [
 const NPMRC = '.npmrc';
 
 /**
+ * The config files actionlint reads from `.github` on its own. One can ignore
+ * any finding by pattern, ShellCheck's included, and the set carries none.
+ */
+const ACTIONLINT_CONFIGS: readonly string[] = ['.github/actionlint.yaml', '.github/actionlint.yml'];
+
+/**
  * Every file name Prettier 3 searches for a config, beside the one
  * `.prettierrc` the gate names with `--config`. A `.js`, `.ts`, `.mjs`,
  * `.mts`, `.cjs` or `.cts` one runs as code, and any of them can name a
@@ -94,9 +100,9 @@ function baseName(path: string): string {
 
 /**
  * Every tracked file the gate refuses to run beside, as findings: an env file
- * Bun loads here, an `.npmrc`, any path under a `node_modules` directory at
- * any depth, and every Prettier config but the root `.prettierrc`, a
- * `package.json` `prettier` key included.
+ * Bun loads here, an `.npmrc`, an actionlint config, any path under a
+ * `node_modules` directory at any depth, and every Prettier config but the
+ * root `.prettierrc`, a `package.json` `prettier` key included.
  *
  * @remarks
  * Bun loads an env file into the gate's environment before the gate runs, so
@@ -112,13 +118,22 @@ function baseName(path: string): string {
  * starts with its two config switches and nothing else, so no variable an env
  * file set reaches it.
  */
-export function trackedFindings(): string[] {
+export async function trackedFindings(): Promise<string[]> {
   // icase, because Bun on Windows and macOS opens `.ENV` as `.env`, and a
   // literal pathspec matches case-sensitively even under core.ignorecase.
-  const startupFiles = [...BUN_ENV_FILES, NPMRC].map((name) => `:(icase,literal)${name}`);
+  const startupFiles = [...BUN_ENV_FILES, NPMRC, ...ACTIONLINT_CONFIGS].map((name) => `:(icase,literal)${name}`);
   const prettierFiles = [...PRETTIER_CONFIGS, 'package.json'].map((name) => `:(icase,glob)**/${name}`);
-  const listed = run(
-    ['git', 'ls-files', '-z', '--', ':(icase,glob)**/node_modules/**', ...startupFiles, ...prettierFiles],
+  const listed = await run(
+    [
+      'git',
+      'ls-files',
+      '-z',
+      '--',
+      ':(icase,glob)**/node_modules',
+      ':(icase,glob)**/node_modules/**',
+      ...startupFiles,
+      ...prettierFiles,
+    ],
     GIT_TIMEOUT_MS,
     // /dev/null is the spelling Git for Windows reads as an empty file too.
     { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
@@ -128,7 +143,8 @@ export function trackedFindings(): string[] {
     return [`git could not list the tracked files the gate refuses: it ${describe(listed)}`];
   }
   const paths = listed.stdout.split('\0').filter((path) => path.length > 0);
-  const modules = paths.filter((path) => /(^|\/)node_modules\//i.test(path));
+  // node_modules itself too: a tracked link by that name stands in for the whole directory.
+  const modules = paths.filter((path) => /(^|\/)node_modules(\/|$)/i.test(path));
   const found: string[] = [];
   for (const path of paths.filter((entry) => !modules.includes(entry))) {
     const name = baseName(path);
@@ -144,6 +160,10 @@ export function trackedFindings(): string[] {
       found.push(
         `${quote(path)} is tracked, and bun install fetches from the registry it names. Remove it from the index: git rm --cached -- ${path}`,
       );
+    } else if (ACTIONLINT_CONFIGS.includes(path.toLowerCase())) {
+      found.push(
+        `${quote(path)} is tracked, and actionlint reads it to ignore findings by pattern. The workflows row runs with no actionlint config. Remove it: git rm -- ${path}`,
+      );
     } else {
       found.push(
         `${quote(path)} is tracked, and Bun loads it into the environment of every bun run here. Remove it from the index: git rm --cached -- ${path}`,
@@ -154,7 +174,7 @@ export function trackedFindings(): string[] {
     const shown = modules.slice(0, NODE_MODULES_SHOWN).map((path) => quote(path));
     const more = modules.length > NODE_MODULES_SHOWN ? ` and ${String(modules.length - NODE_MODULES_SHOWN)} more` : '';
     found.push(
-      `${shown.join(', ')}${more} ${modules.length === 1 ? 'is' : 'are'} tracked under a node_modules directory. bun install keeps what it finds there, bun run puts node_modules/.bin ahead of PATH, and Bun resolves an import from the nearest node_modules first. Remove each from the index with git rm -r --cached`,
+      `${shown.join(', ')}${more} ${modules.length === 1 ? 'is' : 'are'} tracked as or under a node_modules directory. bun install keeps what it finds there, bun run puts node_modules/.bin ahead of PATH, and Bun resolves an import from the nearest node_modules first. Remove each from the index with git rm -r --cached`,
     );
   }
   return found;
@@ -165,7 +185,7 @@ export function trackedFindings(): string[] {
  *
  * @remarks
  * A file at the repository root named like one of these, with any extension
- * or none, is refused by the tools row. {@link resolveProgram} never reads
+ * or none, is refused before any row. {@link resolveProgram} never reads
  * the working directory, so none of them can stand in for the program either
  * way. The gate starts gh, git and mise by name, the hooks start bun and
  * bunx, and lefthook's install script starts node.
@@ -235,18 +255,33 @@ function isInsideRepository(directory: string, root: string): boolean {
 }
 
 /**
+ * The PATH entries the gate searches and hands every child: the absolute ones
+ * whose canonical path lies outside the repository, in PATH's order.
+ *
+ * @remarks
+ * Windows searches the working directory ahead of PATH for a bare name, and
+ * Bun's own lookup reads an empty or `.` entry as the working directory, so a
+ * file at the repository root named like a program would run in its place.
+ * `bun run` puts the checkout's `node_modules/.bin` ahead of PATH as an
+ * absolute entry, where a planted file would run the same way.
+ */
+function searchedDirectories(): string[] {
+  const windows = process.platform === 'win32';
+  const root = repositoryRoot();
+  return (process.env['PATH'] ?? '')
+    .split(delimiter)
+    .map((entry) => (windows ? entry.replace(/^"(.*)"$/, '$1') : entry))
+    .filter((directory) => isAbsolute(directory) && !isInsideRepository(directory, root));
+}
+
+/**
  * The absolute path of `program`, found through PATH alone.
  *
  * @remarks
- * Only absolute PATH entries outside the repository are searched. Windows
- * searches the working directory ahead of PATH for a bare name, and Bun's own
- * lookup reads an empty or `.` entry as the working directory, so a file at
- * the repository root named like the program would run in its place. `bun
- * run` puts the checkout's `node_modules/.bin` ahead of PATH as an absolute
- * entry, where a planted file would run the same way. On Windows each
- * PATHEXT extension is tried in PATHEXT's order, as cmd.exe tries them,
- * unless the name already carries one. A program given as an absolute path is
- * returned as it is, and a relative path is never resolved.
+ * Only the {@link searchedDirectories} are searched. On Windows each PATHEXT
+ * extension is tried in PATHEXT's order, as cmd.exe tries them, unless the
+ * name already carries one. A program given as an absolute path is returned
+ * as it is, and a relative path is never resolved.
  *
  * @returns The path to start, or undefined when no absolute PATH entry that
  * resolves outside the repository holds it
@@ -264,12 +299,7 @@ export function resolveProgram(program: string): string | undefined {
     : [];
   const carries = extensions.some((extension) => extension.toLowerCase() === extname(program).toLowerCase());
   const names = windows && !carries ? extensions.map((extension) => program + extension) : [program];
-  const root = repositoryRoot();
-  for (const entry of (process.env['PATH'] ?? '').split(delimiter)) {
-    const directory = windows ? entry.replace(/^"(.*)"$/, '$1') : entry;
-    if (!isAbsolute(directory) || isInsideRepository(directory, root)) {
-      continue;
-    }
+  for (const directory of searchedDirectories()) {
     for (const name of names) {
       const candidate = join(directory, name);
       if (isRunnable(candidate)) {
@@ -309,17 +339,121 @@ export interface RunOptions {
 }
 
 /**
+ * The proxy variables, in both spellings the tools' HTTP clients read. Bun
+ * 1.4.2 on Windows reads a lowercase-only name directly but leaves it out when
+ * it lists the environment, so {@link run} reads each one by name.
+ */
+export const PROXY_NAMES: readonly string[] = [
+  'HTTPS_PROXY',
+  'HTTP_PROXY',
+  'NO_PROXY',
+  'https_proxy',
+  'http_proxy',
+  'no_proxy',
+];
+
+/** How long the tree kill, and the reads after it, may take once a deadline passes. */
+const KILL_GRACE_MS = 10_000;
+
+/**
+ * Kills `pid` and every process it started, at a deadline.
+ *
+ * @remarks
+ * A tool can start processes of its own, as actionlint starts ShellCheck and
+ * tsc's launcher starts the compiler, and killing the tool alone leaves them
+ * running with no parent. Windows walks the tree with `taskkill /T`. POSIX
+ * has no such command, so the tree comes from one `ps` listing of every
+ * process and its parent. A process group would need a new session, and a
+ * child in its own session never sees the Ctrl-C that stops the gate.
+ */
+function killTree(pid: number): void {
+  const tree = [pid];
+  if (process.platform === 'win32') {
+    const taskkill = resolveProgram('taskkill');
+    if (taskkill !== undefined) {
+      Bun.spawnSync({
+        cmd: [taskkill, '/T', '/F', '/PID', String(pid)],
+        stdout: 'ignore',
+        stderr: 'ignore',
+        timeout: KILL_GRACE_MS,
+      });
+    }
+  } else {
+    const ps = resolveProgram('ps');
+    if (ps !== undefined) {
+      const listed = Bun.spawnSync({
+        cmd: [ps, '-A', '-o', 'pid=', '-o', 'ppid='],
+        stdout: 'pipe',
+        stderr: 'ignore',
+        timeout: KILL_GRACE_MS,
+      });
+      const children = new Map<number, number[]>();
+      for (const line of listed.stdout.toString().split('\n')) {
+        const fields = line.trim().split(/\s+/);
+        const child = Number(fields[0]);
+        const parent = Number(fields[1]);
+        if (fields.length === 2 && Number.isInteger(child) && Number.isInteger(parent)) {
+          children.set(parent, [...(children.get(parent) ?? []), child]);
+        }
+      }
+      // An array's iterator reads its length on every step, so the loop walks what it appends.
+      for (const member of tree) {
+        tree.push(...(children.get(member) ?? []).filter((child) => !tree.includes(child)));
+      }
+    }
+  }
+  // The root last, so no member outlives the walk by being orphaned mid-kill.
+  for (const member of tree.reverse()) {
+    try {
+      process.kill(member, 'SIGKILL');
+    } catch {
+      // Already gone: taskkill or an earlier kill in this loop ended it.
+    }
+  }
+}
+
+/**
+ * Everything `stream` carries, decoded as UTF-8, or nothing when the process
+ * writes to the gate's own streams. The read stops when `stop` settles, so a
+ * process left holding a pipe open cannot hold the gate.
+ */
+async function readAll(stream: unknown, stop: Promise<void>): Promise<string> {
+  if (!(stream instanceof ReadableStream)) {
+    return '';
+  }
+  const reader = (stream as ReadableStream<Uint8Array>).getReader();
+  stop
+    .then(() => reader.cancel())
+    .catch(() => {
+      // The stream closed on its own first, which is the ordinary end.
+    });
+  const chunks: Uint8Array[] = [];
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+/**
  * Runs one command to completion with its output captured.
  *
  * @remarks
  * Every process the gate starts goes through here, so every one carries a
- * deadline. A tool that hangs is a red row, not a hung gate.
+ * deadline. A tool that hangs is a red row, not a hung gate. At the deadline
+ * the process and every process it started are killed.
  *
  * The program starts from the path {@link resolveProgram} finds, never from
  * the working directory. A program no absolute PATH entry holds is a failed
  * process, exit 127 with the reason as its stderr, and so is a spawn error, so
  * a missing prerequisite reads like any other red row rather than a crash of
- * the gate.
+ * the gate. A process that inherits the gate's environment gets PATH as the
+ * {@link searchedDirectories} alone, so a program it starts by name resolves
+ * outside the repository too, and gets every {@link PROXY_NAMES} value the
+ * gate can read.
  *
  * @param cmd - The program and its arguments, the program first
  * @param timeoutMs - The deadline, after which the process is killed
@@ -330,19 +464,35 @@ export interface RunOptions {
  * as undefined is removed, in every spelling
  * @returns What the process printed and how it ended
  */
-export function run(
+export async function run(
   cmd: readonly string[],
   timeoutMs: number,
   env: Readonly<Record<string, string | undefined>> = {},
   options: RunOptions = {},
-): Finished {
+): Promise<Finished> {
   const show = options.show === true;
   const replaced = new Set(Object.keys(env).map((name) => name.toUpperCase()));
   const merged: Record<string, string> = {};
   if (options.inherit !== false) {
+    if (!replaced.has('PATH')) {
+      replaced.add('PATH');
+      merged['PATH'] = searchedDirectories().join(delimiter);
+    }
     for (const [name, value] of Object.entries(process.env)) {
       if (value !== undefined && !replaced.has(name.toUpperCase())) {
         merged[name] = value;
+      }
+    }
+    // Windows reads one name in any case, so a spelling already present covers the others.
+    const present = new Set(
+      Object.keys(merged).map((name) => (process.platform === 'win32' ? name.toUpperCase() : name)),
+    );
+    for (const name of PROXY_NAMES) {
+      const key = process.platform === 'win32' ? name.toUpperCase() : name;
+      const value = process.env[name];
+      if (value !== undefined && !replaced.has(name.toUpperCase()) && !present.has(key)) {
+        merged[name] = value;
+        present.add(key);
       }
     }
   }
@@ -361,28 +511,36 @@ export function run(
       timedOut: false,
     };
   }
-  let finished: ReturnType<typeof Bun.spawnSync>;
+  let child: ReturnType<typeof Bun.spawn>;
   try {
-    finished = Bun.spawnSync({
+    child = Bun.spawn({
       cmd: [path, ...args],
       cwd: process.cwd(),
       env: merged,
+      stdin: 'ignore',
       stdout: show ? 'inherit' : 'pipe',
       stderr: show ? 'inherit' : 'pipe',
-      timeout: timeoutMs,
-      killSignal: 'SIGKILL',
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     return { exitCode: 127, stdout: '', stderr: `${program}: ${message}`, timedOut: false };
   }
-  const timedOut: boolean = finished.exitedDueToTimeout === true;
-  return {
-    exitCode: timedOut ? -1 : finished.exitCode,
-    stdout: finished.stdout?.toString() ?? '',
-    stderr: finished.stderr?.toString() ?? '',
-    timedOut,
-  };
+  let timedOut = false;
+  let stopReading: () => void = () => undefined;
+  const stopped = new Promise<void>((resolve) => {
+    stopReading = resolve;
+  });
+  let grace: ReturnType<typeof setTimeout> | undefined;
+  const deadline = setTimeout(() => {
+    timedOut = true;
+    killTree(child.pid);
+    grace = setTimeout(stopReading, KILL_GRACE_MS);
+  }, timeoutMs);
+  const [stdout, stderr] = await Promise.all([readAll(child.stdout, stopped), readAll(child.stderr, stopped)]);
+  const exitCode = await Promise.race([child.exited, stopped.then(() => -1)]);
+  clearTimeout(deadline);
+  clearTimeout(grace);
+  return { exitCode: timedOut ? -1 : exitCode, stdout, stderr, timedOut };
 }
 
 /**
