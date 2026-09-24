@@ -734,6 +734,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The same step refuses a tracked `.npmrc` at any depth, also without regard to case, because it redirects the
   install's registry. It refuses a `patchedDependencies` key in any tracked `package.json` (Gate), because a
   frozen install without scripts still applies a patch.
+- A step of its own, before the install, refuses a tracked `bunfig.toml`, in any case, unless it holds
+  `[install] minimumReleaseAge` alone at the cooldown or higher, because a preload in it runs inside commitlint. A
+  link or a file that does not parse is refused too. Every `bun` start in the job passes `--no-env-file` (Gate).
 - A step of its own, also before the install, refuses `paths` and `baseUrl` in any tracked `tsconfig.json` or
   `jsconfig.json` and in every file its `extends` names, because the job runs commitlint under Bun (Gate).
   It also refuses an `extends` naming a package, a file outside the checkout or a file the checkout lacks, since
