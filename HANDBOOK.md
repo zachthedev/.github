@@ -731,8 +731,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   Bun then runs that copy. The job runs beside every caller's gate, whatever the caller's stack, so it holds
   the refusal itself.
 - The same step refuses a tracked `.npmrc` at any depth, also without regard to case, because it redirects the
-  install's registry. It refuses a `package.json` `patchedDependencies` entry for an `@commitlint` package or a
-  package `commitlint.config.js` imports, because a frozen install without scripts still applies it.
+  install's registry. It refuses a `patchedDependencies` key in any tracked `package.json` (Gate), because a
+  frozen install without scripts still applies a patch.
 - A step of its own, also before the install, refuses `paths` and `baseUrl` in any tracked `tsconfig.json` or
   `jsconfig.json` and in every file its `extends` names, because the job runs commitlint under Bun (Gate).
   It also refuses an `extends` naming a package, a file outside the checkout or a file the checkout lacks, since
