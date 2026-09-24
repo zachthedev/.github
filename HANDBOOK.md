@@ -742,7 +742,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   workflow or the one gate task that sequences it holds it. A test that parses `ci.yml` for its shape is glue,
   and it goes.
 - The `commits` workflow runs commitlint over the pull request range and over the subject the squash writes,
-  with ` (#N)` appended.
+  with ` (#N)` appended. For a one-commit pull request that is the commit's own subject (Merge settings).
 - The subject lint runs through a generated wrapper that turns every commitlint ignore off, the caller's and
   commitlint's defaults alike, so a header an ignore skips in the range is still checked where it lands. The range
   lint and the commit hook keep the caller's ignores. A `Revert "..."` or merge subject fails the subject lint.
@@ -758,6 +758,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The same step refuses a tracked `.npmrc` at any depth, also without regard to case, because it redirects the
   install's registry. It refuses a `patchedDependencies` key in any tracked `package.json` (Gate), because a
   frozen install without scripts still applies a patch.
+- It refuses a tracked env file at the root, any of the eight names Bun loads, without regard to case.
+  `bun install` loads one even frozen and without scripts, and no flag stops that. A tracked `.env` pointing
+  `BUN_INSTALL_CACHE_DIR` at a committed folder installed a changed package with `bun.lock` unchanged.
 - A step of its own, before the install, refuses a tracked `bunfig.toml`, in any case, unless it holds
   `[install] minimumReleaseAge` alone at the cooldown or higher, because a preload in it runs inside commitlint. A
   link or a file that does not parse is refused too. Every `bun` start in the job passes `--no-env-file` (Gate).
