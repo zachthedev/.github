@@ -176,11 +176,12 @@ The scope is optional. `.github/commit-scopes.json` lists each scope and what it
 accepts no other. Omit the scope rather than invent one. A new part of the repository earns a scope in that
 file, in the change that adds the part.
 
-The header and every body line stay within 72 characters. A pull request merges by squash, the one method the
-repository allows. A one-commit pull request lands its commit's subject and body, and a longer one lands its
-title and each commit as a bullet. Either subject lands with ` (#NNN)` appended, so keep a commit subject and a
-title within 65 characters. A body paragraph never opens with a bare type, because release-please reads it as a
-second change.
+The `commit-msg` hook holds the header and every body line to 72 characters as written. A pull request merges
+by squash, the one method the repository allows. A one-commit pull request lands its commit's subject and body,
+and a longer one lands its title and each commit as a bullet. Either subject lands with ` (#N)` appended, and the
+`commits` job holds that landed subject to 72 ([Commits](HANDBOOK.md#commits)). Keep a commit subject and a title
+within 72 characters less that suffix: 64 to 67, fewer as the pull request number grows. A body paragraph never
+opens with a bare type, because release-please reads it as a second change.
 
 A pull request's title takes the type of its most user-facing commit, and `!` when any commit breaks something
 users see. A squash of several commits lands the title as its header, so a `!` in a commit's own header is lost
