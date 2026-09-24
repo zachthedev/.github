@@ -511,9 +511,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every ignore file a row reads, such as `.prettierignore` and the excludes in `.taplo.toml`, is compared whole
   against a constant in that repository's gate. A change to what a row skips is then a gate change a reviewer
   sees.
-  - A lint config that carries exclusions or the linter list, such as `.golangci.yml` or an
-    `eslint.config.ts` with `ignores`, is compared whole the same way, because a change to it narrows what the row checks.
-    Changing one means changing the constant in the gate beside it, which a reviewer sees.
+  - A lint config that carries exclusions or the linter list, such as `.golangci.yml` or an `eslint.config.ts`
+    with `ignores`, is compared whole the same way, because a change to it narrows what the row checks. Changing
+    one means changing the constant in the gate beside it, which a reviewer sees.
 - `.github/zizmor.yml` is compared whole against a constant in that repository's gate as well, because it can
   disable an audit. A waiver is then a gate change a reviewer sees.
 - The gate refuses a committed `.github/actionlint.yaml`, because its `paths` block can silence every finding. A
