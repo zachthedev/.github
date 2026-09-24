@@ -13,7 +13,6 @@ repository calls or extends the rest.
 | [.github/ISSUE_TEMPLATE/](.github/ISSUE_TEMPLATE/)                   | GitHub, as the default issue forms for a repository that defines none.                                               |
 | [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md) | GitHub, as the default pull request template.                                                                        |
 | [.github/FUNDING.yml](.github/FUNDING.yml)                           | GitHub, for the sponsor button on every repository.                                                                  |
-| [profile/README.md](profile/README.md)                               | GitHub, as the organization profile once `zachthedev` is one. A personal account reads its profile README elsewhere. |
 
 The reusable workflows:
 
