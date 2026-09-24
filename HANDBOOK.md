@@ -366,7 +366,8 @@ API reports the value only on a `required_reviewers` rule.
 - No zizmor waiver binds the callee. A `file:line` entry matches any location the finding reports, which for
   `secrets-inherit` is the `uses:` line or the `secrets:` line, not the lines between. Every gate and the shared
   `workflows` job therefore fail unless each job passing `secrets: inherit` calls
-  `zachthedev/.github/.github/workflows/`.
+  `zachthedev/.github/.github/workflows/`. They also fail when a file the waiver names holds no such call, so a
+  waiver never outlives its job.
 - That hold reads a zizmor pass run with `--no-config --no-ignores`. `--no-config` alone still honors an inline
   `# zizmor: ignore[secrets-inherit]`, which hides the job, and `--no-ignores` drops config ignores and inline
   comments alike. The hold then stands on its own, beside the inline refusal (Gate).
@@ -511,7 +512,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     `package.json` or a `node_modules`, because the root `tsconfig.json`'s `paths`, `extends` and `baseUrl`
     otherwise redirect the gate's imports;
   - a tracked `.npmrc` at any depth, because it redirects even the frozen, script-free install. An untracked one
-    holds personal credentials and changes no row, so it passes.
+    holds personal credentials and changes no row, so it passes;
+  - a package the root `package.json` names that the checkout's `node_modules` lacks, or holds through a link out
+    of the checkout, because Bun then loads a parent directory's copy.
 - Those checks import only built-in modules, so no package loads before they pass.
 - Every gate refuses a `patchedDependencies` key in any tracked `package.json`. A patch rewrites a pinned
   package's code under a frozen, script-free install and passes the lockfile's integrity check. A scope as narrow
@@ -534,8 +537,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   reader keeps the first copy, while `JSON.parse` and Go's `encoding/json` keep the last. A duplicate therefore
   lets the gate pass one value while Bun uses the other.
 - A config that changes a gate row's result is refused when it is present on disk, committed or not, so a local
-  gate agrees with CI. A personal override, a `lefthook-local` or `.lefthook-local` file in any form or an env file,
-  is refused only when committed, and `.gitignore` names it.
+  gate agrees with CI. A personal file, a `lefthook-local` or `.lefthook-local` file in any form, an env file or
+  `.claude/settings.local.json`, is refused only when committed, and `.gitignore` names it.
+- A tracked file under a directory a row skips is refused, since no row checks it while the product can still
+  import it. Each stack names its own list, and a Bun gate's is `dist/`, `coverage/` and `.claude/worktrees/`.
+- A tracked source file no row checks is refused. A Bun gate names its untyped JavaScript and declaration files in
+  a held list, since tsc checks neither, and a Go gate refuses a tracked Go file no build compiles.
 - The gate refuses a root `.config` directory outright, in any letter case. mise, the dotnet tool manifest,
   cosmiconfig's meta config and lefthook all read it.
 - The root `.config` and a `package.json` `cosmiconfig` key are refused before any commitlint step, the shared
@@ -566,6 +573,13 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - A test row also fails when every test it counted was skipped. Under Microsoft.Testing.Platform, a runner config
     that marks every test explicit exits 0 with every test skipped. A runner config that can skip or filter tests
     falls under the tool config search above, in every stack.
+  - A Bun test row runs with `CI=true`, so a file holding `test.only` fails the row, where it would otherwise run
+    that test alone and leave the rest out of the count.
+  - A row that parses tool output strips ANSI CSI sequences before it matches, and the gate hands every child
+    `NO_COLOR=1`. A summary colored on the runner alone turned a gate red there.
+  - A row's printed sentence escapes control characters in anything it quotes.
+- A row that runs repository code, such as tests or a generator, never runs ahead of a row that reads a config
+  that code could write, unless the tree rules run again before each later row.
   - The actionlint row hands actionlint the workflow files by name. With no file argument actionlint also needs a
     `.git`, so it fails in an archive copy of the tree.
   - The actionlint and zizmor rows fail unless every file they handed over appears in the tool's own per-file
@@ -603,6 +617,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - The flag's value is single-quoted with forward slashes. An unquoted Windows backslash path turns the rule off
     with no error.
   - The shared job's stand-in comes from `.github`'s own pinned workflow text, never from the caller's checkout.
+  - A stand-in writes nothing to stdout until it has read its input whole and ShellCheck has exited.
 - Every gate and the shared `workflows` job refuse a `shell:` value, on a step or under `defaults.run`, other than
   `bash`, `sh` or `pwsh`. actionlint runs ShellCheck for bash and sh alone, so a custom shell such as
   `/bin/bash -e {0}` runs bash unchecked.
@@ -617,6 +632,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   stand-in's refusal included. A canonical one is added the day a repository needs it.
 - Every tool a gate starts runs with `SHELLCHECK_OPTS` cleared, because that variable reaches ShellCheck past
   actionlint's `--norc`.
+- Every gate withholds `BUN_OPTIONS` from each Bun it starts, in any stack that starts Bun for Prettier or
+  commitlint. Bun reads it as flags ahead of its own, a test name filter or a preload among them.
 - The gate refuses a workflow file whose extension is not a lowercase `.yml`. actionlint's file list and zizmor's
   collection each missed a `.github/workflows/UP.YML`.
 - The gate refuses a tracked path with a `.git`, `.sl`, `.svn`, `.hg` or `.jj` segment. Prettier's CLI skips a
@@ -957,6 +974,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - an `allow` or `expect` naming a lint group, such as `warnings`, `unused` or `clippy::pedantic`, since a group is
     not a rule and clippy accepts one;
   - `rustfmt::skip` in every form;
+  - cargo-machete's ignore metadata in any `Cargo.toml`, a waiver no tool asks a reason for;
   - a member manifest whose `[lints]` is anything but `workspace = true` alone, since such a crate escapes the
     workspace setting.
 - `@generated` needs no refusal while the held `rustfmt.toml` leaves `format_generated_files` at its default,
