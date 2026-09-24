@@ -31,15 +31,15 @@ This repository is a caller too. Its `ci.yml`, `cd.yml` and `audit.yml` are its 
 
 ## Documentation
 
-| Document                                 | Holds                                                                                            |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| [HANDBOOK.md](HANDBOOK.md)               | The standard every `zachthedev` repository is aligned to. Each kickstart holds the files for it. |
-| [CONTRIBUTING.md](CONTRIBUTING.md)       | Setup, the gate, commit messages, where code goes, dependencies, releases, what never happens.   |
-| [docs/dev.md](docs/dev.md)               | Prerequisites, the first run, generated files.                                                   |
-| [AGENTS.md](AGENTS.md)                   | What an agent reads first, runs to verify, and never does in a session. `CLAUDE.md` imports it.  |
-| [SECURITY.md](SECURITY.md)               | What counts as a vulnerability here, and how to report one privately.                            |
-| [SUPPORT.md](SUPPORT.md)                 | Where a question goes, and how long a reply takes.                                               |
-| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | The Contributor Covenant, with the reporting address.                                            |
+| Document                                 | Holds                                                                                                                |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| [HANDBOOK.md](HANDBOOK.md)               | The standard every `zachthedev` repository is aligned to. Each kickstart holds the files for it.                     |
+| [CONTRIBUTING.md](CONTRIBUTING.md)       | Setup, the gate, commit messages, where code goes, dependencies, releases, what never happens.                       |
+| [docs/dev.md](docs/dev.md)               | Prerequisites, the first run, generated files.                                                                       |
+| [AGENTS.md](AGENTS.md)                   | What an agent reads first, runs to verify, and never does in a session. `CLAUDE.md` imports it.                      |
+| [SECURITY.md](SECURITY.md)               | What counts as a vulnerability here and in every repository without its own policy, and how to report one privately. |
+| [SUPPORT.md](SUPPORT.md)                 | Where a question goes, and how long a reply takes.                                                                   |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | The Contributor Covenant, with the reporting address.                                                                |
 
 ## Working on it
 

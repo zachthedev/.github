@@ -1,5 +1,9 @@
 # Contributing
 
+If another `zachthedev` repository sent you here, read that repository's `README.md` and `docs/` and the
+[handbook](https://github.com/zachthedev/.github/blob/main/HANDBOOK.md), since this guide covers
+`zachthedev/.github` alone.
+
 ## Setup
 
 Install before committing. [docs/dev.md#prerequisites](docs/dev.md#prerequisites) names what the machine needs,
