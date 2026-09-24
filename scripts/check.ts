@@ -30,7 +30,7 @@ import { styleText } from 'node:util';
 // under node_modules loads before the preflight in main() refuses a planted
 // package. tools.ts imports zod and the format row imports prettier, so each
 // loads where a row needs it.
-import { describe, type Finished, PRETTIERRC, run, trackedFindings } from './run';
+import { describe, type Finished, PRETTIERRC, quote, run, trackedFindings } from './run';
 import { PRETTIERIGNORE, startupFindings, ZIZMOR_CONFIG } from './startup';
 
 /** The deadline for one linter or formatter pass over the tree. */
@@ -192,6 +192,46 @@ function comparable(path: string): string {
 /** How a count of files reads in a row's line. */
 function files(count: number): string {
   return `${String(count)} ${count === 1 ? 'file' : 'files'}`;
+}
+
+/* ///// Inline waivers ///// */
+
+/** An inline zizmor ignore comment, in any case and spacing. zizmor honors it outside .github/zizmor.yml. */
+const ZIZMOR_INLINE = /zizmor:\s*ignore\[/i;
+
+/** A ShellCheck directive that turns a check off, in any case and spacing. actionlint's ShellCheck honors it. */
+const SHELLCHECK_OFF = /#\s*shellcheck\s+disable/i;
+
+/**
+ * Every inline waiver in a tracked file under .github, as findings: a zizmor
+ * ignore comment anywhere there, and a ShellCheck disable directive in a
+ * workflow.
+ *
+ * @remarks
+ * Each waives a finding outside a file the gate holds whole. Every zizmor
+ * waiver lives in .github/zizmor.yml, and ShellCheck has no waiver file, so a
+ * script that needs one is rewritten. The shared workflows job refuses the
+ * same in every caller.
+ */
+async function inlineWaiverFindings(): Promise<string[]> {
+  const found: string[] = [];
+  for (const path of await trackedFiles(':(glob).github/**')) {
+    const workflow = path.startsWith('.github/workflows/');
+    const lines = (await Bun.file(path).text()).split('\n');
+    for (const [index, line] of lines.entries()) {
+      if (ZIZMOR_INLINE.test(line)) {
+        found.push(
+          `${quote(path)} line ${String(index + 1)} waives a zizmor audit inline. Move it into .github/zizmor.yml, under that audit's ignore list`,
+        );
+      }
+      if (workflow && SHELLCHECK_OFF.test(line)) {
+        found.push(
+          `${quote(path)} line ${String(index + 1)} disables ShellCheck. Rewrite the script so ShellCheck passes it`,
+        );
+      }
+    }
+  }
+  return found;
 }
 
 /* ///// tools ///// */
@@ -599,7 +639,7 @@ async function main(): Promise<number> {
   // stands in for what bun install would put there. So no row runs beside
   // any of them. This comes before any other process the gate starts, and a
   // single row run passes through it too.
-  const refused = [...(await trackedFindings()), ...(await startupFindings())];
+  const refused = [...(await trackedFindings()), ...(await startupFindings()), ...(await inlineWaiverFindings())];
   if (refused.length > 0) {
     console.log(`  ${glyph(false)} ${'preflight'.padEnd(width)}  ${dim('no row ran')}`);
     console.log(`    ${refused.join('\n    ')}`);
