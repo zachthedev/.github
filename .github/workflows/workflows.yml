@@ -279,6 +279,43 @@ jobs:
           ACTIONLINT: ${{ steps.shellcheck.outputs.actionlint }}
           SHELLCHECK: ${{ steps.shellcheck.outputs.path }}
         run: '"$ACTIONLINT" -pyflakes= -shellcheck="$SHELLCHECK"'
+      # A secrets-inherit waiver in .github/zizmor.yml binds to a file or a line, not to the
+      # workflow a job calls, so pointing a waived job at another repository keeps the waiver and
+      # hands that repository every secret. zizmor runs here with no config, so it reports every
+      # job that passes secrets: inherit, waived or not, and each one must call a reusable workflow
+      # of zachthedev/.github. That repository's own run also accepts its ./.github/workflows/
+      # calls. zizmor exits 10 to 14 when it reports findings; any other nonzero exit is an error.
+      - name: Held secrets-inherit callees
+        run: |
+          zizmor=$(mise which zizmor)
+          status=0
+          report=$("$zizmor" --no-progress --offline --no-config --strict-collection --format json --collect=all .github) || status=$?
+          if [ "$status" -ne 0 ] && { [ "$status" -lt 10 ] || [ "$status" -gt 14 ]; }; then
+            echo "::error::zizmor could not audit .github (exit $status)."
+            exit 1
+          fi
+          own=""
+          if [ "${GITHUB_REPOSITORY,,}" = zachthedev/.github ]; then
+            own=./.github/workflows/
+          fi
+          callers=$(printf '%s' "$report" | jq -r '.[] | select(.ident == "secrets-inherit") | .locations[] | select(.symbolic.kind == "Primary") | [(.symbolic.key.Local.verbatim_path // "unknown"), (.concrete.location.start_point.row + 1 | tostring), .concrete.feature] | @tsv')
+          refused=0
+          while IFS=$'\t' read -r path line callee; do
+            [ -n "$path" ] || continue
+            path=${path//\\//}
+            callee=${callee#[\"\']}
+            callee=${callee%[\"\']}
+            lowered=${callee,,}
+            case "$lowered" in
+              zachthedev/.github/.github/workflows/*) continue ;;
+            esac
+            if [ -n "$own" ] && [ "${lowered#"$own"}" != "$lowered" ]; then
+              continue
+            fi
+            echo "::error::$(printf '%q' "$path") line $line passes secrets: inherit to $(printf '%q' "$callee"). Only a reusable workflow of zachthedev/.github takes a caller's secrets."
+            refused=1
+          done <<< "$callers"
+          exit "$refused"
       # Online, so the audits that ask GitHub run: a pinned commit outside its action's
       # repository, a known-vulnerable action, a version comment naming the wrong tag. The job
       # token is enough for them and is read-only, and any failed call aborts the run. Every
