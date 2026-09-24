@@ -20,7 +20,7 @@
 
 # A contributor's own files, which .gitignore lists and `bun run format` would
 # otherwise rewrite: lefthook's local configs and Claude Code's local settings.
-# Each is exactly a name the gate refuses to track.
+# The gate refuses to track each of these names, and any path below one.
 /lefthook-local
 /lefthook-local.*
 /.lefthook-local

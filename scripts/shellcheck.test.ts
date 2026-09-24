@@ -24,10 +24,10 @@ const SHELLCHECK_ARGS: readonly string[] = [
 ];
 
 // A program in ShellCheck's place. It records its arguments, the names in its
-// environment and the bytes on its stdin, then prints and exits as the
-// FAKE_ variables say.
+// environment and the bytes on its stdin, read unless FAKE_SKIP_READ is set,
+// then prints and exits as the FAKE_ variables say.
 const FAKE = `import { writeFileSync } from 'node:fs';
-const stdin = new Uint8Array(await Bun.stdin.arrayBuffer());
+const stdin = process.env.FAKE_SKIP_READ === undefined ? new Uint8Array(await Bun.stdin.arrayBuffer()) : new Uint8Array();
 writeFileSync(process.env.FAKE_RECORD, JSON.stringify({ args: process.argv.slice(2), names: Object.keys(process.env), stdin: [...stdin] }));
 process.stdout.write(process.env.FAKE_STDOUT ?? '');
 process.stderr.write(process.env.FAKE_STDERR ?? '');
@@ -187,6 +187,26 @@ test("ShellCheck gets actionlint's arguments and the exact bytes, and its output
 
 test('a clean ShellCheck run comes back clean', () => {
   expect(standIn('echo "$V"\n', { FAKE_STDOUT: '[]' })).toEqual({ exitCode: 0, stdout: '[]', stderr: '' });
+});
+
+test.each(['2', '3', '4'])(
+  'a ShellCheck exiting %s passes its stderr and exit code, and nothing on stdout',
+  (exit: string) => {
+    expect(standIn('echo "$V"\n', { FAKE_STDOUT: '[]', FAKE_STDERR: 'a failure', FAKE_EXIT: exit })).toEqual({
+      exitCode: Number(exit),
+      stdout: '',
+      stderr: 'a failure',
+    });
+  },
+);
+
+// Four megabytes fill any pipe, so the write fails once the program is gone.
+test('a ShellCheck that exits without reading the script leaves exit 2 and nothing on stdout', () => {
+  const ended = standIn('echo "$V"\n'.repeat(400_000), { FAKE_SKIP_READ: '1', FAKE_STDOUT: '[]' });
+
+  expect(ended.exitCode).toBe(2);
+  expect(ended.stdout).toBe('');
+  expect(ended.stderr).toContain('ShellCheck did not read the whole script');
 });
 
 test('SHELLCHECK_OPTS reaches ShellCheck in no spelling, and every other variable reaches it', () => {

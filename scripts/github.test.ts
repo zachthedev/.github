@@ -216,6 +216,18 @@ test.each([...ANSWERS])('$label', async ({ answer, expected }: AnswerCase) => {
   expect(standIns.calls()).toHaveLength(1);
 });
 
+test('a gh that outlives the deadline is no token, though it answers later', async () => {
+  // Bun kills the launcher at the deadline. A launcher that starts the stand-in
+  // as its own child leaves it to answer on the inherited output after the
+  // kill, and the killed launcher's exit still reads as no token.
+  standIns.answer('gh', { stdout: 'late-token\n', sleepMs: 4_000 });
+
+  const token = await githubToken(standIns.path('gh'), { GH_TOKEN: undefined, GITHUB_TOKEN: undefined }, 1_000);
+
+  expect(token).toBeUndefined();
+  expect(standIns.calls()).toHaveLength(1);
+});
+
 test('a missing gh is no token', async () => {
   const absent = join(standIns.dir, launcherName('absent'));
 

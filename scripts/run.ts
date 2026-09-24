@@ -16,6 +16,60 @@ export function quote(value: string): string {
   );
 }
 
+/** The character with code point `code`, so no control character is written into this file as a literal. */
+const character = (code: number): string => String.fromCharCode(code);
+
+/**
+ * Every character that prints nothing or moves the cursor: the C0 controls
+ * but tab and newline, DEL, the C1 controls, and every {@link INVISIBLE}
+ * character.
+ */
+const UNPRINTABLE = new RegExp(
+  `[${character(0)}-${character(8)}${character(0x0b)}-${character(0x1f)}${character(0x7f)}-${character(0x9f)}]|${INVISIBLE.source}`,
+  'g',
+);
+
+/**
+ * `text`, a line the gate prints, with Windows line endings made plain and
+ * every {@link UNPRINTABLE} character written as its `\u` escape.
+ *
+ * @remarks
+ * A row's message carries tool output, and a tool quotes the files it reads,
+ * so a job id or path in a workflow reaches the terminal through it. An
+ * escape sequence or a carriage return there could rewrite the lines above
+ * it, so the gate prints every line through this.
+ */
+export function printable(text: string): string {
+  return text
+    .replaceAll('\r\n', '\n')
+    .replace(UNPRINTABLE, (found) => `\\u${found.charCodeAt(0).toString(16).padStart(4, '0')}`);
+}
+
+/**
+ * An ANSI control sequence: ESC and `[`, or the one-byte CSI, then parameter
+ * bytes, intermediate bytes and a final byte. Or an operating system command,
+ * such as a terminal hyperlink: ESC and `]`, then any text up to BEL or ESC
+ * and a backslash.
+ */
+const CONTROL_SEQUENCE = new RegExp(
+  `(?:${character(0x1b)}\\[|${character(0x9b)})[0-?]*[ -/]*[@-~]|${character(0x1b)}\\][^${character(0x07)}${character(0x1b)}]*(?:${character(0x07)}|${character(0x1b)}\\\\)`,
+  'g',
+);
+
+/**
+ * `printed`, a tool's output, with every ANSI control sequence removed and
+ * Windows line endings made plain, so a pattern matches colored output as it
+ * matches plain output.
+ *
+ * @remarks
+ * Every child gets NO_COLOR, and yet a tool can color its output on one
+ * machine alone, as `dotnet test` does on a GitHub runner, so every parser of
+ * tool output reads through this.
+ */
+export function plain(printed: string): string {
+  return printed.replace(CONTROL_SEQUENCE, '').replaceAll('\r\n', '\n');
+}
+
 /** Code points Unicode lists as default-ignorable, which HFS+ leaves out when it compares names. */
 const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
 
@@ -198,6 +252,12 @@ export interface RunOptions {
    * inherits nothing from the gate's environment.
    */
   readonly inherit?: boolean;
+  /**
+   * How long the process may run before Bun kills it, the process alone and
+   * with no tree kill. Only a caller that reads no answer as its own fallback
+   * passes one, as the gh token read does.
+   */
+  readonly timeoutMs?: number;
 }
 
 /**
@@ -213,6 +273,33 @@ export const PROXY_NAMES: readonly string[] = [
   'http_proxy',
   'no_proxy',
 ];
+
+/**
+ * What every process that inherits the gate's environment gets, so no tool
+ * colors its output: NO_COLOR set, and the two names that force color
+ * removed. Bun 1.4.2 colors bun test's summary under FORCE_COLOR even with
+ * NO_COLOR set.
+ */
+const COLORLESS: Readonly<Record<string, string | undefined>> = {
+  NO_COLOR: '1',
+  FORCE_COLOR: undefined,
+  CLICOLOR_FORCE: undefined,
+};
+
+/**
+ * What every process that inherits the gate's environment goes without: the
+ * variables every Bun reads before its own arguments. BUN_OPTIONS carries
+ * arguments ahead of them, where a test name pattern hides tests from a count
+ * and a preload or an env file reaches inside a tool, and BUN_INSPECT_PRELOAD
+ * runs a module in every Bun start. On Windows Bun reads each name in any
+ * spelling.
+ */
+const WITHHELD: Readonly<Record<string, undefined>> = {
+  BUN_OPTIONS: undefined,
+  BUN_INSPECT: undefined,
+  BUN_INSPECT_PRELOAD: undefined,
+  BUN_INSPECT_CONNECT_TO: undefined,
+};
 
 /** How long a process's output may stay open after it exits, since a process it started can hold it. */
 const DRAIN_MS = 10_000;
@@ -258,8 +345,9 @@ async function readAll(stream: unknown, stop: Promise<void>): Promise<string> {
  * a missing prerequisite reads like any other red row rather than a crash of
  * the gate. A process that inherits the gate's environment gets PATH as the
  * {@link searchedDirectories} alone, so a program it starts by name resolves
- * outside the repository too, and gets every {@link PROXY_NAMES} value the
- * gate can read.
+ * outside the repository too, gets every {@link PROXY_NAMES} value the gate
+ * can read, and gets {@link COLORLESS} and goes without {@link WITHHELD},
+ * in every spelling, unless `env` names the same variables.
  *
  * @param cmd - The program and its arguments, the program first
  * @param env - Variables added to the gate's own environment for this process,
@@ -274,9 +362,11 @@ export async function run(
   env: Readonly<Record<string, string | undefined>> = {},
   options: RunOptions = {},
 ): Promise<Finished> {
-  const replaced = new Set(Object.keys(env).map((name) => name.toUpperCase()));
+  const inherit = options.inherit !== false;
+  const given = inherit ? { ...COLORLESS, ...WITHHELD, ...env } : env;
+  const replaced = new Set(Object.keys(given).map((name) => name.toUpperCase()));
   const merged: Record<string, string> = {};
-  if (options.inherit !== false) {
+  if (inherit) {
     if (!replaced.has('PATH')) {
       replaced.add('PATH');
       merged['PATH'] = searchedDirectories().join(delimiter);
@@ -299,7 +389,7 @@ export async function run(
       }
     }
   }
-  for (const [name, value] of Object.entries(env)) {
+  for (const [name, value] of Object.entries(given)) {
     if (value !== undefined) {
       merged[name] = value;
     }
@@ -323,6 +413,7 @@ export async function run(
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
+      ...(options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }),
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

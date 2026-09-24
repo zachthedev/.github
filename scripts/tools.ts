@@ -22,7 +22,7 @@ import { dlopen, FFIType, type Pointer, ptr, toArrayBuffer } from 'bun:ffi';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { describe, type Finished, fold, PROXY_NAMES, quote, run } from './run';
+import { describe, type Finished, fold, plain, PROXY_NAMES, quote, run } from './run';
 import { directoryEntries, isTable, LOCK, PINS, quoteValue, sameValue } from './startup';
 
 /** The command that rewrites {@link LOCK} after an edit to {@link PINS}. */
@@ -791,13 +791,19 @@ export async function resolve(): Promise<ReadonlyMap<string, string>> {
       throw new Error(`${PINS} pins no version of ${tool.key}`);
     }
     const located = await mise(['which', tool.binary]);
-    const path = located.stdout.trim();
-    if (located.exitCode !== 0 || path.length === 0) {
+    const path = plain(located.stdout).trim();
+    if (located.exitCode !== 0) {
+      throw new Error(`mise which ${tool.binary} ${describe(located)}`);
+    }
+    if (path.length === 0) {
       throw new Error(`mise which ${tool.binary} found nothing. Install it with: mise install`);
     }
     const printed = await run([path, tool.versionFlag]);
-    const reported = /\d+\.\d+\.\d+/.exec(`${printed.stdout}\n${printed.stderr}`)?.[0] ?? '';
-    if (printed.exitCode !== 0 || reported !== version) {
+    if (printed.exitCode !== 0) {
+      throw new Error(`${path} ${tool.versionFlag} ${describe(printed)}`);
+    }
+    const reported = /\d+\.\d+\.\d+/.exec(plain(`${printed.stdout}\n${printed.stderr}`))?.[0] ?? '';
+    if (reported !== version) {
       throw new Error(
         `${path} reports ${tool.key} ${reported}, and ${PINS} pins ${quote(version)}. Install it with: mise install`,
       );

@@ -27,6 +27,7 @@ export interface Call {
 export interface Answer {
   readonly stdout?: string;
   readonly exitCode?: number;
+  readonly sleepMs?: number;
 }
 
 /** Whether launchers are cmd.exe scripts rather than shell scripts. */
@@ -34,8 +35,9 @@ export const WINDOWS = process.platform === 'win32';
 
 // Every launcher starts this. It appends the call to calls.jsonl and answers
 // from <name>.json, keyed by the arguments joined with spaces, or `*`. It
-// moves to the temporary directory first, so it never holds a case's working
-// directory, which a running process keeps from being removed on Windows.
+// moves to the temporary directory first: on Windows a kill that reaches the
+// launcher's cmd.exe alone leaves this process running past its case, and a
+// process holding a directory keeps it from being removed.
 const RECORDER = `import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -45,6 +47,7 @@ appendFileSync(join(dir, 'calls.jsonl'), JSON.stringify({ name, args, env: { ...
 const control = join(dir, name + '.json');
 const answers = existsSync(control) ? JSON.parse(readFileSync(control, 'utf8')) : {};
 const answer = answers[args.join(' ')] ?? answers['*'] ?? {};
+if (answer.sleepMs) await Bun.sleep(answer.sleepMs);
 if (answer.stdout) await Bun.write(Bun.stdout, answer.stdout);
 process.exit(answer.exitCode ?? 0);
 `;

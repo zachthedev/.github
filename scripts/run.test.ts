@@ -115,6 +115,39 @@ test('a name passed as undefined is absent from the child in every spelling', as
   expect(spellings(standIns.calls()[0]?.env ?? {}, 'GATE_GONE')).toEqual([]);
 });
 
+test('a child that inherits gets NO_COLOR, and no FORCE_COLOR or CLICOLOR_FORCE in any spelling', async () => {
+  process.env['NO_COLOR'] = '';
+  process.env['FORCE_COLOR'] = '1';
+  process.env['force_color'] = '3';
+  process.env['CLICOLOR_FORCE'] = '1';
+
+  await run([standIns.path('tool')]);
+
+  const env = standIns.calls()[0]?.env ?? {};
+  expect(spellings(env, 'NO_COLOR').map((name) => env[name])).toEqual(['1']);
+  expect(spellings(env, 'FORCE_COLOR')).toEqual([]);
+  expect(spellings(env, 'CLICOLOR_FORCE')).toEqual([]);
+});
+
+// Each value is one Bun starts under without failing, so the stand-in records
+// its start whether or not the name reaches it: a flag, an inspector address
+// nothing listens on, and a preload that does nothing.
+test.each([
+  ['BUN_OPTIONS', (): string => '--smol'],
+  ['bun_options', (): string => '--smol'],
+  ['BUN_INSPECT', (): string => 'ws://127.0.0.1:9/x'],
+  ['Bun_Inspect_Preload', (): string => join(standIns.dir, 'inert-preload.ts')],
+  ['bun_inspect_connect_to', (): string => 'ws://127.0.0.1:9/x'],
+] as const)('a child that inherits goes without %p, in every spelling of its name', async (name, value) => {
+  writeFileSync(join(standIns.dir, 'inert-preload.ts'), 'export {};\n');
+  process.env[name] = value();
+
+  await run([standIns.path('tool')]);
+
+  expect(standIns.calls()).toHaveLength(1);
+  expect(spellings(standIns.calls()[0]?.env ?? {}, name)).toEqual([]);
+});
+
 test('a process started with inherit false receives the variables given and none of the gate environment', async () => {
   process.env['GATE_PASS'] = 'through';
 
@@ -846,3 +879,35 @@ test.each(['.claude/settings.local.json', '.Claude/Settings.Local.json', 'leftho
     expect(await trackedFindings()).toEqual([]);
   },
 );
+
+test.each([
+  ['lefthook-local/notes.md', 'lefthook-local'],
+  ['lefthook-local.d/notes.md', 'lefthook-local.d'],
+  ['.lefthook-local/deep/notes.md', '.lefthook-local'],
+  ['.Lefthook-Local.d/notes.md', '.lefthook-local.d'],
+  ['.claude/settings.local.json/notes.md', '.claude/settings.local.json'],
+])(
+  'a tracked %p, below a personal root name .prettierignore skips, is a finding, and one on disk alone is not',
+  async (path: string, root: string) => {
+    answerGit([path]);
+    const tracked = await trackedFindings();
+    standIns.clear();
+    answerGit([], [path]);
+
+    expect(tracked).toEqual([
+      carrying(`${JSON.stringify(path)} is tracked under ${JSON.stringify(root)}, a name .prettierignore skips`),
+    ]);
+    expect(await trackedFindings()).toEqual([]);
+  },
+);
+
+test.each([
+  'docs/lefthook-local/notes.md',
+  'lefthook-locals/notes.md',
+  '.claude/settings.json',
+  '.claude/other/notes.md',
+])('a tracked %p, below no personal root name, yields no finding', async (path: string) => {
+  answerGit([path]);
+
+  expect(await trackedFindings()).toEqual([]);
+});

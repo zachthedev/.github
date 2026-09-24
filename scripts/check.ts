@@ -15,12 +15,16 @@
  * tool that searches for a config runs with its one config named. Before any
  * row, the gate refuses to run beside a tracked env file Bun loads, a tracked
  * `.npmrc`, a tracked path under node_modules, a config a tool with no named
- * form would read, a bunfig.toml key beside the install cooldown, anything
- * that would steer how Bun resolves an import, a package patch, a manifest
- * package node_modules lacks, an inline waiver, a workflow shell ShellCheck
- * never reads, or a root file named like a program. No config's text is held:
- * code-owner review is the control on a change to one. Every row that walks
- * the tree says how many files it checked and fails when that is none.
+ * form would read, a bunfig.toml key beside the install cooldown, a
+ * .prettierrc naming a plugin or a shared config module, anything that would
+ * steer how Bun resolves an import, a package patch, a package bun.lock
+ * installs that node_modules lacks, an inline waiver, a workflow shell
+ * ShellCheck never reads, or a root entry named like a program or read as the
+ * ShellCheck stand-in's path. No config's text is held: code-owner review is
+ * the control on a change to one. Every row that walks the tree says how many
+ * files it checked and fails when that is none. The rows that run the
+ * repository's own code come last, and the preflight runs again after each.
+ * No row carries a deadline: the CI job's timeout-minutes bounds the gate.
  */
 
 import { existsSync } from 'node:fs';
@@ -36,15 +40,18 @@ import { styleText } from 'node:util';
 // environment when it loads, before any row starts a process.
 import { githubToken } from './github';
 import {
+  actionlintFinished,
   comparable,
   files,
   ignoreCommentFindings,
   inheritedCallFindings,
   inheritedCalls,
+  taploFound,
   testCount,
   unreadSourceFinding,
+  zizmorCompleted,
 } from './rows';
-import { describe, type Finished, fold, quote, run } from './run';
+import { describe, type Finished, fold, plain, printable, quote, run } from './run';
 import {
   ESLINT_CONFIG,
   PRETTIERIGNORE,
@@ -81,10 +88,8 @@ const ARGUMENT_BUDGET = 24_000;
 
 // ShellCheck reads extra flags from SHELLCHECK_OPTS whatever actionlint's --norc
 // says, and one can exclude any finding, so no process the gate starts gets it.
-// Every Bun reads BUN_OPTIONS as arguments ahead of its own, where a test name
-// pattern hides tests from a count and a preload runs code inside a tool.
+// run() withholds the variables every Bun reads before its own arguments.
 delete process.env['SHELLCHECK_OPTS'];
-delete process.env['BUN_OPTIONS'];
 
 /** A row of the gate: its name, what it checks, and the check itself. */
 interface Row {
@@ -92,6 +97,11 @@ interface Row {
   readonly checks: string;
   /** Runs the check. A string it returns prints after the row's time. */
   readonly check: () => string | undefined | Promise<string | undefined>;
+  /**
+   * True for a row that runs the repository's own code, which can write any
+   * file a later row reads, so the preflight runs again before the next row.
+   */
+  readonly runsCode?: true;
 }
 
 /** The binary paths the `tools` row resolves, read by the rows after it. */
@@ -252,7 +262,7 @@ async function typecheck(): Promise<string> {
       '--listFiles',
       ...project,
     ]);
-    const lines = finished.stdout.split(/\r?\n/);
+    const lines = plain(finished.stdout).split('\n');
     const listed = lines.filter((line) => isAbsolutePath(line));
     if (finished.exitCode !== 0) {
       const report = lines.filter((line) => !isAbsolutePath(line)).join('\n');
@@ -326,7 +336,7 @@ async function lint(): Promise<string> {
   ]);
   let results: unknown;
   try {
-    results = JSON.parse(finished.stdout);
+    results = JSON.parse(plain(finished.stdout));
   } catch {
     // No json means ESLint stopped before it linted anything, a config error among them.
     throw new Error(`eslint ${describe(finished)}`);
@@ -358,11 +368,12 @@ async function lint(): Promise<string> {
 // ignore file, and counts that list. getFileInfo runs in the gate's process
 // and resolves the config nearest each file unless told not to, a package.json
 // prettier key and the plugins it names included, so resolveConfig is off.
-// .prettierrc names no parser, plugin or override, so the inferred parser is
-// the same either way. --ignore-path names .prettierignore alone, so
-// .gitignore never narrows it, and --config names the one config, so Prettier
-// searches for no other file and a config under a subdirectory never loads.
-// --no-editorconfig keeps any .editorconfig from setting an option.
+// The preflight refuses a plugin in .prettierrc, which names no parser or
+// override either, so the inferred parser is the same either way.
+// --ignore-path names .prettierignore alone, so .gitignore never narrows it,
+// and --config names the one config, so Prettier searches for no other file
+// and a config under a subdirectory never loads. --no-editorconfig keeps any
+// .editorconfig from setting an option.
 async function format(): Promise<string> {
   const { getFileInfo } = await import('prettier');
   const checked: string[] = [];
@@ -403,15 +414,6 @@ async function format(): Promise<string> {
 }
 
 /* ///// toml ///// */
-
-/** Every path in taplo's `found files ... files=[...]` log line, or undefined when it printed none. */
-function taploFound(printed: string): string[] | undefined {
-  const line = /found files total=\d+ excluded=\d+ files=\[(.*)\]/.exec(printed);
-  if (line === null) {
-    return undefined;
-  }
-  return [...(line[1] ?? '').matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((match) => (match[1] ?? '').replace(/\\(.)/g, '$1'));
-}
 
 // taplo exits 0 having checked nothing when a file it was handed is missing
 // or excluded, so the row matches the files taplo says it found against the
@@ -508,9 +510,14 @@ async function workflows(): Promise<string> {
       const path = join(dir, canary.name);
       await Bun.write(path, canary.workflow);
       const finished = await run([actionlint, ...analyzers, path]);
-      if (finished.exitCode !== 1 || !finished.stdout.includes(canary.expected)) {
+      if (finished.exitCode !== 1) {
         throw new Error(
-          `actionlint reported no ${quote(canary.expected)} over the ${canary.name} canary, so ShellCheck did not run behind scripts/shellcheck.ts. It ${describe(finished)}. Check that ${shellcheck} starts`,
+          `actionlint over the ${canary.name} canary ${describe(finished)}, and a canary's one finding exits 1`,
+        );
+      }
+      if (!plain(finished.stdout).includes(canary.expected)) {
+        throw new Error(
+          `actionlint reported no ${quote(canary.expected)} over the ${canary.name} canary, so the wiring through scripts/shellcheck.ts is unproven. It ${describe(finished)}`,
         );
       }
     }
@@ -534,11 +541,7 @@ async function workflows(): Promise<string> {
     if (finished.exitCode !== 0) {
       throw new Error(`actionlint ${describe(report)}`);
     }
-    const linted = new Set(
-      [...finished.stderr.matchAll(/^(?:verbose: )*Found total \d+ errors? in \d+ ms for (.+?)\r?$/gm)].map(
-        (match) => match[1] ?? '',
-      ),
-    );
+    const linted = actionlintFinished(finished.stderr);
     const unlinted = batch.filter((path) => !linted.has(path));
     if (unlinted.length > 0) {
       throw new Error(`actionlint finished no lint of ${unlinted.join(', ')}: ${describe(report)}`);
@@ -577,9 +580,7 @@ async function workflows(): Promise<string> {
     ],
     env,
   );
-  const completed = new Set(
-    [...audited.stderr.matchAll(/completed (.+?)\r?$/gm)].map((match) => (match[1] ?? '').replaceAll('\\', '/')),
-  );
+  const completed = zizmorCompleted(audited.stderr);
   const unaudited = workflowFiles.filter((path) => !completed.has(path));
   if (completed.size === 0 || unaudited.length > 0) {
     throw new Error(
@@ -651,13 +652,15 @@ async function inheritedCallsHeld(zizmor: string): Promise<number> {
   if (finished.exitCode !== 0 && (finished.exitCode < 10 || finished.exitCode > 14)) {
     throw new Error(`zizmor with no config ${describe(finished)}`);
   }
-  let report: unknown;
+  let calls: ReturnType<typeof inheritedCalls>;
   try {
-    report = JSON.parse(finished.stdout);
-  } catch {
-    throw new Error(`zizmor with no config printed no json: ${describe(finished)}`);
+    calls = inheritedCalls(finished.stdout);
+  } catch (error: unknown) {
+    throw new Error(
+      `zizmor with no config: ${error instanceof Error ? error.message : String(error)}. It ${describe(finished)}`,
+      { cause: error },
+    );
   }
-  const calls = inheritedCalls(report);
   const refused = inheritedCallFindings(calls, INHERIT_CALLEES, await inheritWaivers());
   if (refused.length > 0) {
     throw new Error(refused.join('\n'));
@@ -685,7 +688,7 @@ async function renovate(): Promise<string> {
       '--no-global',
       config,
     ]);
-    const validated = `${finished.stdout}\n${finished.stderr}`.includes('Config validated successfully');
+    const validated = plain(`${finished.stdout}\n${finished.stderr}`).includes('Config validated successfully');
     if (finished.exitCode !== 0 || !validated) {
       throw new Error(`renovate-config-validator over ${config} ${describe(finished)}`);
     }
@@ -695,13 +698,11 @@ async function renovate(): Promise<string> {
 
 /* ///// The rows ///// */
 
+// The two rows that run the repository's own code come last: lint runs
+// eslint.config.ts, and scripts:test runs the gate's own tests. So every row
+// that reads a config runs before any code could write one. A single row run
+// keeps this order.
 const rows: readonly Row[] = [
-  {
-    name: 'scripts:test',
-    checks:
-      "bun test over the gate's own scripts/*.test.ts, every program they start a stand-in, counting the tests and failing when every one was skipped",
-    check: scriptsTest,
-  },
   {
     name: 'tools',
     checks: 'the root, mise.toml and mise.lock against scripts/tools.ts, then the install',
@@ -712,11 +713,6 @@ const rows: readonly Row[] = [
     checks:
       'tsc --noEmit over eslint.config.ts, then over scripts with its own tsconfig.json, counting the files each read, and every tracked TypeScript file read by one',
     check: typecheck,
-  },
-  {
-    name: 'lint',
-    checks: 'eslint over the tree with eslint.config.ts alone and no warnings allowed, counting the files it linted',
-    check: lint,
   },
   {
     name: 'format',
@@ -739,6 +735,19 @@ const rows: readonly Row[] = [
     name: 'renovate',
     checks: 'renovate-config-validator over every tracked preset and .github/renovate.json, counting them',
     check: renovate,
+  },
+  {
+    name: 'lint',
+    checks: 'eslint over the tree with eslint.config.ts alone and no warnings allowed, counting the files it linted',
+    check: lint,
+    runsCode: true,
+  },
+  {
+    name: 'scripts:test',
+    checks:
+      "bun test over the gate's own scripts/*.test.ts, every program they start a stand-in, counting the tests and failing when every one was skipped",
+    check: scriptsTest,
+    runsCode: true,
   },
 ];
 
@@ -763,7 +772,7 @@ async function main(): Promise<number> {
   const requested = process.argv.slice(2).filter((argument) => !argument.startsWith('--'));
   const unknown = requested.filter((name) => !rows.some((row) => row.name === name));
   if (unknown.length > 0) {
-    console.error(`no such row: ${unknown.join(', ')}. bun run check:rows lists them.`);
+    console.error(`no such row: ${printable(unknown.join(', '))}. bun run check:rows lists them.`);
     return 1;
   }
   const selected = requested.length === 0 ? rows : rows.filter((row) => requested.includes(row.name));
@@ -776,26 +785,41 @@ async function main(): Promise<number> {
   // tracked .npmrc steered the install, and a file tracked under node_modules
   // stands in for what bun install would put there. So no row runs beside
   // any of them. This comes before any other process the gate starts, and a
-  // single row run passes through it too.
-  const refused = [...(await trackedFindings()), ...(await startupFindings())];
-  if (refused.length > 0) {
-    console.log(`  ${glyph(false)} ${'preflight'.padEnd(width)}  ${dim('no row ran')}`);
-    console.log(`    ${refused.join('\n    ')}`);
+  // single row run passes through it too. A row that runs the repository's
+  // code can write any file the preflight reads, so the preflight runs again
+  // after one, before any later row.
+  const preflight = async (after: string): Promise<boolean> => {
+    const refused = [...(await trackedFindings()), ...(await startupFindings())];
+    if (refused.length > 0) {
+      console.log(`  ${glyph(false)} ${'preflight'.padEnd(width)}  ${dim(after)}`);
+      console.log(`    ${printable(refused.join('\n')).split('\n').join('\n    ')}`);
+    }
+    return refused.length === 0;
+  };
+  if (!(await preflight('no row ran'))) {
     return 1;
   }
   const failures: string[] = [];
-  for (const row of selected) {
+  for (const [index, row] of selected.entries()) {
     const started = performance.now();
     try {
       const note = await row.check();
       console.log(
-        `  ${glyph(true)} ${row.name.padEnd(width)}  ${dim(seconds(started))}${note === undefined ? '' : `  ${dim(note)}`}`,
+        `  ${glyph(true)} ${row.name.padEnd(width)}  ${dim(seconds(started))}${note === undefined ? '' : `  ${dim(printable(note))}`}`,
       );
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       console.log(`  ${glyph(false)} ${row.name.padEnd(width)}  ${dim(seconds(started))}`);
-      console.log(`    ${message.split('\n').join('\n    ')}`);
+      console.log(`    ${printable(message).split('\n').join('\n    ')}`);
       failures.push(row.name);
+    }
+    if (
+      row.runsCode === true &&
+      index < selected.length - 1 &&
+      !(await preflight(`after ${row.name}, no later row ran`))
+    ) {
+      failures.push('preflight');
+      break;
     }
   }
   console.log(`  ${dim('─'.repeat(width + 12))}`);

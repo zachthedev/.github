@@ -11,8 +11,10 @@
  * blanked. A line carrying `#`, any spacing, then `shellcheck` and a space, in
  * any case, is refused as a finding in ShellCheck's JSON form, so actionlint
  * prints it beside the step and the row fails. Any other script runs through
- * the pinned ShellCheck unchanged, with its output and exit code passed
- * through. The file is the same in every repository of the set and imports
+ * the pinned ShellCheck unchanged, with its stderr and exit code passed
+ * through, and its stdout once it read the whole script and exited 0 or 1.
+ * Nothing reaches stdout before the script was read whole and ShellCheck
+ * exited. The file is the same in every repository of the set and imports
  * nothing, so actionlint starting it once per script loads no other module.
  * Any failure here exits 2 with nothing on stdout, which actionlint reports as
  * a failed run rather than a clean one.
@@ -83,19 +85,45 @@ async function main(): Promise<number> {
       Reflect.deleteProperty(process.env, name);
     }
   }
-  const child = Bun.spawnSync({
+  const child = Bun.spawn({
     cmd: [shellcheck, ...args],
     env: { ...process.env },
-    stdin: script,
+    stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  if (child.exitCode === null) {
-    throw new Error(`ShellCheck ended on ${child.signalCode ?? 'a signal'} rather than an exit code`);
+  // The script is written on its own task while both outputs are read, so
+  // neither side waits on a full pipe. A ShellCheck that exits before reading
+  // the script leaves the write failing with EPIPE once the pipe is full.
+  const written = (async (): Promise<string | undefined> => {
+    try {
+      await child.stdin.write(script);
+      await child.stdin.end();
+      return undefined;
+    } catch (error: unknown) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  })();
+  const [unwritten, stdout, stderr, exitCode] = await Promise.all([
+    written,
+    new Response(child.stdout).bytes(),
+    new Response(child.stderr).bytes(),
+    child.exited,
+  ]);
+  await pass(Bun.stderr, stderr);
+  if (unwritten !== undefined) {
+    throw new Error(`ShellCheck did not read the whole script: ${unwritten}`);
   }
-  await pass(Bun.stderr, child.stderr);
-  await pass(Bun.stdout, child.stdout);
-  return child.exitCode;
+  if (child.signalCode !== null) {
+    throw new Error(`ShellCheck ended on ${child.signalCode} rather than an exit code`);
+  }
+  // ShellCheck exits 0 or 1 when it read and checked the script. Any other
+  // exit keeps its stdout back, since actionlint reads a failed run with
+  // findings on stdout as those findings alone, and `[]` as a clean one.
+  if (exitCode === 0 || exitCode === 1) {
+    await pass(Bun.stdout, stdout);
+  }
+  return exitCode;
 }
 
 /** Writes `bytes` to `stream` unless there are none, since Bun fails an empty write to a Windows pipe. */

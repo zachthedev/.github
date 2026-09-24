@@ -25,6 +25,7 @@
     "renovate": "44.97.4",
     "typescript": "6.0.3",
     "typescript-eslint": "8.70.0",
+    "yaml": "2.9.1",
     "zod": "4.6.5"
   },
   "trustedDependencies": [

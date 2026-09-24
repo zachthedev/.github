@@ -28,6 +28,27 @@ export default defineConfig(
     },
   },
 
+  // Bun runs any file as code under an import attribute naming a loader, such
+  // as `with { type: 'js' }` on a .txt import, which no row reads as code. An
+  // import carries `type: 'json'` or no attribute, and a dynamic import takes
+  // no options.
+  {
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "ImportAttribute:not([key.name='type'][value.value='json']):not([key.value='type'][value.value='json'])",
+          message: "Bun runs a file as code under a loader attribute. Import with `type: 'json'` or no attribute.",
+        },
+        {
+          selector: 'ImportExpression[options]',
+          message: 'Bun runs a file as code under a loader attribute. Import JSON with a static import.',
+        },
+      ],
+    },
+  },
+
   {
     languageOptions: {
       parserOptions: {

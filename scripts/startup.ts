@@ -1,8 +1,8 @@
 /**
  * The files Bun and the gate's tools read before they run, refused where they
  * would change what a row checks: a file a tool without a named config would
- * read, a key in bunfig.toml or package.json that runs or swaps code, what
- * resolves the gate's own imports, and the root's program names.
+ * read, a key in bunfig.toml, package.json or .prettierrc that runs or swaps
+ * code, what resolves the gate's own imports, and the root's program names.
  *
  * @remarks
  * The gate calls {@link trackedFindings} and {@link startupFindings} before
@@ -263,6 +263,31 @@ function searchPattern(glob: string): RegExp {
     .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
     .join('[^/]*');
   return new RegExp(`^${anywhere ? '(?:.*/)?' : ''}${body}$`);
+}
+
+/**
+ * The root paths of every personal file {@link CONFIG_SEARCHES} names, each as
+ * a pattern with the number of segments it spans. .prettierignore skips each
+ * one, and anything below it.
+ */
+const PERSONAL_ROOTS: readonly { readonly pattern: RegExp; readonly depth: number }[] = CONFIG_SEARCHES.filter(
+  (search) => search.personal === true,
+)
+  .flatMap((search) => search.paths)
+  .filter((path) => !path.startsWith('**/'))
+  .map((path) => ({ pattern: searchPattern(path), depth: path.split('/').length }));
+
+/**
+ * The folded root path of the {@link PERSONAL_ROOTS} entry that `segments`,
+ * a folded path, sits below, or undefined when it sits below none. A file at
+ * such a path itself is refused as the personal file.
+ */
+function personalRoot(segments: readonly string[]): string | undefined {
+  return PERSONAL_ROOTS.map(({ pattern, depth }) => ({
+    pattern,
+    root: segments.slice(0, depth).join('/'),
+    depth,
+  })).find(({ pattern, root, depth }) => segments.length > depth && pattern.test(root))?.root;
 }
 
 /** Every way the tracked `package.json` at `path` patches a package, as findings. */
@@ -666,6 +691,12 @@ export async function trackedFindings(): Promise<string[]> {
       const remove = search.personal === true ? 'Remove it from the index with git rm --cached' : 'Remove it';
       found.push(`${quote(path)} is ${search.what}, and ${search.reads}. ${remove}`);
     }
+    const under = isTracked ? personalRoot(segments) : undefined;
+    if (under !== undefined) {
+      found.push(
+        `${quote(path)} is tracked under ${quote(under)}, a name .prettierignore skips as a personal file, so the format row never checks it. Remove it from the index with git rm --cached`,
+      );
+    }
     const base = segments.at(-1) ?? '';
     if (PROJECT_CONFIG_NAMES.includes(base)) {
       found.push(...projectConfigFindings(path));
@@ -775,6 +806,60 @@ async function bunfigFindings(): Promise<string[]> {
   return found;
 }
 
+/** The {@link PRETTIERRC} key naming the plugins Prettier imports, at the top or in an override's options. */
+const PRETTIER_PLUGINS = 'plugins';
+
+/** The path of every {@link PRETTIER_PLUGINS} key within `value`, at any depth, as `a.b[0].c`. */
+function pluginKeys(value: unknown, at: string): string[] {
+  if (Array.isArray(value)) {
+    return (value as unknown[]).flatMap((item, index) => pluginKeys(item, `${at}[${String(index)}]`));
+  }
+  if (!isTable(value)) {
+    return [];
+  }
+  return Object.entries(value).flatMap(([key, inner]) => {
+    const path = at === '' ? key : `${at}.${key}`;
+    return [...(key === PRETTIER_PLUGINS ? [path] : []), ...pluginKeys(inner, path)];
+  });
+}
+
+/**
+ * Every way {@link PRETTIERRC} makes the format row run code, as findings: a
+ * value other than a JSON object, and a {@link PRETTIER_PLUGINS} key at any
+ * depth.
+ *
+ * @remarks
+ * Prettier 3.9.8 under `--config .prettierrc` imports each plugin the file
+ * names, a package or a local path, at the top or in an override matching a
+ * file it checks, and imports a shared config module the file names as a
+ * string, each measured running its code. It reads the file as YAML, so the
+ * gate holds it to plain JSON, which both read alike, and refuses any other
+ * text rather than read it two ways.
+ */
+async function prettierrcFindings(): Promise<string[]> {
+  const file = Bun.file(PRETTIERRC);
+  if (!(await file.exists())) {
+    return [];
+  }
+  let parsed: unknown;
+  try {
+    parsed = parseJson(await file.text());
+  } catch (error: unknown) {
+    return [
+      `${PRETTIERRC} does not parse as plain JSON, so whether Prettier loads code through it is unknown: ${quote(error instanceof Error ? error.message : String(error))}`,
+    ];
+  }
+  if (!isTable(parsed)) {
+    return [
+      `${PRETTIERRC} holds ${quoteValue(parsed)}, and it is an object of formatting options. Prettier imports a shared config module a string names and runs it`,
+    ];
+  }
+  return pluginKeys(parsed, '').map(
+    (path) =>
+      `${PRETTIERRC} carries ${quote(path)}, and Prettier imports each plugin it names, a package or a local path, and runs it in the format row. Remove it`,
+  );
+}
+
 /**
  * Every file and directory under `path`, links not followed. A `node_modules`
  * directory is listed and not entered, since one under `scripts/` is refused
@@ -816,21 +901,135 @@ async function scriptsFindings(): Promise<string[]> {
 /** The `package.json` tables that name the packages bun install puts under node_modules. */
 const DEPENDENCY_KEYS: readonly string[] = ['dependencies', 'devDependencies', 'optionalDependencies'];
 
+/** The lockfile bun install writes, whose `packages` table names every package it installs and where. */
+const BUN_LOCK = 'bun.lock';
+
+/** How many missing packages the finding names before it counts the rest. */
+const MISSING_SHOWN = 5;
+
 /**
- * Every package the root {@link PACKAGE_JSON} names that the checkout's
- * `node_modules` lacks, or holds through a link out of the checkout, as
- * findings.
+ * Whether the platform named `current` is one a bun.lock `os` or `cpu` value
+ * admits: absent, a name, or a list of names where `!` excludes one. Bun
+ * writes `none` for a platform it has no name for, which admits nothing. A
+ * value of any other shape admits every platform, so the package is required.
+ */
+function admits(value: unknown, current: string): boolean {
+  const names: unknown[] = typeof value === 'string' ? [value] : Array.isArray(value) ? (value as unknown[]) : [];
+  const listed = names.filter((name) => typeof name === 'string');
+  if (listed.length === 0 || listed.length !== names.length) {
+    return true;
+  }
+  const allowed = listed.filter((name) => !name.startsWith('!'));
+  return (allowed.length === 0 || allowed.includes(current)) && !listed.includes(`!${current}`);
+}
+
+/**
+ * The chain of package names a bun.lock `packages` key spells, from the root:
+ * `eslint/ignore` is the `ignore` nested under `eslint`, and a scoped name
+ * spans two parts.
+ */
+function lockNames(key: string): string[] {
+  const parts = key.split('/');
+  const names: string[] = [];
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index] ?? '';
+    const name = part.startsWith('@') ? `${part}/${parts[index + 1] ?? ''}` : part;
+    index += name.split('/').length - 1;
+    names.push(name);
+  }
+  return names;
+}
+
+/** The `node_modules` path, as segments below the root, where bun install puts the package a bun.lock key names. */
+function lockPath(key: string): string[] {
+  return lockNames(key).flatMap((name) => ['node_modules', ...name.split('/')]);
+}
+
+/**
+ * The key of the package a dependency named `name` of the package at key
+ * `from` resolves to, or undefined when bun.lock holds none: the key nested
+ * under `from` first, then each key nested under a package above it, then the
+ * hoisted one. The root is the empty key.
+ */
+function lockEdge(packages: ReadonlyMap<string, LockPackage>, from: string, name: string): string | undefined {
+  const chain = from === '' ? [] : lockNames(from);
+  for (let depth = chain.length; depth >= 0; depth -= 1) {
+    const key = [...chain.slice(0, depth), name].join('/');
+    if (packages.has(key)) {
+      return key;
+    }
+  }
+  return undefined;
+}
+
+/** A bun.lock `packages` entry as the install check reads it. */
+interface LockPackage {
+  readonly os: unknown;
+  readonly cpu: unknown;
+  /** Whether the entry names a `libc`, which Bun reports for no system. */
+  readonly libc: boolean;
+  /** The names under `dependencies`, `optionalDependencies` and `peerDependencies`, less `optionalPeers`. */
+  readonly dependencies: readonly string[];
+}
+
+/**
+ * The `packages` table of a parsed bun.lock, by key. An entry's fields are
+ * the first table in its list, which holds them for a registry package and
+ * for a git, tarball or folder one alike.
+ */
+function lockPackages(lock: unknown): Map<string, LockPackage> {
+  const table = isTable(lock) ? lock['packages'] : undefined;
+  const packages = new Map<string, LockPackage>();
+  for (const [key, entry] of isTable(table) ? Object.entries(table) : []) {
+    const fields = (Array.isArray(entry) ? (entry as unknown[]) : []).find((item) => isTable(item)) ?? {};
+    const names = (field: string): string[] => {
+      const value = fields[field];
+      return isTable(value) ? Object.keys(value) : [];
+    };
+    const optionalPeers = fields['optionalPeers'];
+    const skipped = Array.isArray(optionalPeers) ? (optionalPeers as unknown[]) : [];
+    packages.set(key, {
+      os: fields['os'],
+      cpu: fields['cpu'],
+      libc: Object.hasOwn(fields, 'libc'),
+      dependencies: [
+        ...names('dependencies'),
+        ...names('optionalDependencies'),
+        ...names('peerDependencies').filter((name) => !skipped.includes(name)),
+      ],
+    });
+  }
+  return packages;
+}
+
+/**
+ * Every package bun install puts under the checkout's `node_modules` for this
+ * platform that is missing there, or held through a link out of the checkout,
+ * as findings, each at the path its {@link BUN_LOCK} key names. The walk starts
+ * at each root {@link PACKAGE_JSON} name and follows every edge bun.lock
+ * records, and an entry whose `os` or `cpu` leaves this platform out is passed
+ * over with every package reached through it alone.
  *
  * @remarks
- * Bun resolves a bare import from the nearest `node_modules` holding the
- * package, so a checkout that lacks one loads a parent directory's copy, and
- * with no `node_modules` at all Bun tries to install it at run time. Either
- * way the code that runs is not the version bun.lock pins. The gate imports
- * zod and prettier, eslint.config.ts and commitlint.config.js import their
- * plugins, and each is refused here before any row loads it.
+ * Bun 1.4.2 installs a package only through a parent it installs, and skips an
+ * entry whose `os` or `cpu` leaves the platform out, whether a root name or a
+ * dependency of any kind. So sharp's `@img/sharp-wasm32`, reached only through
+ * a FreeBSD parent and a parent whose `cpu` is `none`, lands nowhere, while a
+ * package a skipped parent shares with an installed one lands. Bun resolves a
+ * bare import from the nearest `node_modules` holding the package, so a
+ * checkout that lacks one loads a parent directory's copy, and with no
+ * `node_modules` at all Bun tries to install it at run time. Either way the
+ * code that runs is not the version bun.lock pins. That holds for a package
+ * the manifest never names too, as the typecheck row's native compiler, the
+ * platform package `@typescript/native` resolves. The gate imports zod and
+ * prettier, eslint.config.ts and commitlint.config.js import their plugins,
+ * and each package is refused here before any row loads it. An entry naming a
+ * `libc`, and everything reached through it alone, is checked for a link out
+ * alone, since which libc this system runs is not something Bun reports.
  */
 async function installFindings(): Promise<string[]> {
   let manifest: unknown;
+  let lock: unknown;
   try {
     manifest = parseJson(await Bun.file(PACKAGE_JSON).text());
   } catch (error: unknown) {
@@ -839,29 +1038,70 @@ async function installFindings(): Promise<string[]> {
       `${PACKAGE_JSON} does not parse as the gate reads it, so which packages node_modules must hold is unknown: ${quote(error instanceof Error ? error.message : String(error))}`,
     ];
   }
-  const names = DEPENDENCY_KEYS.flatMap((key) => {
-    const table = isTable(manifest) ? manifest[key] : undefined;
-    return isTable(table) ? Object.keys(table) : [];
+  try {
+    lock = Bun.JSONC.parse(await Bun.file(BUN_LOCK).text());
+  } catch (error: unknown) {
+    // Missing or malformed: refused, since where bun install puts each package is unknown.
+    return [
+      `${BUN_LOCK} does not parse as the gate reads it, so which packages node_modules must hold is unknown: ${quote(error instanceof Error ? error.message : String(error))}`,
+    ];
+  }
+  const packages = lockPackages(lock);
+  // Each key reached, and whether it must be present rather than checked for a link out alone.
+  const reached = new Map<string, boolean>();
+  const queue: (readonly [string, boolean])[] = DEPENDENCY_KEYS.flatMap((field) => {
+    const table = isTable(manifest) ? manifest[field] : undefined;
+    return (isTable(table) ? Object.keys(table) : []).map(
+      (name) => [lockEdge(packages, '', name) ?? name, true] as const,
+    );
   });
-  const modules = resolve('node_modules');
-  const found: string[] = [];
-  for (const name of names) {
-    let real: string;
-    try {
-      real = realpathSync.native(join(modules, name, PACKAGE_JSON));
-    } catch {
-      // Missing, or a link to nothing: either way the checkout does not hold the package.
-      found.push(
-        `${quote(name)} is missing from node_modules, and Bun then loads a copy from a parent directory's node_modules or installs one at run time, neither the version bun.lock pins. Run bun install`,
-      );
+  for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+    const [key, must] = next;
+    const entry = packages.get(key);
+    if (
+      reached.get(key) === true ||
+      (reached.has(key) && !must) ||
+      (entry !== undefined && (!admits(entry.os, process.platform) || !admits(entry.cpu, process.arch)))
+    ) {
       continue;
     }
-    const inside = relative(realpathSync.native('.'), real);
+    const needed = must && entry?.libc !== true;
+    reached.set(key, needed);
+    for (const name of entry?.dependencies ?? []) {
+      const child = lockEdge(packages, key, name);
+      if (child !== undefined) {
+        queue.push([child, needed]);
+      }
+    }
+  }
+  const required = new Map([...reached].map(([key, must]) => [lockPath(key).join('/'), must]));
+  const root = realpathSync.native('.');
+  const missing: string[] = [];
+  const found: string[] = [];
+  for (const [path, must] of required) {
+    let real: string;
+    try {
+      real = realpathSync.native(resolve(path, PACKAGE_JSON));
+    } catch {
+      // Missing, or a link to nothing: either way the checkout does not hold the package.
+      if (must) {
+        missing.push(path);
+      }
+      continue;
+    }
+    const inside = relative(root, real);
     if (inside.startsWith('..') || isAbsolute(inside)) {
       found.push(
-        `${quote(name)} in node_modules leads out of the checkout, to ${quote(real)}, so what loads is not this checkout's install. Run bun install`,
+        `${quote(path)} leads out of the checkout, to ${quote(real)}, so what loads is not this checkout's install. Run bun install`,
       );
     }
+  }
+  if (missing.length > 0) {
+    const shown = missing.slice(0, MISSING_SHOWN).map((path) => quote(path));
+    const more = missing.length > MISSING_SHOWN ? ` and ${String(missing.length - MISSING_SHOWN)} more` : '';
+    found.unshift(
+      `${shown.join(', ')}${more} ${missing.length === 1 ? 'is' : 'are'} missing, where bun install puts ${missing.length === 1 ? 'it' : 'them'} for this platform. Bun then loads a copy from a parent directory's node_modules or installs one at run time, neither the version bun.lock pins. Run bun install`,
+    );
   }
   return found;
 }
@@ -869,9 +1109,18 @@ async function installFindings(): Promise<string[]> {
 /* ///// The root ///// */
 
 /**
+ * The root entry actionlint reads the start of the ShellCheck stand-in's
+ * command line as: every word of it is single-quoted, and actionlint 1.7.12
+ * looks the whole value up as one program path before it splits the words.
+ * On Linux and macOS the value starts `'/`, a relative path whose first
+ * segment is this name.
+ */
+const QUOTE_ENTRY = "'";
+
+/**
  * Every root entry the gate refuses, as findings: a file named like a program
- * the gate, its hooks or an install start, with any extension or none, and a
- * `.config` in any case.
+ * the gate, its hooks or an install start, with any extension or none, a
+ * `.config` in any case, and a file, directory or link named {@link QUOTE_ENTRY}.
  *
  * @remarks
  * The gate starts a program from an absolute PATH entry outside the
@@ -882,6 +1131,11 @@ async function installFindings(): Promise<string[]> {
 async function programFindings(): Promise<string[]> {
   const found: string[] = [];
   for (const entry of await readdir('.', { withFileTypes: true })) {
+    if (entry.name === QUOTE_ENTRY) {
+      found.push(
+        `${quote(entry.name)} is at the root, and actionlint reads the ShellCheck stand-in's whole command line as a path below it before splitting the words, so a file there runs in place of ShellCheck on Linux and macOS. Remove it`,
+      );
+    }
     if (!entry.isDirectory() && !PROGRAM_NAMED_FILES.includes(fold(entry.name)) && isProgramName(entry.name)) {
       found.push(
         `${quote(entry.name)} is named like a program the gate, its hooks or an install start, and a clone carries no program at its root. Remove it`,
@@ -899,8 +1153,9 @@ async function programFindings(): Promise<string[]> {
 /**
  * Every way the files Bun and the gate's tools read before they run would
  * change what a row checks, as findings: a key in {@link BUNFIG} beside the
- * cooldown, what resolves the gate's own imports, a package the manifest
- * names that node_modules lacks, and a root entry named like a program.
+ * cooldown, a {@link PRETTIERRC} that loads code, what resolves the gate's own
+ * imports, a package bun.lock installs that node_modules lacks, and a root
+ * entry named like a program or read as the ShellCheck stand-in's path.
  *
  * @remarks
  * The gate calls this before any row, because Bun honored its files before
@@ -910,6 +1165,7 @@ async function programFindings(): Promise<string[]> {
 export async function startupFindings(): Promise<string[]> {
   return [
     ...(await bunfigFindings()),
+    ...(await prettierrcFindings()),
     ...(await scriptsFindings()),
     ...(await installFindings()),
     ...(await programFindings()),
