@@ -587,8 +587,20 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   because the callee hold is its control (Secrets).
 - zizmor's config cannot waive a composite action's finding. A composite action under `.github/actions`
   therefore carries no waiver, and its finding is fixed.
-- Both also refuse a `shellcheck disable` directive in a tracked workflow file. One silences ShellCheck under
-  actionlint with every row green, and ShellCheck has no waiver file, so a finding is fixed in the script.
+- Both also refuse every ShellCheck directive in a workflow `run:` script. ShellCheck has no waiver file, so a
+  finding is fixed in the script.
+- That refusal reads what ShellCheck reads. actionlint's `-shellcheck` flag runs a stand-in that takes the decoded
+  script, refuses any line holding a `# shellcheck` directive in any case, and otherwise runs the pinned ShellCheck
+  over the same bytes. No search of the file text sees the same script: ShellCheck honors several keys per
+  directive, a key right after a quoted value, YAML folding and YAML escapes, sixteen spellings in all.
+  - A second canary, carrying `# shellcheck disable=SC2086`, proves the refusal on every run, beside the canary
+    that proves ShellCheck ran (Workflows).
+  - The flag's value is single-quoted with forward slashes. An unquoted Windows backslash path turns the rule off
+    with no error.
+  - The shared job's stand-in comes from `.github`'s own pinned workflow text, never from the caller's checkout.
+- Every gate and the shared `workflows` job refuse a `shell:` value, on a step or under `defaults.run`, other than
+  `bash`, `sh` or `pwsh`. actionlint runs ShellCheck for bash and sh alone, so a custom shell such as
+  `/bin/bash -e {0}` runs bash unchecked.
 - The gate refuses a `.github/actionlint.yaml` or `.github/actionlint.yml`, in any case. actionlint reads either
   one, and its `paths` block can silence every finding. A canonical one is added the day a repository needs it.
 - Every tool a gate starts runs with `SHELLCHECK_OPTS` cleared, because that variable reaches ShellCheck past
@@ -948,8 +960,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 
 ### Shell
 
-- ShellCheck has no setting that requires a code or a reason. A directive in a tracked `.sh` script therefore reads
-  `# shellcheck disable=SCnnnn[,SCnnnn] # reason`, and the gate holds it to that form.
+- ShellCheck has no setting that requires a code or a reason. In a tracked `.sh` script, any line holding a
+  `# shellcheck` directive is therefore exactly `# shellcheck disable=SCnnnn[,SCnnnn] # reason` as its whole
+  comment, and the gate holds it to that form. A partial match would miss a directive with several keys.
 - A repository that tracks shell scripts runs a ShellCheck row over them, with `--norc`, `SHELLCHECK_OPTS`
   cleared, a printed count and a failure on zero.
 
