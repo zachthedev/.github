@@ -359,8 +359,8 @@ API reports the value only on a `required_reviewers` rule.
   workflow that consumes it says why in a comment beside the read.
 - A `uses:` job takes the called workflow's job-level environment. The caller runs in no environment, so it
   cannot name an environment secret. A caller whose called workflow reads one passes `secrets: inherit`, and
-  `.github/zizmor.yml` waives the `secrets-inherit` audit for that file under `rules.secrets-inherit.ignore`
-  (Gate). Every other caller passes nothing through.
+  `.github/zizmor.yml` waives the `secrets-inherit` audit by naming that file, such as `deps.yml` or `cd.yml`,
+  under `rules.secrets-inherit.ignore` (Gate). Every other caller passes nothing through.
 
 ### Apps
 
