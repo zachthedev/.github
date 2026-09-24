@@ -441,11 +441,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   before it is called done.
 - No gate row resolves a tool from the machine's `PATH`. The programs the gate expects on `PATH` are the
   prerequisites `docs/dev.md` names.
-- No gate, hook or shared job starts a tool on a `node` from `PATH`. `bunx` starts a bin whose shebang names
-  `node`, such as Prettier's or commitlint's, under the `node` on `PATH` when one exists, and GitHub's runners
-  carry Node. Every `bunx` therefore passes `--bun`, or the gate starts the tool through Bun by its path under
-  `node_modules`. `bun run` starts a `package.json` script's bare bin the same way, so such a script calls
-  `bunx --bun --no-install` too.
+- No gate, hook or shared job starts a tool on a `node` from `PATH`, and none starts one through `bunx`. Every
+  hook, `package.json` script and gate row starts a JS tool as `bun ./node_modules/<pkg>/<bin>`, the `./` kept so
+  Bun reads a path, and a missing package then fails the start.
+- `bunx` starts a bin whose shebang names `node`, such as Prettier's or commitlint's, under the `node` on `PATH`
+  when one exists, and GitHub's runners carry Node. `bunx --bun --no-install` does not fail on a missing package:
+  it falls back to `PATH`, a parent `node_modules/.bin` or its own cache under the temporary directory.
 - A gate resolves every program it spawns to an absolute path from `PATH` alone, and spawns that path. It drops
   empty and relative `PATH` entries and any entry inside the repository. Inside compares canonical paths or file
   identity, never an entry's spelling. It checks a found program the same way at its final path, through every
@@ -488,8 +489,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   reviewer skimming a diff does not look for one.
 - The refusals keep such a file off the default branch. They cannot stop the first local run of an unread branch:
   a `bunfig.toml` preload, a `paths` redirect in the gate's own `scripts/tsconfig.json` or a Task `dotenv` runs
-  before any row does. Under `bunx --bun` a preload also runs before each commit hook's tool and in any script
-  that calls it, and a root `tsconfig.json` with `paths` or `baseUrl` redirects that tool's imports. Committing on
+  before any row does. Under Bun a preload also runs before each commit hook's tool and in any script that starts
+  one, and a root `tsconfig.json` with `paths` or `baseUrl` redirects that tool's imports. Committing on
   an unread branch runs that branch's `commitlint.config.js` from the commit hook
   before any check, as a preload runs before the hook's tool.
 - `eslint.config.ts` and `commitlint.config.js` run as code in a gate only in the form its constant holds
@@ -498,7 +499,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A Bun gate refuses a tracked env file Bun loads on its own, `.env` and its variants, at any depth, because Bun
   loads it into the gate's environment (Known defects). The names match without regard to case. A template such as
   `.env.example` passes.
-- `bunx --bun` also loads `.env`, `.env.local` and `.env.development` into the tools it runs, and only a `bunfig.toml`
+- Bun also loads `.env`, `.env.local` and `.env.development` into each tool it runs, and only a `bunfig.toml`
   `env = false` stops that. `bunfig.toml` stays the cooldown alone (Updates), so a contributor's own untracked env
   file is the named residual. An env value can turn a row red, as `PRETTIER_EXPERIMENTAL_CLI` does, and runs no
   code.
@@ -508,11 +509,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - a `scripts/` directory without its own `tsconfig.json`, compared whole, or one holding a `jsconfig.json`, a
     `package.json` or a `node_modules`, because the root `tsconfig.json`'s `paths`, `extends` and `baseUrl`
     otherwise redirect the gate's imports;
-  - a `package.json` `patchedDependencies` entry for a package the gate imports, because a frozen
-    `--ignore-scripts` install still applies it;
   - a tracked `.npmrc` at any depth, because it redirects even the frozen, script-free install. An untracked one
     holds personal credentials and changes no row, so it passes.
 - Those checks import only built-in modules, so no package loads before they pass.
+- Every gate refuses a `patchedDependencies` key in any tracked `package.json`. A patch rewrites a pinned
+  package's code under a frozen, script-free install and passes the lockfile's integrity check. A scope as narrow
+  as the gate's own imports misses lint configs and tools.
 - A Bun gate refuses every `tsconfig.json` and `jsconfig.json` on disk, at any depth outside `node_modules` and
   `.claude/worktrees`, unless the gate holds it whole. typescript-eslint reads the nearest tsconfig for each file,
   so an untracked nested one changed lint results. `scripts/expected.ts` holds the repository's own, the root one
@@ -520,10 +522,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   row pass over a type error while it printed its full count.
 - The gate walks each held one along its `extends` chain. It refuses `paths` or `baseUrl` there, and an `extends`
   naming a package, an absolute path, a missing file or a file outside the checkout. Every `extends` target must
-  itself be held, because an unheld base file can carry `noCheck`. Under `bunx --bun` Bun
-  applies the root one to a tool's own imports, so a `paths` entry for a package commitlint imports ran
-  repository code in the commit hook. A project aliases through `package.json` `imports`, whose `#` names cannot
-  redirect a bare package name.
+  itself be held, because an unheld base file can carry `noCheck`. Bun applies the root one to a tool's own
+  imports, so a `paths` entry for a package commitlint imports ran repository code in the commit hook. A project
+  aliases through `package.json` `imports`, whose `#` names cannot redirect a bare package name.
 - A Go gate, and any other over no TypeScript, refuses a `tsconfig.json` or `jsconfig.json` tracked at any depth
   or on disk at the root, since none of its tools reads a nested one.
 - Every tracked `tsconfig.json` and `jsconfig.json` is plain JSON with no comments, because every gate and the
@@ -713,13 +714,13 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   It also refuses a root `.config` and a `package.json` `cosmiconfig` key (Gate).
 - Before its install, the `commits` workflow refuses any tracked path with a `node_modules` segment, nested ones
   included, without regard to case. `bun install` keeps a tracked package directory at the locked version, and
-  `bunx` then runs that copy. The job runs beside every caller's gate, whatever the caller's stack, so it holds
+  Bun then runs that copy. The job runs beside every caller's gate, whatever the caller's stack, so it holds
   the refusal itself.
 - The same step refuses a tracked `.npmrc` at any depth, also without regard to case, because it redirects the
   install's registry. It refuses a `package.json` `patchedDependencies` entry for an `@commitlint` package or a
   package `commitlint.config.js` imports, because a frozen install without scripts still applies it.
 - A step of its own, also before the install, refuses `paths` and `baseUrl` in any tracked `tsconfig.json` or
-  `jsconfig.json` and in every file its `extends` names, because the job runs commitlint under `bunx --bun` (Gate).
+  `jsconfig.json` and in every file its `extends` names, because the job runs commitlint under Bun (Gate).
   It also refuses an `extends` naming a package, a file outside the checkout or a file the checkout lacks, since
   the step cannot read any of those.
 - The `workflows` workflow runs actionlint and zizmor. The gate proves ShellCheck ran by writing a canary
@@ -800,7 +801,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The header is at most 72 characters. Renovate's headers are shortened by the presets' `commitMessageAction`
   and `commitMessageTopic`, never by exempting the bot.
 - The shared `commitlint.config.js` ignores a message signed off by `dependabot[bot]`, because its body carries
-  release notes past the line limit. The pull request title and the landed-subject lint still check its header.
+  release notes past the line limit. The ignore matches a `Signed-off-by: dependabot[bot] <` trailer on a line
+  after the header alone, so a header or title that merely carries the text is still linted. The pull request
+  title and the landed-subject lint still check a Dependabot header.
 - A commit's type names its effect on the people who use what the repository ships.
 - `feat`, `fix`, `perf` and `revert` are user-facing. Every other type is hidden from the changelog (Releases).
 - A gate, hook or tooling change is `chore`, and a change to the repository's own workflows is `ci`, because
@@ -833,8 +836,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   the gate.
 - A Go repository pins lefthook as a `go.mod` tool directive, because lefthook is a Go program and the stack
   leans on its native abilities. Its `package.json` carries commitlint and Prettier alone.
-- A hook job that runs a package resolves it with `bunx --bun --no-install`, so the lockfile's pin runs under Bun
-  (Updates, Gate). `bunx --no-install` refuses a missing package while `node_modules` exists.
+- A hook job starts a package as `bun ./node_modules/<pkg>/<bin>`, so the lockfile's pin runs under Bun and a
+  missing package fails the job (Updates, Gate).
 - The hook script `lefthook install` writes fails open where lefthook itself resolves from `node_modules`: Bun,
   and any kind installing lefthook through `package.json`. With no lefthook binary found, it prints
   `Can't find lefthook in PATH` and exits 0, and the commit or push goes through unchecked.
