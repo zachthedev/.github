@@ -14,13 +14,13 @@
  * and git start from an absolute PATH entry outside the checkout alone. Every
  * tool that searches for a config runs with its one config named. Before any
  * row, the gate refuses to run beside a tracked env file Bun loads, a tracked
- * `.npmrc`, a tracked path under node_modules, a config a tool would read in
- * place of the one the gate names, a bunfig.toml that holds anything but the
- * install cooldown, anything that would steer how Bun resolves an import, a
- * package patch, a manifest package node_modules lacks, a changed config or
- * ignore file a row reads, an inline waiver, a workflow shell ShellCheck never
- * reads, or a root file named like a program. Every row that walks the tree
- * says how many files it checked and fails when that is none.
+ * `.npmrc`, a tracked path under node_modules, a config a tool with no named
+ * form would read, a bunfig.toml key beside the install cooldown, anything
+ * that would steer how Bun resolves an import, a package patch, a manifest
+ * package node_modules lacks, an inline waiver, a workflow shell ShellCheck
+ * never reads, or a root file named like a program. No config's text is held:
+ * code-owner review is the control on a change to one. Every row that walks
+ * the tree says how many files it checked and fails when that is none.
  */
 
 import { existsSync } from 'node:fs';
@@ -34,7 +34,6 @@ import { styleText } from 'node:util';
 // loads where a row needs it, once the preflight found it in the checkout's
 // node_modules rather than a parent's. github.ts takes every GitHub token out of the
 // environment when it loads, before any row starts a process.
-import { EXPECTED_ZIZMOR_CONFIG } from './expected';
 import { githubToken } from './github';
 import {
   comparable,
@@ -595,8 +594,35 @@ async function workflows(): Promise<string> {
 const INHERIT_CALLEES: readonly string[] = ['./.github/workflows/', 'zachthedev/.github/.github/workflows/'];
 
 /**
+ * The entries the committed zizmor config's `secrets-inherit` ignore list
+ * names, each a file or a file:line:column.
+ *
+ * @throws When the config does not parse, or the list holds anything but strings
+ */
+async function inheritWaivers(): Promise<string[]> {
+  let parsed: unknown;
+  try {
+    parsed = Bun.YAML.parse(await Bun.file(ZIZMOR_CONFIG).text());
+  } catch (error: unknown) {
+    throw new Error(
+      `${ZIZMOR_CONFIG} does not parse as the gate reads YAML, so its secrets-inherit waivers are unknown: ${quote(error instanceof Error ? error.message : String(error))}`,
+      { cause: error },
+    );
+  }
+  const ignore = (parsed as { rules?: { 'secrets-inherit'?: { ignore?: unknown } } } | null)?.rules?.['secrets-inherit']
+    ?.ignore;
+  if (ignore === undefined) {
+    return [];
+  }
+  if (!Array.isArray(ignore) || !ignore.every((entry) => typeof entry === 'string')) {
+    throw new Error(`${ZIZMOR_CONFIG} rules.secrets-inherit.ignore is not a list of file names`);
+  }
+  return ignore;
+}
+
+/**
  * How many jobs pass `secrets: inherit`, each held to {@link INHERIT_CALLEES},
- * with a call in every file the held zizmor.yml waives.
+ * with a call in every file the committed zizmor.yml waives.
  *
  * @remarks
  * zizmor runs with no config and `--no-ignores`, which drops inline ignore
@@ -632,7 +658,7 @@ async function inheritedCallsHeld(zizmor: string): Promise<number> {
     throw new Error(`zizmor with no config printed no json: ${describe(finished)}`);
   }
   const calls = inheritedCalls(report);
-  const refused = inheritedCallFindings(calls, INHERIT_CALLEES, EXPECTED_ZIZMOR_CONFIG.rules['secrets-inherit'].ignore);
+  const refused = inheritedCallFindings(calls, INHERIT_CALLEES, await inheritWaivers());
   if (refused.length > 0) {
     throw new Error(refused.join('\n'));
   }

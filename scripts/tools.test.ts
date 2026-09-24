@@ -450,6 +450,52 @@ test.each(['', LOCK, PINS])('a missing file is a finding naming it (%p present a
   expect(await findings()).toEqual(expected);
 });
 
+/* ///// bunfig.toml ///// */
+
+interface BunfigCase {
+  readonly label: string;
+  readonly text: string;
+  /** A fragment of each finding against the file, in order, or none when it passes. */
+  readonly refused: readonly string[];
+}
+
+const BUNFIG_CASES: readonly BunfigCase[] = [
+  { label: 'the cooldown alone', text: '[install]\nminimumReleaseAge = 259200\n', refused: [] },
+  { label: 'a shorter cooldown, since no value is held', text: '[install]\nminimumReleaseAge = 3600\n', refused: [] },
+  {
+    label: 'a top-level preload',
+    text: 'preload = ["./x.ts"]\n\n[install]\nminimumReleaseAge = 259200\n',
+    refused: ['bunfig.toml carries "preload"'],
+  },
+  { label: 'a [test] preload', text: '[test]\npreload = ["./x.ts"]\n', refused: ['bunfig.toml carries "test"'] },
+  { label: 'a [define] table', text: '[define]\nX = "1"\n', refused: ['bunfig.toml carries "define"'] },
+  {
+    label: 'an install cache dir',
+    text: '[install]\nminimumReleaseAge = 259200\n\n[install.cache]\ndir = "./planted"\n',
+    refused: ['bunfig.toml [install] carries "cache"'],
+  },
+  {
+    label: 'an install registry',
+    text: '[install]\nregistry = "https://registry.invalid/"\n',
+    refused: ['bunfig.toml [install] carries "registry"'],
+  },
+  { label: 'install as a value', text: 'install = 1\n', refused: ['bunfig.toml carries install as'] },
+];
+
+test.each([...BUNFIG_CASES])('bunfig.toml with $label', async ({ text, refused }: BunfigCase) => {
+  writeFileSync('bunfig.toml', text);
+
+  const found = (await preflightFindings()).filter((finding) => finding.startsWith('bunfig.toml'));
+
+  expect(found).toEqual(refused.map((fragment) => carrying(fragment)));
+});
+
+test('a missing bunfig.toml yields no finding against it', async () => {
+  const found = (await preflightFindings()).filter((finding) => finding.startsWith('bunfig.toml'));
+
+  expect(found).toEqual([]);
+});
+
 /* ///// The packages node_modules must hold ///// */
 
 /** Writes a package.json naming `names` as devDependencies, and a package under node_modules for each of `present`. */

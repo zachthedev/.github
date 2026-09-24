@@ -497,13 +497,22 @@ test('a git that cannot name the work tree is the one finding, and nothing is li
   expect(gitArgs()).toEqual([['rev-parse', '--show-toplevel']]);
 });
 
-test('an untracked Prettier config on disk is a finding, and an untracked env file is not', async () => {
-  answerGit([], ['.prettierrc.json', 'src/.prettierrc', '.env']);
+test('an untracked config a tool with no named form reads is a finding, and an untracked env file is not', async () => {
+  answerGit([], ['.github/actionlint.yaml', '.lefthook.yml', '.env']);
 
   expect(await trackedFindings()).toEqual([
-    carrying('".prettierrc.json" is a Prettier config'),
-    carrying('"src/.prettierrc" is a Prettier config'),
+    carrying('".github/actionlint.yaml" is an actionlint config'),
+    carrying('".lefthook.yml" is a lefthook config'),
   ]);
+});
+
+test('a config for a tool the gate runs with its config named yields no finding, tracked or not', async () => {
+  answerGit(
+    ['.prettierrc.json', '.commitlintrc.json', 'taplo.toml', 'zizmor.yml', 'package.yaml'],
+    ['src/.prettierrc', 'src/eslint.config.js', 'docs/.taplo.toml'],
+  );
+
+  expect(await trackedFindings()).toEqual([]);
 });
 
 test('one tracked path under node_modules is a finding that names it', async () => {
@@ -563,15 +572,34 @@ test('a tracked env template, or an env file for a mode Bun never loads, yields 
 
 /* ///// Project configs along an extends chain ///// */
 
-test('a tracked tsconfig.json extending a config expected.ts does not hold is a finding naming both', async () => {
+test('a tracked tsconfig.json extending a base that sets paths is a finding naming both', async () => {
+  writeFileSync(join(cwd, 'tsconfig.json'), '{ "extends": "./tsconfig.base.json" }');
+  writeFileSync(join(cwd, 'tsconfig.base.json'), '{ "compilerOptions": { "paths": { "x": ["./x.ts"] } } }');
+  answerGit(['tsconfig.json', 'tsconfig.base.json']);
+
+  expect(await trackedFindings()).toEqual([
+    carrying('"tsconfig.json", through "tsconfig.base.json", sets compilerOptions.paths'),
+  ]);
+});
+
+test('a tracked tsconfig.json extending a base that redirects nothing yields no finding, whatever else it sets', async () => {
   writeFileSync(join(cwd, 'tsconfig.json'), '{ "extends": "./tsconfig.base.json" }');
   writeFileSync(join(cwd, 'tsconfig.base.json'), '{ "compilerOptions": { "noCheck": true } }');
   answerGit(['tsconfig.json', 'tsconfig.base.json']);
 
+  expect(await trackedFindings()).toEqual([]);
+});
+
+test('a tsconfig.json outside the paths expected.ts names is a finding, tracked or not', async () => {
+  mkdirSync(join(cwd, 'src'));
+  writeFileSync(join(cwd, 'src', 'tsconfig.json'), '{}');
+  mkdirSync(join(cwd, 'docs'));
+  writeFileSync(join(cwd, 'docs', 'jsconfig.json'), '{}');
+  answerGit(['src/tsconfig.json'], ['docs/jsconfig.json']);
+
   expect(await trackedFindings()).toEqual([
-    carrying(
-      '"tsconfig.json" names "./tsconfig.base.json" in extends, and the gate does not hold "tsconfig.base.json"',
-    ),
+    carrying('"src/tsconfig.json" is a TypeScript project config outside the paths scripts/expected.ts names'),
+    carrying('"docs/jsconfig.json" is a TypeScript project config outside the paths scripts/expected.ts names'),
   ]);
 });
 
