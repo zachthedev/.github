@@ -1011,6 +1011,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   pinned exactly.
 - The root `.editorconfig` also sets `dotnet_diagnostic.SA0001.severity = none`. SA0001 has no location, so
   the category keys never reach it, and it fails a build that treats warnings as errors.
+- `.editorconfig` is lint config under `CODEOWNERS` (Gate), as `.golangci.yml` and `eslint.config.ts` are. A
+  reviewer refuses a `generated_code` key and a `dotnet_diagnostic.*.severity` below warning as config-level
+  waivers, since `generated_code = true` stops every analyzer and leaves no SARIF record. No gate refuses those
+  keys. The gate keeps its location rule for a nested `.editorconfig` and its refusal of `.globalconfig` names
+  (Gate), and the SARIF audit below catches a key that silences a rule that fires.
 - The gate requires StyleCop at its pin, as a direct dependency, in every C# lock file. Removing the reference and
   relocking turns SA1404 off with the gate green.
 - The gate refuses `#pragma warning` in every form, `restore` included, because no analyzer checks a pragma for an
@@ -1028,7 +1033,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - `[UnconditionalSuppressMessage]`, which SA1404 does not read;
   - every ignore form CSharpier honors, the XML forms included.
 - The gate matches those refusals as the compiler reads the file. It decodes `\u` escapes before it matches an
-  identifier, since `GeneratedCode` defeats a plain text match. It matches a directive over the whole text
+  identifier, since `Generated\u0043ode` defeats a plain text match. It matches a directive over the whole text
   with Roslyn's own line breaks and whitespace, U+2028, U+2029, U+0085, a bare carriage return, U+FEFF and U+001A
   included, never line by line.
 - The build row adds two checks. A SARIF error-log audit refuses any in-source suppression with an empty
