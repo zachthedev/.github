@@ -30,7 +30,9 @@ import { styleText } from 'node:util';
 // Every module imported here reads Bun and node: built-ins alone, so nothing
 // under node_modules loads before the preflight in main() refuses a planted
 // package. tools.ts imports zod and the format row imports prettier, so each
-// loads where a row needs it.
+// loads where a row needs it. github.ts takes every GitHub token out of the
+// environment when it loads, before any row starts a process.
+import { githubToken } from './github';
 import { describe, type Finished, fold, quote, run } from './run';
 import {
   ESLINT_CONFIG,
@@ -41,6 +43,7 @@ import {
   startupFindings,
   TAPLO_CONFIG,
   trackedFindings,
+  TSCONFIG,
   ZIZMOR_CONFIG,
 } from './startup';
 
@@ -57,32 +60,11 @@ const BUN = process.execPath;
  */
 const PACKAGES = join(process.cwd(), 'node_modules');
 
-/** The deadline for `gh auth token`, past which the gate reads gh as holding no token. */
-const GH_TIMEOUT_MS = 5_000;
-
 /**
  * How many characters of file arguments one command carries. Windows caps a
  * whole command line at 32,767, so a longer list runs in batches.
  */
 const ARGUMENT_BUDGET = 24_000;
-
-// Every name gh, zizmor and mise read a GitHub token from is taken out of the
-// environment every row's processes inherit. gh's own two are kept aside for
-// `gh auth token` alone, so gh answers as it would from the contributor's
-// shell, and the workflows row hands its answer to zizmor alone. A locked mise
-// install of a tool mise's registry routes, as every tool here is, makes no
-// api.github.com request, so no row has a use for mise's.
-// CI's gate step carries none of them, so there zizmor runs offline.
-const GH_ENVIRONMENT: Readonly<Record<string, string | undefined>> = {
-  GH_TOKEN: process.env['GH_TOKEN'],
-  GITHUB_TOKEN: process.env['GITHUB_TOKEN'],
-};
-delete process.env['GH_TOKEN'];
-delete process.env['GITHUB_TOKEN'];
-delete process.env['ZIZMOR_GITHUB_TOKEN'];
-delete process.env['MISE_GITHUB_TOKEN'];
-delete process.env['MISE_GITHUB_ENTERPRISE_TOKEN'];
-delete process.env['GITHUB_API_TOKEN'];
 
 // ShellCheck reads extra flags from SHELLCHECK_OPTS whatever actionlint's --norc
 // says, and one can exclude any finding, so no process the gate starts gets it.
@@ -206,38 +188,23 @@ function files(count: number): string {
   return `${String(count)} ${count === 1 ? 'file' : 'files'}`;
 }
 
-/* ///// ShellCheck directives ///// */
+/* ///// scripts:test ///// */
 
-/** A ShellCheck directive that turns a check off, in any case and spacing. actionlint's ShellCheck honors it. */
-const SHELLCHECK_OFF = /#\s*shellcheck\s+disable/i;
-
-/**
- * Every ShellCheck disable directive in a tracked workflow, as findings.
- *
- * @remarks
- * A directive silences ShellCheck for its script under actionlint, and
- * ShellCheck has no waiver file here, so a script that needs one is
- * rewritten. This reads the file's text, so a directive that YAML escapes or
- * folds passes it. The shared workflows job refuses every directive through a
- * stand-in that reads the decoded script, and this check gives way to the Bun
- * set's stand-in when the kickstart carries one.
- */
-async function shellcheckDirectiveFindings(): Promise<string[]> {
-  const found: string[] = [];
-  for (const path of await trackedFiles()) {
-    if (!fold(path).startsWith('.github/workflows/')) {
-      continue;
-    }
-    const lines = (await Bun.file(path).text()).split('\n');
-    for (const [index, line] of lines.entries()) {
-      if (SHELLCHECK_OFF.test(line)) {
-        found.push(
-          `${quote(path)} line ${String(index + 1)} disables ShellCheck. Rewrite the script so ShellCheck passes it`,
-        );
-      }
-    }
+// The gate's own tests. Each case starts a stand-in in place of every program
+// the gate starts, with a PATH holding the stand-ins alone, so none reaches
+// the real gh, git, mise or the network. The row reads bun test's own count,
+// and a failure prints the whole report.
+async function scriptsTest(): Promise<string> {
+  const finished = await run([BUN, 'test', './scripts/'], TOOL_TIMEOUT_MS);
+  if (finished.exitCode !== 0) {
+    throw new Error(`bun test ./scripts/ ${describe(finished)}`);
   }
-  return found;
+  const ran = /^Ran (\d+) tests? across (\d+) files?\./m.exec(`${finished.stdout}\n${finished.stderr}`);
+  const tests = Number(ran?.[1] ?? 0);
+  if (tests === 0) {
+    throw new Error(`bun test ./scripts/ ran no test, so the row checks nothing: ${describe(finished)}`);
+  }
+  return `${String(tests)} ${tests === 1 ? 'test' : 'tests'} across ${files(Number(ran?.[2] ?? 0))}`;
 }
 
 /* ///// Shell values ///// */
@@ -329,31 +296,51 @@ async function tools(): Promise<undefined> {
 
 // The native TypeScript 7 compiler, called by its alias's path because the
 // 6.x `typescript` package that typescript-eslint needs ships a tsc of its
-// own. The gate is the only TypeScript here, so scripts/ holds the one config,
-// and a root config would have no inputs. The project is named, so tsc never
-// searches past the checkout for a config. --listFiles names every file the
-// program read, so the row counts the ones from the repository.
+// own. The gate is the only TypeScript here besides eslint.config.ts, which
+// the root config reads alone. Each project is named, so tsc never searches
+// past the checkout for a config, and scripts/ carries its own, so the root
+// one never reaches the gate's module resolution. --listFiles names every file
+// the program read, so the row counts the ones from the repository, and fails
+// on a tracked TypeScript file that no project read.
 async function typecheck(): Promise<string> {
   const root = comparable('.') + sep;
-  const finished = await run(
-    [BUN, join(PACKAGES, '@typescript/native/bin/tsc'), '--noEmit', '--listFiles', '--project', 'scripts'],
-    TOOL_TIMEOUT_MS,
-  );
-  const lines = finished.stdout.split(/\r?\n/);
-  if (finished.exitCode !== 0) {
-    const report = lines.filter((line) => !isAbsolutePath(line)).join('\n');
-    throw new Error(`tsc over scripts ${describe({ ...finished, stdout: report })}`);
-  }
-  const read = lines
-    .filter((line) => isAbsolutePath(line))
-    .filter((line) => {
+  const counts: number[] = [];
+  const checked = new Set<string>();
+  for (const [label, project] of [
+    ['eslint.config.ts', ['--project', TSCONFIG]],
+    ['scripts', ['--project', 'scripts']],
+  ] as const) {
+    const finished = await run(
+      [BUN, join(PACKAGES, '@typescript/native/bin/tsc'), '--noEmit', '--listFiles', ...project],
+      TOOL_TIMEOUT_MS,
+    );
+    const lines = finished.stdout.split(/\r?\n/);
+    const listed = lines.filter((line) => isAbsolutePath(line));
+    if (finished.exitCode !== 0) {
+      const report = lines.filter((line) => !isAbsolutePath(line)).join('\n');
+      throw new Error(`tsc over ${label} ${describe({ ...finished, stdout: report })}`);
+    }
+    const read = listed.filter((line) => {
       const path = comparable(line);
       return path.startsWith(root) && !/[\\/]node_modules[\\/]/i.test(path);
     });
-  if (read.length === 0) {
-    throw new Error('tsc over scripts read no file from the repository, so it checked nothing');
+    if (read.length === 0) {
+      throw new Error(`tsc over ${label} read no file from the repository, so it checked nothing`);
+    }
+    counts.push(read.length);
+    for (const line of read) {
+      checked.add(comparable(line));
+    }
   }
-  return files(read.length);
+  const unread = (await trackedFiles()).filter(
+    (path) => /\.[cm]?tsx?$/.test(fold(path)) && !checked.has(comparable(path)),
+  );
+  if (unread.length > 0) {
+    throw new Error(
+      `no project reads ${unread.map((path) => quote(path)).join(', ')}, so tsc checks none of ${unread.length === 1 ? 'it' : 'them'}. Add each to a project's include`,
+    );
+  }
+  return `${files(counts[0] ?? 0)} and ${files(counts[1] ?? 0)}`;
 }
 
 /** Whether a line tsc printed is a path it read rather than a diagnostic. */
@@ -436,16 +423,18 @@ async function lint(): Promise<string> {
 
 // Prettier names no file it checked, so the row hands it every tracked file
 // Prettier would format, decided by Prettier's own getFileInfo against the one
-// ignore file, and counts that list. --ignore-path names .prettierignore
-// alone, so .gitignore never narrows it, and --config names the one config, so
-// Prettier searches for no other file and a config under a subdirectory never
-// loads. --no-editorconfig keeps any .editorconfig from setting an option.
+// ignore file, and counts that list. getFileInfo runs in the gate's process
+// and resolves the config nearest each file unless told not to, a package.json
+// prettier key and the plugins it names included, so resolveConfig is off.
+// .prettierrc names no parser, plugin or override, so the inferred parser is
+// the same either way. --ignore-path names .prettierignore alone, so
+// .gitignore never narrows it, and --config names the one config, so Prettier
+// searches for no other file and a config under a subdirectory never loads.
+// --no-editorconfig keeps any .editorconfig from setting an option.
 async function format(): Promise<string> {
   const { getFileInfo } = await import('prettier');
   const checked: string[] = [];
   for (const path of await trackedFiles()) {
-    // resolveConfig: false, since the API resolves the nearest config from each
-    // file's directory, and a nested one would load its plugins in this process.
     const info = await getFileInfo(path, { ignorePath: PRETTIERIGNORE, resolveConfig: false });
     if (!info.ignored && info.inferredParser !== null) {
       checked.push(path);
@@ -529,17 +518,6 @@ jobs:
 `;
 const SHELLCHECK_FINDING = 'SC2086';
 
-/**
- * The token `gh auth token` answers with, for zizmor's online audits, or none.
- * A gh that is missing, fails, prints nothing or outlives
- * {@link GH_TIMEOUT_MS} reads as no token.
- */
-async function githubToken(): Promise<string | undefined> {
-  const printed = await run(['gh', 'auth', 'token'], GH_TIMEOUT_MS, GH_ENVIRONMENT);
-  const found = printed.stdout.trim();
-  return printed.exitCode === 0 && found.length > 0 ? found : undefined;
-}
-
 async function workflows(): Promise<string> {
   const actionlint = await binary('actionlint');
   const shellcheck = await binary('shellcheck');
@@ -602,7 +580,7 @@ async function workflows(): Promise<string> {
   // .claude/worktrees. zizmor prints `completed <file>` for each input at
   // RUST_LOG's info level, so the row proves every tracked workflow was
   // audited.
-  const token = process.env['ZIZMOR_OFFLINE'] !== undefined ? undefined : await githubToken();
+  const token = process.env['ZIZMOR_OFFLINE'] !== undefined ? undefined : await githubToken('gh');
   const online = token !== undefined;
   const mode = online ? [] : ['--offline'];
   const env: Readonly<Record<string, string>> = online ? { GH_TOKEN: token, RUST_LOG: 'info' } : { RUST_LOG: 'info' };
@@ -759,13 +737,19 @@ async function renovate(): Promise<string> {
 
 const rows: readonly Row[] = [
   {
+    name: 'scripts:test',
+    checks: "bun test over the gate's own scripts/*.test.ts, every program they start a stand-in, counting the tests",
+    check: scriptsTest,
+  },
+  {
     name: 'tools',
     checks: 'the root, mise.toml and mise.lock against scripts/tools.ts, then the install',
     check: tools,
   },
   {
     name: 'typecheck',
-    checks: 'tsc --noEmit over scripts with its own tsconfig.json, counting the files it read',
+    checks:
+      'tsc --noEmit over eslint.config.ts, then over scripts with its own tsconfig.json, counting the files each read, and every tracked TypeScript file read by one',
     check: typecheck,
   },
   {
@@ -787,7 +771,7 @@ const rows: readonly Row[] = [
   {
     name: 'workflows',
     checks:
-      'actionlint over every tracked workflow with ShellCheck proven present, then zizmor over .github with nothing ignored and each workflow proven audited, online when gh has a token and offline otherwise',
+      'actionlint over every tracked workflow with ShellCheck proven present, then zizmor over .github with nothing ignored and each workflow proven audited, online when gh has a token and offline otherwise, then every job passing secrets: inherit held to a reusable workflow of zachthedev/.github',
     check: workflows,
   },
   {
@@ -832,12 +816,7 @@ async function main(): Promise<number> {
   // stands in for what bun install would put there. So no row runs beside
   // any of them. This comes before any other process the gate starts, and a
   // single row run passes through it too.
-  const refused = [
-    ...(await trackedFindings()),
-    ...(await startupFindings()),
-    ...(await shellcheckDirectiveFindings()),
-    ...(await shellFindings()),
-  ];
+  const refused = [...(await trackedFindings()), ...(await startupFindings()), ...(await shellFindings())];
   if (refused.length > 0) {
     console.log(`  ${glyph(false)} ${'preflight'.padEnd(width)}  ${dim('no row ran')}`);
     console.log(`    ${refused.join('\n    ')}`);

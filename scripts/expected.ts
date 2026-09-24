@@ -14,10 +14,32 @@
 /**
  * Every `tsconfig.json` and `jsconfig.json` the repository keeps beside
  * scripts/tsconfig.json, by path, with what each holds, compared as parsed
- * JSON. The gate is this repository's only TypeScript, so it keeps none, and
- * any project config in the tree beside scripts/tsconfig.json is refused.
+ * JSON. The gate is this repository's only TypeScript. The root one reads
+ * eslint.config.ts alone, the one TypeScript file outside scripts/, so the
+ * typecheck row checks it. Their files, strictness and `noCheck` decide what
+ * the typecheck and lint rows check, so any other project config in the tree
+ * is refused. None carries `paths` or `baseUrl`, which startup.ts refuses
+ * along any `extends` chain.
  */
-export const EXPECTED_PROJECT_CONFIGS: Readonly<Record<string, unknown>> = {};
+export const EXPECTED_PROJECT_CONFIGS: Readonly<Record<string, unknown>> = {
+  'tsconfig.json': {
+    compilerOptions: {
+      target: 'es2025',
+      module: 'esnext',
+      moduleResolution: 'bundler',
+      types: ['bun'],
+      strict: true,
+      noUncheckedIndexedAccess: true,
+      noImplicitOverride: true,
+      exactOptionalPropertyTypes: true,
+      noPropertyAccessFromIndexSignature: true,
+      verbatimModuleSyntax: true,
+      noEmit: true,
+      skipLibCheck: true,
+    },
+    include: ['eslint.config.ts'],
+  },
+};
 
 /**
  * What `.github/zizmor.yml` holds, compared as parsed YAML. `self-repository`
@@ -68,7 +90,7 @@ export default defineConfig(
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ['commitlint.config.js', 'eslint.config.ts'],
+          allowDefaultProject: ['commitlint.config.js'],
         },
         tsconfigRootDir: import.meta.dirname,
       },
@@ -149,8 +171,8 @@ export default defineConfig(
     },
   },
 
-  // Config files at the repo root sit outside the tsconfig project; lint
-  // them without type information.
+  // commitlint.config.js sits outside every tsconfig project, and the typecheck
+  // row checks eslint.config.ts; lint both without type information.
   {
     files: ['commitlint.config.js', 'eslint.config.ts'],
     extends: [tseslint.configs.disableTypeChecked],

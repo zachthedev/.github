@@ -1,3 +1,4 @@
+import { dlopen, FFIType, ptr } from 'bun:ffi';
 import { accessSync, constants, realpathSync, statSync } from 'node:fs';
 import { delimiter, extname, isAbsolute, join, sep } from 'node:path';
 
@@ -229,6 +230,38 @@ export const PROXY_NAMES: readonly string[] = [
  */
 const KILL_GRACE_MS = 10_000;
 
+/** Windows' System32 directory, read from the system rather than the environment, or undefined when it reports none. */
+function systemDirectory(): string | undefined {
+  const kernel32 = dlopen('kernel32.dll', {
+    GetSystemDirectoryW: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.u32 },
+  });
+  try {
+    const buffer = Buffer.alloc(2 * 1024);
+    const length = kernel32.symbols.GetSystemDirectoryW(ptr(buffer), 1024);
+    return length === 0 || length > 1024 ? undefined : buffer.toString('utf16le', 0, length * 2);
+  } finally {
+    kernel32.close();
+  }
+}
+
+/**
+ * The system program the tree kill runs: `taskkill.exe` in Windows' System32,
+ * or `ps` in /bin or /usr/bin elsewhere. Undefined when the system holds none.
+ *
+ * @remarks
+ * It is found without PATH, so a gate or test started with a narrowed PATH
+ * still reaches it, and no PATH entry or variable puts another program in its
+ * place.
+ */
+export function treeKillProgram(): string | undefined {
+  if (process.platform !== 'win32') {
+    return ['/bin/ps', '/usr/bin/ps'].find((candidate) => isRunnable(candidate));
+  }
+  const directory = systemDirectory();
+  const taskkill = directory === undefined ? undefined : join(directory, 'taskkill.exe');
+  return taskkill !== undefined && isRunnable(taskkill) ? taskkill : undefined;
+}
+
 /**
  * Kills `child`, which is still running, and every process it started, at a
  * deadline.
@@ -238,28 +271,30 @@ const KILL_GRACE_MS = 10_000;
  * tsc's launcher starts the compiler, and killing the tool alone leaves them
  * running with no parent. Windows walks the tree with `taskkill /T`. POSIX
  * has no such command, so the tree comes from one `ps` listing of every
- * process and its parent. A process group would need a new session, and a
- * child in its own session never sees the Ctrl-C that stops the gate. The
- * child itself dies through Bun's handle, which ends nothing once it exited,
- * and it dies first, so it starts no process after the listing.
+ * process and its parent. Either way the tree is read once, so a process
+ * started after that read is missed. A process group would need a new
+ * session, and a child in its own session never sees the Ctrl-C that stops
+ * the gate. The child itself dies through Bun's handle, which ends nothing
+ * once it exited, and it dies first, so it starts no process after the
+ * listing. {@link treeKillProgram} names the program, and the preflight
+ * refuses to run without one.
  */
 function killTree(child: ReturnType<typeof Bun.spawn>): void {
   const descendants: number[] = [];
+  const program = treeKillProgram();
   if (process.platform === 'win32') {
-    const taskkill = resolveProgram('taskkill');
-    if (taskkill !== undefined) {
+    if (program !== undefined) {
       Bun.spawnSync({
-        cmd: [taskkill, '/T', '/F', '/PID', String(child.pid)],
+        cmd: [program, '/T', '/F', '/PID', String(child.pid)],
         stdout: 'ignore',
         stderr: 'ignore',
         timeout: KILL_GRACE_MS,
       });
     }
   } else {
-    const ps = resolveProgram('ps');
-    if (ps !== undefined) {
+    if (program !== undefined) {
       const listed = Bun.spawnSync({
-        cmd: [ps, '-A', '-o', 'pid=', '-o', 'ppid='],
+        cmd: [program, '-A', '-o', 'pid=', '-o', 'ppid='],
         stdout: 'pipe',
         stderr: 'ignore',
         timeout: KILL_GRACE_MS,

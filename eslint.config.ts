@@ -19,7 +19,7 @@ export default defineConfig(
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ['commitlint.config.js', 'eslint.config.ts'],
+          allowDefaultProject: ['commitlint.config.js'],
         },
         tsconfigRootDir: import.meta.dirname,
       },
@@ -100,8 +100,8 @@ export default defineConfig(
     },
   },
 
-  // Config files at the repo root sit outside the tsconfig project; lint
-  // them without type information.
+  // commitlint.config.js sits outside every tsconfig project, and the typecheck
+  // row checks eslint.config.ts; lint both without type information.
   {
     files: ['commitlint.config.js', 'eslint.config.ts'],
     extends: [tseslint.configs.disableTypeChecked],

@@ -18,6 +18,12 @@
 /coverage/
 /dist/
 
+# A contributor's own files, which .gitignore lists and `bun run format` would
+# otherwise rewrite: Claude Code's local settings and lefthook's local config.
+/.claude/settings.local.json
+/lefthook-local*
+/.lefthook-local*
+
 # This repository's own, in scripts/expected.ts: the maintainer's local alignment table,
 # which .gitignore keeps out of the index.
 /REPOS.md
