@@ -494,9 +494,13 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   one, and a root `tsconfig.json` with `paths` or `baseUrl` redirects that tool's imports. Committing on
   an unread branch runs that branch's `commitlint.config.js` from the commit hook
   before any check, as a preload runs before the hook's tool.
-- `eslint.config.ts` and `commitlint.config.js` run as code in a gate only in the form its constant holds
-  (below). The `commits` job runs a pull request's `commitlint.config.js` in CI, contained by the same read-only,
-  tokenless shape as the gate job.
+- `CODEOWNERS`, `* @zachthedev`, with `require_code_owner_review` on `default-branch`, makes the owner's review a
+  merge condition for every change to gate code or to a config a row reads. The owner's own pull request merges
+  through the admin bypass (Branch rules).
+- No gate holds a config file's text against a copy in its own code. Where a row's proof takes its expected set
+  from an ignore file, it reads the committed file.
+- `eslint.config.ts` and `commitlint.config.js` are code the rows and the commit hook run. The `commits` job runs
+  a pull request's `commitlint.config.js` in CI, contained by the same read-only, tokenless shape as the gate job.
 - A Bun gate refuses a tracked env file Bun loads on its own, `.env` and its variants, at any depth, because Bun
   loads it into the gate's environment (Known defects). The names match without regard to case. A template such as
   `.env.example` passes.
@@ -505,11 +509,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   runs, and an env value can turn a row red, as `PRETTIER_EXPERIMENTAL_CLI` does. A dev or deploy script keeps env
   loading. `bunfig.toml` stays the cooldown alone (Updates), so it never sets `env = false`.
 - Before its first row, a Bun gate also refuses what changes which code runs before or inside it:
-  - a `bunfig.toml` other than the cooldown, compared whole, because a top-level `preload`, a `[test] preload`
-    and `[define]` each run or rewrite code. `bun --config=<file> <entry>`, with the equals sign, drops the
-    checkout's `bunfig.toml`, while `-c <file>`, `--config <file>` and `-c=<file>` still run its preload;
-  - a `scripts/` directory without its own `tsconfig.json`, compared whole, or one holding a `jsconfig.json`, a
-    `package.json` or a `node_modules`, because the root `tsconfig.json`'s `paths`, `extends` and `baseUrl`
+  - a `bunfig.toml` holding any key but `[install] minimumReleaseAge`, because a top-level `preload`, a
+    `[test] preload` and `[define]` each run or rewrite code. `bun --config=<file> <entry>`, with the equals sign,
+    drops the checkout's `bunfig.toml`, while `-c <file>`, `--config <file>` and `-c=<file>` still run its preload;
+  - a `scripts/` directory without its own `tsconfig.json`, or one holding a `jsconfig.json`, a `package.json` or
+    a `node_modules`, because the root `tsconfig.json`'s `paths`, `extends` and `baseUrl`
     otherwise redirect the gate's imports;
   - a tracked `.npmrc` at any depth, because it redirects even the frozen, script-free install. An untracked one
     holds personal credentials and changes no row, so it passes;
@@ -523,14 +527,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every gate refuses a `patchedDependencies` key in any tracked `package.json`. A patch rewrites a pinned
   package's code under a frozen, script-free install and passes the lockfile's integrity check. A scope as narrow
   as the gate's own imports misses lint configs and tools.
-- A Bun gate refuses every `tsconfig.json` and `jsconfig.json` on disk, at any depth outside `node_modules` and
-  `.claude/worktrees`, unless the gate holds it whole. typescript-eslint reads the nearest tsconfig for each file,
-  so an untracked nested one changed lint results. `scripts/expected.ts` holds the repository's own, the root one
-  included, and the shared `startup.ts` holds `scripts/tsconfig.json`. A root `noCheck: true` let the typecheck
-  row pass over a type error while it printed its full count.
-- The gate walks each held one along its `extends` chain. It refuses `paths` or `baseUrl` there, and an `extends`
-  naming a package, an absolute path, a missing file or a file outside the checkout. Every `extends` target must
-  itself be held, because an unheld base file can carry `noCheck`. Bun applies the root one to a tool's own
+- A Bun gate walks every `tsconfig.json` and `jsconfig.json` on disk, at any depth outside `node_modules` and
+  `.claude/worktrees`, along its `extends` chain. typescript-eslint reads the nearest tsconfig for each file, so a
+  nested one, tracked or not, changes lint results.
+- The walk refuses `paths` or `baseUrl`, and an `extends` naming a package, an absolute path, a missing file or a
+  file outside the checkout. A `noCheck: true` lets the typecheck row pass over a type error while it prints its
+  full count, so a project config is gate config under `CODEOWNERS`. Bun applies the root one to a tool's own
   imports, so a `paths` entry for a package commitlint imports ran repository code in the commit hook. A project
   aliases through `package.json` `imports`, whose `#` names cannot redirect a bare package name.
 - A Go gate, and any other over no TypeScript, refuses a `tsconfig.json` or `jsconfig.json` tracked at any depth
@@ -546,7 +548,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A tracked file under a directory a row skips is refused, since no row checks it while the product can still
   import it. Each stack names its own list, and a Bun gate's is `dist/`, `coverage/` and `.claude/worktrees/`.
 - A tracked source file no row checks is refused. A Bun gate names its untyped JavaScript and declaration files in
-  a held list, since tsc checks neither, and a Go gate refuses a tracked Go file no build compiles.
+  a list in its gate, since tsc checks neither, and a Go gate refuses a tracked Go file no build compiles.
 - The gate refuses a root `.config` directory outright, in any letter case. mise, the dotnet tool manifest,
   cosmiconfig's meta config and lefthook all read it.
 - The root `.config` and a `package.json` `cosmiconfig` key are refused before any commitlint step, the shared
@@ -554,21 +556,25 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every gate tool that searches for its own config runs with the one config named explicitly. The tools are
   Prettier, commitlint, golangci-lint, ESLint, taplo and zizmor, CSharpier in C#, and rustfmt, clippy and
   cargo-deny in Rust.
-- The gate refuses every other name such a tool searches, at every depth it searches, without regard to case. A
-  config the tool finds first replaces the shared one: a committed `.golangci.json` beside `.golangci.yml`
-  replaced the lint config and hid a `govet` finding.
+- A config the tool finds first replaces the shared one: a committed `.golangci.json` beside `.golangci.yml`
+  replaced the lint config and hid a `govet` finding while the row named no config.
+- The gate refuses the other names a tool reads only where the tool has no named-config form: cargo's config, the
+  toolchain file, the actionlint config, lefthook's configs, the env files, `.npmrc`, cosmiconfig's root `.config`
+  and mise's configs. Refusals match at every depth the tool reads, without regard to case.
+- A tool whose row names its config drops the refusal of its other names, but only where a measurement shows the
+  named form stops every read that tool makes. Until then the refusal stands:
   - Prettier: every config file name but the root `.prettierrc`, a `package.json` `prettier` key and a
     `package.yaml`.
   - commitlint: a `.commitlintrc*`, a `commitlint.config.*` other than the root `commitlint.config.js`, a
     `package.json` `commitlint` key and a `package.yaml`.
-  - rustfmt: every `rustfmt.toml` and `.rustfmt.toml` but the root `rustfmt.toml`. rustfmt reads one at any
-    depth, in any case and above the checkout, so the row runs `cargo fmt --check -- --config-path rustfmt.toml`.
-  - clippy: every `clippy.toml` and `.clippy.toml` but the root `clippy.toml`. clippy reads one from a crate's
-    directory, the workspace root and above the checkout, and it takes no config flag, so
-    `CLIPPY_CONF_DIR=<absolute root>` names it.
-  - cargo-deny: every `deny.toml` but the root one, a `.deny.toml` and a `.cargo/deny.toml`. cargo-deny reads the
-    nearest, so the row passes `--config deny.toml`, a global flag that goes ahead of `check`.
-  - Each of those three named forms stops every read its tool makes, above the checkout included.
+- The Rust rows name their configs, and each named form stops every read its tool makes, above the checkout
+  included, so their other names carry no refusal:
+  - rustfmt reads a `rustfmt.toml` or `.rustfmt.toml` at any depth, in any case and above the checkout. The row
+    runs `cargo fmt --check -- --config-path rustfmt.toml`.
+  - clippy reads a `clippy.toml` or `.clippy.toml` from a crate's directory, the workspace root and above the
+    checkout, and it takes no config flag. `CLIPPY_CONF_DIR=<absolute root>` names it.
+  - cargo-deny reads the nearest `deny.toml`, `.deny.toml` or `.cargo/deny.toml`. The row passes
+    `--config deny.toml`, a global flag that goes ahead of `check`.
 - A gate that calls Prettier's `getFileInfo` passes `resolveConfig: false`. The API otherwise resolves the nearest
   config in the gate's own process, a nested `package.json` `prettier` key and its plugins included, and
   `--config` never reaches it.
@@ -594,15 +600,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     that level, so a contributor's stricter `RUST_LOG` hides them.
   - Rows hand files as plain paths after `--`, never with a `./` prefix. A `./` path slips past taplo's excludes
     and actionlint's config globs, and `--` keeps a file named like a flag a path.
-- Every ignore file a row reads, such as `.prettierignore` and the excludes in `.taplo.toml`, is compared whole
-  against a constant in that repository's gate. A change to what a row skips is then a gate change a reviewer
-  sees.
-  - A lint config that carries exclusions, rules or the linter list is compared whole too: `.golangci.yml`, an
-    `eslint.config.ts` with `ignores` and `commitlint.config.js`. A change to one narrows what its tool checks.
-    The preflight compares each before any row, as it does `.prettierrc`, so a changed config is refused before
-    its tool loads it. Changing one means changing the constant in the gate beside it, which a reviewer sees.
-- `.github/zizmor.yml` is compared whole against a constant in that repository's gate as well, because it can
-  disable an audit. A waiver is then a gate change a reviewer sees.
+- An ignore file a row reads, such as `.prettierignore` or the excludes in `.taplo.toml`, a lint config that
+  carries exclusions, rules or the linter list, and `.github/zizmor.yml` each narrow what a row checks, so each
+  is gate config under `CODEOWNERS` (above).
 - Every gate, and the shared `workflows` job, refuses a `zizmor: ignore[` comment in a tracked file under
   `.github`, so every waiver lives in `.github/zizmor.yml`. An inline comment waives any audit on its line,
   `unpinned-uses` included.
@@ -649,12 +649,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   collection each missed a `.github/workflows/UP.YML`.
 - The gate refuses a tracked path with a `.git`, `.sl`, `.svn`, `.hg` or `.jj` segment. Prettier's CLI skips a
   named file under one without a word, while `getFileInfo` accepts it.
-- When a row passes its deadline, the gate's run helper kills the row's process tree: `taskkill /T` on Windows,
-  and elsewhere a process walk that kills the root first.
-- The helper records a child's exit and never kills an exited child by its pid, because that pid is free for
-  reuse. A descendant that still holds the child's output at the deadline fails the row by name.
-- A descendant whose parent already exited is out of that walk's reach. Only a job object reaches it, and Bun
-  exposes none, so a Bun gate names that orphan as a residual in `CONTRIBUTING.md` and `docs/dev.md`.
+- The CI job's `timeout-minutes` bounds the gate. A gate sets no deadline of its own on a row and kills no
+  process tree, and on a contributor's machine Ctrl-C ends a hung tool. A Go gate can bound a pipe a leftover
+  process holds with `exec.Cmd.WaitDelay`.
 - Where a runtime loads an env file before the gate starts, such as Task's `dotenv`, CI and the `pre-push` hook
   run the tracked-file refusal as their own step, before that runtime starts.
 - In a Go repository the gate job and the `pre-push` hook set `GOWORK=off` and `GOFLAGS=-mod=readonly`, and the
@@ -663,24 +660,23 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - In a C# repository:
   - The gate refuses a nested `Directory.Build.props`, a `Directory.Build.rsp` anywhere, and a nested
     `.globalconfig`, `.editorconfig` or `nuget.config`. Each turned a red build green or added a package source
-    past the root's `<clear />`. A nested `.editorconfig` passes only where the gate names it and holds it byte
-    for byte.
+    past the root's `<clear />`. A nested `.editorconfig` passes only where the gate names its path.
   - The build, test and installer rows pass `DirectoryBuildPropsPath`, `DirectoryBuildTargetsPath` and
     `DirectoryPackagesPropsPath` as absolute paths at the root, so MSBuild reads the root's files alone.
   - The build and installer rows also pass `-noAutoResponse`, so MSBuild reads no response file. The test row
     does not: `dotnet test` reads no `Directory.Build.rsp`, and in MTP mode it hands the flag to the test app,
     which exits 5 with zero tests.
   - CSharpier runs over named files with `--config-path`, `--ignore-path` and `--include-generated`, and the row
-    compares its checked count. A root `.csharpierignore` of `*` gave `Checked 0 files` and exit 0.
-    `.csharpierrc` and `.csharpierignore` are held whole.
+    compares its checked count against the committed `.csharpierignore`. A root `.csharpierignore` of `*` gave
+    `Checked 0 files` and exit 0.
   - The gate refuses a root `cake.config`.
   - The gate refuses a `testconfig.json`, `*.testconfig.json`, `xunit.runner.json` or `*.xunit.runner.json` at any
     depth. The tests row reads the total, succeeded and skipped counts from the summary, never the exit code.
 - In a Rust repository:
   - cargo started at the root reads the root `.cargo/config` and `.cargo/config.toml`, the extensionless one
-    winning, and every one above the checkout, never a crate's. The gate holds `.cargo/config.toml` whole and
-    refuses `.cargo/config`. cargo has no named form, so a config above the checkout or in `CARGO_HOME` is a
-    named residual, the one such read in a Rust gate.
+    winning, and every one above the checkout, never a crate's. The gate refuses `.cargo/config`, so
+    `.cargo/config.toml` is the one checkout config cargo reads. cargo has no named form, so a config above the
+    checkout or in `CARGO_HOME` is a named residual, the one such read in a Rust gate.
   - The gate refuses a `rust-toolchain` or `rust-toolchain.toml` anywhere but the root `rust-toolchain.toml`.
 - A test or script that spawns git drops every inherited `GIT_*` variable for that process and names the
   repository with `-C <root>`. git exports `GIT_DIR` and `GIT_INDEX_FILE` to a hook, so a gate the hook runs
@@ -693,15 +689,15 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A checkout another account owns therefore stops the gate. git refuses it as dubious ownership and reads no
   `safe.directory` from the configs the gate turns off. The fix is the directory's owner, never a
   `safe.directory` the gate would read, and `CONTRIBUTING.md` says so.
-- Every gate lists tracked paths once and compares names through Unicode case folding in its own code, never
-  through git's `:(icase)` pathspec magic. git's `icase` folds ASCII alone, macOS's APFS folds case beyond ASCII,
-  and an inherited `GIT_LITERAL_PATHSPECS` turns the magic off without a word. A broader fold costs a false refusal
-  at worst.
+- Every gate lists tracked paths once and compares names in its own code by one rule: strip default-ignorable
+  code points, then fold case. It never uses git's `:(icase)` pathspec magic. git's `icase` folds ASCII alone,
+  macOS's APFS folds case beyond ASCII, and an inherited `GIT_LITERAL_PATHSPECS` turns the magic off without a
+  word. A broader fold costs a false refusal at worst.
 - The stack's own runner drives the gate: Bun scripts in `package.json`, `xtask` for Rust, Cake for C#, go-task
   for Go. A `Makefile` is a violation.
 - In a Bun repository `scripts/startup.ts`, `scripts/run.ts` and `scripts/tools.ts` are byte-identical across
-  the set. The repository's own constants, such as its held project configs and its `.github/zizmor.yml`, live in
-  `scripts/expected.ts`.
+  the set. The repository's own lists, such as its untyped sources, live in `scripts/expected.ts`.
+- A Rust repository's gate modules are shared by copy the same way, never through a shared crate.
 - `cargo xtask` is `cargo run --package xtask`, and the outer cargo resolves the workspace before any row runs.
   The alias in `.cargo/config.toml` therefore carries `--locked`: `run --locked --package xtask --quiet --`.
 - The Bun linter is ESLint with typescript-eslint, configured in `eslint.config.ts` (Known defects).
@@ -918,9 +914,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `.prettierignore` too.
 - Every `.prettierignore` pattern is anchored to the root, with a leading slash where it has no other, so it
   cannot hide a same-named file deeper in the tree.
-- A Prettier config can name a plugin, and Prettier loads it before it checks anything. The gate therefore
-  compares `.prettierrc` whole against the identical file, by its bytes or by its parsed JSON values. Either
-  comparison refuses a changed value or a file that does not parse.
+- A Prettier config can name a plugin, and Prettier loads it before it checks anything, so `.prettierrc` is gate
+  config under `CODEOWNERS` (Gate).
 - C# is formatted by CSharpier at the same width.
 - taplo formats every TOML file in every kind, from `.taplo.toml`. A repository carrying TOML pins taplo in
   `mise.toml` and runs it as a gate row.
@@ -968,19 +963,22 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   description on `@ts-expect-error`. It reports every directive shape tsc honors. `@ts-expect-error` cannot name a
   TypeScript error code that anything checks, so its description is the reason.
 - The gate refuses the text of Prettier's ignore comment, in any case and in prose too, in every file the format
-  row checks. A path the held `.prettierignore` names is not checked.
+  row checks. A path the committed `.prettierignore` names is not checked.
 
 ### Rust
 
-- The workspace sets `allow_attributes_without_reason = "deny"` under `[workspace.lints.clippy]`, so every
-  `allow` and `expect` carries a `reason`. `forbid` fails the build wherever a derive macro emits a group `allow`,
-  as clap's `#[derive(Parser)]` emits `#[allow(clippy::restriction)]`, which rustc refuses (E0453).
-- Under `deny` a crate-level, reasoned `allow` of that lint switches the check off. The gate therefore refuses any
-  lint attribute naming `allow_attributes_without_reason`.
+- The workspace sets `allow_attributes_without_reason = "deny"` and `allow_attributes = "deny"` under
+  `[workspace.lints.clippy]`. A hand-written waiver is therefore `#[expect(..., reason = "...")]`, and a stale
+  `expect` fails as an unfulfilled expectation under `-D warnings`. `allow_attributes` leaves alone the `allow`
+  that clap's derives emit.
+- `forbid` fails the build wherever a derive macro emits a group `allow`, as clap's `#[derive(Parser)]` emits
+  `#[allow(clippy::restriction)]`, which rustc refuses (E0453).
+- Under `deny` a crate-level, reasoned `allow` of either lint switches its check off. The gate therefore refuses
+  any lint attribute naming `allow_attributes_without_reason` or `allow_attributes`.
 - With any lint set under `[workspace.lints.clippy]`, the `all` and `pedantic` groups take `priority = -1`, or
   clippy fails with `lint_groups_priority`.
 - The gate refuses:
-  - a root `Cargo.toml` that does not set `allow_attributes_without_reason` to `deny`;
+  - a root `Cargo.toml` that does not set both lints to `deny`;
   - an empty or whitespace `reason`;
   - an `allow` or `expect` naming a lint group, such as `warnings`, `unused` or `clippy::pedantic`, since a group is
     not a rule and clippy accepts one;
@@ -988,22 +986,22 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - cargo-machete's ignore metadata in any `Cargo.toml`, a waiver no tool asks a reason for;
   - a member manifest whose `[lints]` is anything but `workspace = true` alone, since such a crate escapes the
     workspace setting.
-- `@generated` needs no refusal while the held `rustfmt.toml` leaves `format_generated_files` at its default,
+- `@generated` needs no refusal while the root `rustfmt.toml` leaves `format_generated_files` at its default,
   `true`.
 
 ### C#
 
 - StyleCop's SA1404 requires a `Justification` on every `[SuppressMessage]`, and rejects a missing, empty or
-  whitespace one and `<Pending>`. The held root `.editorconfig` turns every other StyleCop rule off through the
+  whitespace one and `<Pending>`. The root `.editorconfig` turns every other StyleCop rule off through the
   eight StyleCop category keys. StyleCop's newest release is a prerelease from 2023, which the owner accepted,
   pinned exactly.
-- The held root `.editorconfig` also sets `dotnet_diagnostic.SA0001.severity = none`. SA0001 has no location, so
+- The root `.editorconfig` also sets `dotnet_diagnostic.SA0001.severity = none`. SA0001 has no location, so
   the category keys never reach it, and it fails a build that treats warnings as errors.
 - The gate requires StyleCop at its pin, as a direct dependency, in every C# lock file. Removing the reference and
   relocking turns SA1404 off with the gate green.
 - The gate refuses `#pragma warning` in every form, `restore` included, because no analyzer checks a pragma for an
   ID or a reason. A `restore` alone does nothing, so refusing it keeps the rule to one sentence at no cost.
-  `#pragma checksum` stays allowed. A compiler warning (`CSxxxx`) then has no inline waiver, only the held
+  `#pragma checksum` stays allowed. A compiler warning (`CSxxxx`) then has no inline waiver, only the root
   `.editorconfig`, since `[SuppressMessage]` cannot suppress one.
 - The gate also refuses:
   - `#nullable disable` in every form;
