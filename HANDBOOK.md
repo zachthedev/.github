@@ -362,9 +362,13 @@ API reports the value only on a `required_reviewers` rule.
   `.github/zizmor.yml` waives the `secrets-inherit` audit by file name, as
   `rules.secrets-inherit.ignore: [cd.yml, deps.yml]` for the files that pass it (Gate). Every other caller passes
   nothing through.
-- No zizmor waiver binds the callee. A `file:line` entry matches the finding's `uses:` line or its `secrets:`
-  line, not the lines between. Every gate and the shared `workflows` job therefore fail unless each job passing
-  `secrets: inherit` calls `zachthedev/.github/.github/workflows/`, read from a zizmor pass with no config.
+- No zizmor waiver binds the callee. A `file:line` entry matches any location the finding reports, which for
+  `secrets-inherit` is the `uses:` line or the `secrets:` line, not the lines between. Every gate and the shared
+  `workflows` job therefore fail unless each job passing `secrets: inherit` calls
+  `zachthedev/.github/.github/workflows/`.
+- That hold reads a zizmor pass run with `--no-config --no-ignores`. `--no-config` alone still honors an inline
+  `# zizmor: ignore[secrets-inherit]`, which hides the job, and `--no-ignores` drops config ignores and inline
+  comments alike. The hold then stands on its own, beside the inline refusal (Gate).
 - With that hold in place a line entry adds nothing, and an edit above the job would turn the gate red for no
   reason. The waiver therefore names the file.
 
@@ -568,6 +572,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every gate, and the shared `workflows` job, refuses a `zizmor: ignore[` comment in a tracked file under
   `.github`, so every waiver lives in `.github/zizmor.yml`. An inline comment waives any audit on its line,
   `unpinned-uses` included.
+- zizmor's config cannot waive a composite action's finding. A composite action under `.github/actions`
+  therefore carries no waiver, and its finding is fixed.
 - Both also refuse a `shellcheck disable` directive in a tracked workflow file. One silences ShellCheck under
   actionlint with every row green, and ShellCheck has no waiver file, so a finding is fixed in the script.
 - The gate refuses a `.github/actionlint.yaml` or `.github/actionlint.yml`, in any case. actionlint reads either
