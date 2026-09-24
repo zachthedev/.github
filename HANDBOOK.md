@@ -90,7 +90,7 @@ command. A row that a section owns names that section.
 | ------------------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `LICENSE`                                  | shape     | Identity                                                                                                                                                                 |
 | `README.md`                                | own       | what it is, how to get it in one line, the documentation table, the gate command, no copy of a printed list                                                              |
-| `CONTRIBUTING.md`                          | shape     | Setup, The gate, Commit messages, Where code goes, Tests, Code, Dependencies, Releases, What never happens                                                               |
+| `CONTRIBUTING.md`                          | shape     | Setup, The gate, Commit messages, Where code goes, Tests, Code, Dependencies, Releases, What never happens, Troubleshooting                                              |
 | `SECURITY.md`                              | shape     | Security, Reporting, What is supported, In scope, Out of scope, After a report, `hey@`                                                                                   |
 | `CHANGELOG.md`                             | own       | written by the release tool alone, one per crate under release-plz                                                                                                       |
 | `docs/dev.md`                              | shape     | Prerequisites, First run, Running it, Generated files, Tests that need a real thing                                                                                      |
@@ -138,6 +138,10 @@ command. A row that a section owns names that section.
   every repository's default. A repository carries its own only to differ.
 - Every document is written for a human contributor first: `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, and
   anything under `docs/`. Links between them are relative markdown links, clickable on github.com.
+- `CONTRIBUTING.md`'s Troubleshooting section holds every caveat and residual a contributor acts on locally, and
+  no other section repeats one. It says at least that `bunx` may run another copy of a tool when the install is
+  stale or missing, so a local run can disagree with CI. It says to run the frozen install after every pull and
+  in each worktree, and to leave `BUN_OPTIONS` and the `BUN_INSPECT` names unset.
 - `AGENTS.md` lives at the repository root under the vendor-neutral name, so every vendor's agent reads one
   editable file. It writes out what an agent alone needs: the gate commands and the rules about what an agent
   runs, reads or changes in a session. It reaches everything about the tree by a relative link. A session rule
@@ -455,12 +459,13 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   from reasoning about the host. Two such faults passed a Windows gate and failed on Linux and macOS.
 - No gate row resolves a tool from the machine's `PATH`. The programs the gate expects on `PATH` are the
   prerequisites `docs/dev.md` names.
-- No gate, hook or shared job starts a tool on a `node` from `PATH`, and none starts one through `bunx`. Every
-  hook, `package.json` script and gate row starts a JS tool as `bun ./node_modules/<pkg>/<bin>`, the `./` kept so
-  Bun reads a path, and a missing package then fails the start.
-- `bunx` starts a bin whose shebang names `node`, such as Prettier's or commitlint's, under the `node` on `PATH`
-  when one exists, and GitHub's runners carry Node. `bunx --bun --no-install` does not fail on a missing package:
-  it falls back to `PATH`, a parent `node_modules/.bin` or its own cache under the temporary directory.
+- No gate, hook or shared job starts a tool on a `node` from `PATH`. Every hook, `package.json` script and gate
+  row starts a JS tool as `bunx --bun --no-install <tool>`. A bare `bunx` starts a bin whose shebang names `node`,
+  such as Prettier's or commitlint's, under the `node` on `PATH` when one exists, and GitHub's runners carry Node.
+- `bunx --bun --no-install` does not fail on a missing package: it falls back to `PATH`, a parent
+  `node_modules/.bin` or its own cache under the temporary directory. CI installs frozen before any start, so
+  the fallback reaches a local run alone, where a stale or missing install can make it disagree with CI.
+  `CONTRIBUTING.md` says so under Troubleshooting (Files).
 - A gate resolves every program it spawns to an absolute path from `PATH` alone, and spawns that path. It drops
   empty and relative `PATH` entries and any entry inside the repository. Inside compares canonical paths or file
   identity, never an entry's spelling. It checks a found program the same way at its final path, through every
@@ -529,12 +534,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     a `node_modules`, because the root `tsconfig.json`'s `paths`, `extends` and `baseUrl`
     otherwise redirect the gate's imports;
   - a tracked `.npmrc` at any depth, because it redirects even the frozen, script-free install. An untracked one
-    holds personal credentials and changes no row, so it passes;
-  - a package `bun.lock` installs for the platform that the checkout's `node_modules` lacks at its lockfile path,
-    or holds through a link out of the checkout, because Bun then loads a parent directory's copy. That covers
-    every locked package, not only the manifest's names, since a missing optional one, such as the platform's
-    compiler, resolves from a parent directory too.
+    holds personal credentials and changes no row, so it passes.
 - Those checks import only built-in modules, so no package loads before they pass.
+- A Bun gate imports its own packages by path under the checkout's `node_modules`, so an absent install fails the
+  gate. It does not check `node_modules` against `bun.lock`: CI installs frozen before its gate, and a stale local
+  install is the contributor's to refresh (Troubleshooting in `CONTRIBUTING.md`).
 - A Bun gate's ESLint refuses an import attribute other than `type: 'json'`. Bun runs any file as a module under
   `with { type: 'js' }`, a `.txt` included, and no row reads such a file.
 - Every gate refuses a `patchedDependencies` key in any tracked `package.json`. A patch rewrites a pinned
@@ -680,10 +684,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every gate and the shared `workflows` job refuse a `.github/actionlint.yaml` or `.github/actionlint.yml`, in any
   case, the job a tracked one. actionlint reads either, and a `paths` ignore in it drops any finding, the
   stand-in's refusal included. A canonical one is added the day a repository needs it.
-- Every gate withholds `BUN_OPTIONS`, `BUN_INSPECT`, `BUN_INSPECT_CONNECT_TO`, `BUN_INSPECT_PRELOAD` and
-  `SHELLCHECK_OPTS` from every child it starts, in every spelling. Bun reads `BUN_OPTIONS` as flags ahead of its
-  own, a test name filter or a preload among them, and the `BUN_INSPECT` names attach an inspector or preload a
-  module. `SHELLCHECK_OPTS` reaches ShellCheck past actionlint's `--norc`.
+- Every gate withholds `BUN_OPTIONS` and `SHELLCHECK_OPTS` from every child it starts, in every spelling. An
+  ordinary shell sets either. Bun reads `BUN_OPTIONS` as flags ahead of its own, a test name filter or a preload
+  among them. `SHELLCHECK_OPTS` reaches ShellCheck past actionlint's `--norc`. The `BUN_INSPECT` names have no
+  ordinary use, so the contributor leaves them unset (Troubleshooting in `CONTRIBUTING.md`).
 - The gate refuses a workflow file whose extension is not a lowercase `.yml`. actionlint's file list and zizmor's
   collection each missed a `.github/workflows/UP.YML`.
 - The gate refuses a tracked path with a `.git`, `.sl`, `.svn`, `.hg` or `.jj` segment. Prettier's CLI skips a
@@ -948,12 +952,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   the gate.
 - A Go repository pins lefthook as a `go.mod` tool directive, because lefthook is a Go program and the stack
   leans on its native abilities. Its `package.json` carries commitlint, `yaml` and Prettier alone.
-- A hook job starts a package as `bun --no-env-file ./node_modules/<pkg>/<bin>`, behind one loop that unsets
-  `BUN_OPTIONS`, `BUN_INSPECT`, `BUN_INSPECT_CONNECT_TO` and `BUN_INSPECT_PRELOAD` in any spelling. The lockfile's
-  pin then runs under Bun with no inherited flags, inspector or env file, and a missing package fails the job
-  (Updates, Gate).
-- The loop unsets rather than empties, because Bun exits 1 on an empty `BUN_INSPECT_PRELOAD`. A `package.json`
-  `prepare` script cannot clear these names, which is a named residual.
+- A hook job starts its tool as a gate row does (Gate). A hook runs in the contributor's own environment and
+  clears no inherited variable, because a hook is not a control: CI's gate and `commits` job decide the merge.
 - The hook script `lefthook install` writes fails open where lefthook itself resolves from `node_modules`: Bun,
   and any kind installing lefthook through `package.json`. With no lefthook binary found, it prints
   `Can't find lefthook in PATH` and exits 0, and the commit or push goes through unchecked.
