@@ -5,7 +5,8 @@
 # runs is the one bun.lock pins, nothing is fetched at commit time, and a
 # missing package fails the job. bunx --no-install would fall back to PATH, a
 # parent node_modules/.bin or its cache. Bun runs the file itself, so no
-# shebang picks a node. When node_modules is gone, lefthook itself is missing:
+# shebang picks a node, and --no-env-file keeps it from loading a .env into the
+# tool's environment. When node_modules is gone, lefthook itself is missing:
 # the installed hook script exits 0 and the commit or push goes through. CI's
 # commits job and gate are the control for that case.
 
@@ -17,7 +18,7 @@ commit-msg:
     # --config names that one config, so no name commitlint searches before it
     # can stand in for it.
     - name: commitlint
-      run: bun ./node_modules/@commitlint/cli/cli.js --config commitlint.config.js --edit {1}
+      run: bun --no-env-file ./node_modules/@commitlint/cli/cli.js --config commitlint.config.js --edit {1}
 
 pre-push:
   jobs:
@@ -26,4 +27,4 @@ pre-push:
     # the file directly rather than through the package script, whose runner
     # puts node_modules/.bin first on PATH.
     - name: check
-      run: bun scripts/check.ts
+      run: bun --no-env-file scripts/check.ts

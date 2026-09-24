@@ -75,8 +75,9 @@ jobs:
       # The gate starts every package from its path under node_modules and needs none of them.
       - run: bun install --frozen-lockfile --ignore-scripts
       # Bun runs the file directly rather than through the package script, whose runner puts
-      # node_modules/.bin first on PATH, ahead of the programs the gate starts.
-      - run: bun scripts/check.ts
+      # node_modules/.bin first on PATH, ahead of the programs the gate starts. --no-env-file
+      # keeps Bun from loading a .env into the gate before its preflight can refuse one.
+      - run: bun --no-env-file scripts/check.ts
 
   # Each calling job grants what its called job declares. A called job can only lower what its
   # caller passes, and a caller passing none is refused before any step runs.

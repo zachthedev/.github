@@ -86,6 +86,38 @@ jobs:
             echo "::error::Remove each path and key named above."
             exit 1
           fi
+      # Bun reads bunfig.toml at the root each time it starts, and bun install reads its [install]
+      # table. A preload there runs code inside commitlint before its first line, and no step here
+      # names another config. So a tracked one, matched without regard to case, holds the one
+      # shape the set allows: [install] minimumReleaseAge alone, at three days or more. python3's
+      # tomllib reads it, and a file it cannot parse, or one that is not a plain file, is refused.
+      - name: Refused bunfig
+        run: |
+          python3 - <<'PY'
+          import subprocess, sys, tomllib
+          listed = subprocess.run(["git", "ls-files", "-s", "-z"], capture_output=True, check=True).stdout.decode()
+          found = []
+          for entry in filter(None, listed.split("\0")):
+              info, name = entry.split("\t", 1)
+              if name.lower() != "bunfig.toml":
+                  continue
+              if not info.startswith("100"):
+                  found.append(f"{name!r} is not a plain file")
+                  continue
+              try:
+                  with open(name, "rb") as file:
+                      held = tomllib.load(file)
+              except (OSError, tomllib.TOMLDecodeError) as error:
+                  found.append(f"{name!r} does not parse as TOML: {error}")
+                  continue
+              install = held.get("install")
+              age = install.get("minimumReleaseAge") if isinstance(install, dict) else None
+              if type(age) is not int or age < 259200 or list(held) != ["install"] or list(install) != ["minimumReleaseAge"]:
+                  found.append(f"{name!r} holds more than [install] minimumReleaseAge at 259200 or higher")
+          for finding in found:
+              print(f"::error::{finding}. Bun reads bunfig.toml before commitlint runs, and the one shape allowed is the install cooldown.")
+          sys.exit(1 if found else 0)
+          PY
       # Bun runs commitlint and applies a tsconfig.json or jsconfig.json to its own imports, so a
       # paths entry or a baseUrl there runs checkout code in place of a package commitlint loads.
       # Every tracked one, at any depth and in any case, and every file its extends names, is read
@@ -148,13 +180,14 @@ jobs:
       # --from and --to are commitlint's own range: it walks base..head in git. commitlint starts
       # by its path under node_modules, which the install above wrote from bun.lock, so a missing
       # copy fails the step. bunx --no-install would fall back to PATH, a parent node_modules/.bin
-      # or its cache. Bun runs the file itself, so no shebang picks a node. --config names the
+      # or its cache. Bun runs the file itself, so no shebang picks a node. --no-env-file keeps Bun
+      # from loading a .env from the checkout into commitlint's environment. --config names the
       # caller's one config, so no name commitlint searches before it can stand in for it.
       - name: Pull request commits
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: bun ./node_modules/@commitlint/cli/cli.js --config commitlint.config.js --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
+        run: bun --no-env-file ./node_modules/@commitlint/cli/cli.js --config commitlint.config.js --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
       # GitHub's default squash message lands a one-commit pull request under that commit's subject
       # and a longer one under the title, each with the pull request number appended. That string
       # reaches the default branch, so it is the one the header length rule reads. Every value
@@ -180,4 +213,4 @@ jobs:
           rm -f -- "$config"
           printf '%s\n' "import config from './commitlint.config.js';" \
             'export default { ...config, ignores: [], defaultIgnores: false };' > "$config"
-          printf '%s (#%s)\n' "$subject" "$NUMBER" | bun ./node_modules/@commitlint/cli/cli.js --config "$config" --verbose
+          printf '%s (#%s)\n' "$subject" "$NUMBER" | bun --no-env-file ./node_modules/@commitlint/cli/cli.js --config "$config" --verbose
