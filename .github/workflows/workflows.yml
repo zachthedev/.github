@@ -118,17 +118,19 @@ jobs:
       # actionlint hands ShellCheck a script only when its shell is bash or sh, or starts with
       # "bash " or "sh ", so a step or defaults.run shell such as /bin/bash -e {0} runs bash with
       # no ShellCheck at all. Every shell key in a tracked workflow is held to bash, sh or pwsh,
-      # written plainly on its own line. No YAML parser is pinned here, so the check reads each
-      # line and decodes every double-quoted string's escapes first, so an escaped key reads as
-      # its text. An explicit ? key and an alias written as a key are refused, since either can
-      # name a key the line never spells.
+      # written plainly on its own line, with no continuation on a deeper line. No YAML parser is
+      # pinned here, so the check reads every line but comments, script text included, and
+      # decodes every double-quoted string's escapes first, so an escaped key reads as its text.
+      # A script line that spells a shell key is refused too. An explicit ? key and an alias
+      # written as a key are refused, since either can name a key the line never spells.
+      # actionlint refuses a key in another case, so the match is exact.
       - name: Held shell values
         run: |
           python3 - <<'PY'
           import re, subprocess, sys
           listed = subprocess.run(["git", "ls-files", "-z", "--", ".github/workflows"], capture_output=True, check=True)
-          KEY = re.compile(r"(?:^|[^A-Za-z0-9_-])shell[\s\"']*:", re.I)
-          HELD = re.compile(r"^\s*(?:-\s+)?shell:\s+(?:bash|sh|pwsh)\s*(?:#.*)?$")
+          KEY = re.compile(r"(?:^|[^A-Za-z0-9_-])shell[\s\"']*:")
+          HELD = re.compile(r"^(\s*(?:-\s+)?)shell[:]\s+(?:bash|sh|pwsh)\s*(?:#.*)?$")
           EXPLICIT = re.compile(r"^\s*(?:-\s+)?\?(?:\s|$)")
           ALIAS = re.compile(r"(?:^|[\s{,])\*[^\s:]+\s*:(?:\s|$)")
           QUOTED = re.compile(r'"((?:[^"\\]|\\.)*)"')
@@ -140,9 +142,14 @@ jobs:
               with open(name, encoding="utf-8", errors="replace") as file:
                   lines = file.read().split("\n")
               for number, line in enumerate(lines, 1):
+                  if line.lstrip().startswith("#"):
+                      continue
                   plain = QUOTED.sub(lambda m: '"' + decoded(m[1]) + '"', line)
-                  if (KEY.search(line) or KEY.search(plain)) and not HELD.match(line):
-                      found.append(f"{name!r} line {number} sets a shell other than bash, sh or pwsh, or in another form")
+                  if KEY.search(line) or KEY.search(plain):
+                      held = HELD.match(line)
+                      after = next((text for text in lines[number:] if text.strip()), "")
+                      if not held or len(after) - len(after.lstrip(" ")) > len(held[1]):
+                          found.append(f"{name!r} line {number} sets a shell other than bash, sh or pwsh, or in another form")
                   elif EXPLICIT.match(line) or ALIAS.search(line):
                       found.append(f"{name!r} line {number} writes a key as an explicit ? key or an alias")
           for finding in found:
@@ -175,7 +182,7 @@ jobs:
                           found += [f"mise.toml gives {tool!r} the option {option!r}" for option in entry if option not in OPTIONS]
               elif key in SECTIONS and isinstance(value, dict):
                   found += [f"mise.toml sets {name!r} under [{key}]" for name in value if name not in SECTIONS[key]]
-              elif key not in ("tools", *SECTIONS):
+              elif key != "tools" and key not in SECTIONS:
                   found.append(f"mise.toml carries {key!r}")
           with open("mise.lock", "rb") as file:
               lock = tomllib.load(file)
