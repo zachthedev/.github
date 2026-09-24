@@ -436,7 +436,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `bunx --bun --no-install` too.
 - A gate resolves every program it spawns to an absolute path from `PATH` alone, and spawns that path. It drops
   empty and relative `PATH` entries and any entry inside the repository. Inside compares canonical paths or file
-  identity, never an entry's spelling. It never runs a bare name, and it never uses a directory the repository
+  identity, never an entry's spelling. It checks a found program the same way at its final path, through every
+  link and junction, because a junction from an outside entry into the checkout otherwise passes. It never runs a
+  bare name, and it never uses a directory the repository
   tracks or the process starts in as a lookup location. On Windows a bare name can otherwise resolve from the
   current directory or a tracked tool directory before `PATH`.
 - Every gate hands its children a `PATH` with no entry inside the checkout, so a child resolving a bare name
@@ -534,12 +536,18 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `workerd` included.
 - Where a runtime loads an env file before the gate starts, such as Task's `dotenv`, CI and the `pre-push` hook
   run the tracked-file refusal as their own step, before that runtime starts.
+- In a Go repository the gate job and the `pre-push` hook set `GOWORK=off` and `GOFLAGS=-mod=readonly`, and the
+  gate refuses a tracked `go.work`, `go.work.sum` and `vendor/`. Each can put checkout code in place of a module
+  the gate's own `go run` builds, as a tracked `go.work` did.
 - A test or script that spawns git drops every inherited `GIT_*` variable for that process and names the
   repository with `-C <root>`. git exports `GIT_DIR` and `GIT_INDEX_FILE` to a hook, so a gate the hook runs
   otherwise writes into the hook's own repository.
 - The gate's own `git` child starts with an empty environment plus `GIT_CONFIG_NOSYSTEM` and
   `GIT_CONFIG_GLOBAL=/dev/null`, and `SystemRoot` on Windows where the stack's start of git needs it, as Go's does.
   Listing tracked files needs no inherited name.
+- A checkout another account owns therefore stops the gate. git refuses it as dubious ownership and reads no
+  `safe.directory` from the configs the gate turns off. The fix is the directory's owner, never a
+  `safe.directory` the gate would read, and `CONTRIBUTING.md` says so.
 - Every gate lists tracked paths once and compares names through Unicode case folding in its own code, never
   through git's `:(icase)` pathspec magic. git's `icase` folds ASCII alone, macOS's APFS folds case beyond ASCII,
   and an inherited `GIT_LITERAL_PATHSPECS` turns the magic off without a word. A broader fold costs a false refusal
@@ -723,6 +731,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - That script hard-codes the installing checkout's `node_modules` path. A linked worktree with no `node_modules`
   of its own therefore runs the installing checkout's lefthook.
 - A fresh clone has no hook until its install runs `lefthook install`.
+- Every lefthook repository refuses a tracked `lefthook-local`, `.lefthook-local` or `.config/lefthook-local`
+  file, any extension, and gitignores all three. lefthook merges one over `lefthook.yml`, so a tracked one can
+  turn `piped` off and replace a hook's jobs.
 - A Go repository's hook runs lefthook through `go tool`, which refuses when lefthook cannot run.
 - lefthook skips `pre-push` on the first push of a new branch to an empty remote. A first push therefore rests on
   the gate run before it.
@@ -1041,6 +1052,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - release-plz creates the tags in the release job, under the releaser app. `release` therefore also holds
     `RELEASER_CLIENT_ID` and `RELEASER_PRIVATE_KEY`, and `release-pr` holds the same pair.
   - The crates.io trusted-publishing configuration names `cd.yml` and the environment `release`.
+  - After a manual first publish, the owner creates the `<crate>-v<version>` tags at the commit each crate's
+    `.cargo_vcs_info.json` names. release-plz never tags a version already on crates.io. A squash merge and the
+    branch's deletion leave that commit unreachable, so without the tags release-plz walks the whole history and
+    proposes a spurious release. The tag ruleset admits the releaser app alone, so the tags are an owner step in
+    the first-publish procedure.
 
 ## Versioning
 
