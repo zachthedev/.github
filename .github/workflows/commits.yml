@@ -44,19 +44,23 @@ jobs:
       # package.yaml and a .commitlintrc file each come before commitlint.config.js in its search.
       # So every commitlint config but the root commitlint.config.js is refused at any depth, a
       # package.yaml whole, since the step reads no YAML, and every tracked package.json is read for
-      # the key. Paths match without regard to case, as Windows and macOS open them. A failed git or
-      # jq call, a malformed package.json among them, stops the step.
+      # the key. cosmiconfig, which commitlint searches through, reads a meta config from a root
+      # .config directory and a package.json cosmiconfig key when it starts, whatever --config
+      # names, and runs a .config/config.js, .mjs, .cjs or .ts as code. So a tracked root .config
+      # and a cosmiconfig key are refused too. Paths match without regard to case, as Windows and
+      # macOS open them. A failed git or jq call, a malformed package.json among them, stops the step.
       - name: Refused paths
         run: |
           tracked=$(git ls-files)
           found=$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)node_modules/|(^"?|/)\.npmrc"?$' || true)
           configs=$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)(\.commitlintrc[^/]*|commitlint\.config\.[^/]*|package\.yaml"?)$' | grep -vxF commitlint.config.js || true)
+          meta=$(printf '%s\n' "$tracked" | grep -iE '^"?\.config(/|"?$)' || true)
           keyed=""
           while IFS= read -r manifest; do
             [ -n "$manifest" ] || continue
-            carries=$(jq 'if type == "object" then has("commitlint") else error("is not an object") end' "$manifest")
-            if [ "$carries" = true ]; then
-              keyed+="$manifest"$'\n'
+            carries=$(jq -r 'if type == "object" then [keys[] | select(. == "commitlint" or . == "cosmiconfig")] | join(" and ") else error("is not an object") end' "$manifest")
+            if [ -n "$carries" ]; then
+              keyed+="$(printf '%q' "$manifest") carries a $carries key"$'\n'
             fi
           done <<< "$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)package\.json"?$' || true)"
           patched=$(jq -r '(.patchedDependencies // {}) | if type == "object" then keys[] else error("patchedDependencies is not an object") end' package.json)
@@ -79,7 +83,7 @@ jobs:
                 ;;
             esac
           done <<< "$patched"
-          if [ -n "$found" ] || [ -n "$configs" ] || [ -n "$keyed" ] || [ -n "$refused" ]; then
+          if [ -n "$found" ] || [ -n "$configs" ] || [ -n "$meta" ] || [ -n "$keyed" ] || [ -n "$refused" ]; then
             while IFS= read -r path; do
               [ -n "$path" ] && echo "::error::$(printf '%q' "$path") is tracked, and bun install would read it in place of what bun.lock names."
             done <<< "$found"
@@ -87,12 +91,15 @@ jobs:
               [ -n "$path" ] && echo "::error::$(printf '%q' "$path") can hold a commitlint config, and commitlint.config.js at the root is the one commitlint config."
             done <<< "$configs"
             while IFS= read -r path; do
-              [ -n "$path" ] && echo "::error::$(printf '%q' "$path") carries a commitlint key, and commitlint.config.js at the root is the one commitlint config."
+              [ -n "$path" ] && echo "::error::$(printf '%q' "$path") is under the root .config, where cosmiconfig reads a config before commitlint loads the one named."
+            done <<< "$meta"
+            while IFS= read -r finding; do
+              [ -n "$finding" ] && echo "::error::$finding, and commitlint.config.js at the root is the one commitlint config."
             done <<< "$keyed"
             while IFS= read -r entry; do
               [ -n "$entry" ] && echo "::error::package.json patches $(printf '%q' "$entry"), a package commitlint loads."
             done <<< "$refused"
-            echo "::error::Remove each path, commitlint key and patch named above."
+            echo "::error::Remove each path, key and patch named above."
             exit 1
           fi
       # Under --bun, Bun applies a tsconfig.json or jsconfig.json to commitlint's own imports, so a
