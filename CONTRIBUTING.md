@@ -49,7 +49,9 @@ reads no `safe.directory` entry, by design.
 Every row that walks the tree says how many files it checked, and fails when that is none. The `format`, `toml`,
 `workflows` and `renovate` rows hand their tool the tracked files, so a new file counts once `git add` names it,
 and `.gitignore` never hides a tracked one. The `toml` row checks that taplo reports each file it was handed, and
-the `workflows` row that actionlint and zizmor each report every tracked workflow.
+the `workflows` row that actionlint and zizmor each report every tracked workflow. The `workflows` row also fails
+unless every job passing `secrets: inherit` calls a reusable workflow of this repository, because a zizmor waiver
+binds to a file, never to what a job calls.
 
 Before any row, the gate's preflight refuses to run beside what Bun or Prettier reads before a row starts:
 
@@ -75,7 +77,11 @@ It also refuses a change to what a row skips or waives, so that change is always
 - a `.prettierignore` whose patterns differ from the ones `scripts/startup.ts` lists. Every Prettier run passes
   `--ignore-path .prettierignore`, so `.gitignore` never narrows Prettier;
 - a `.taplo.toml` or `.github/zizmor.yml` that differs from the copy in `scripts/startup.ts`;
-- a tracked `.github/actionlint.yaml` or `.github/actionlint.yml`, which can silence any actionlint finding.
+- a tracked `.github/actionlint.yaml` or `.github/actionlint.yml`, which can silence any actionlint finding;
+- an inline `zizmor: ignore[` comment in a tracked file under `.github`, in any case or spacing. A zizmor waiver
+  goes in `.github/zizmor.yml`, under that audit's ignore list;
+- a `shellcheck disable` directive in a tracked workflow. ShellCheck has no waiver file, so rewrite the script
+  until ShellCheck passes it.
 
 A template such as `.env.example` passes, and so does your own untracked env file or `.npmrc`. The gate loads
 nothing from `node_modules/` until these checks pass, so a planted package never runs ahead of its refusal. The
