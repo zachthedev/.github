@@ -477,7 +477,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The refusals keep such a file off the default branch. They cannot stop the first local run of an unread branch:
   a `bunfig.toml` preload, a `paths` redirect in the gate's own `scripts/tsconfig.json` or a Task `dotenv` runs
   before any row does. Under `bunx --bun` a preload also runs before each commit hook's tool and in any script
-  that calls it. Committing on an unread branch runs that branch's `commitlint.config.js` from the commit hook
+  that calls it, and a root `tsconfig.json` with `paths` or `baseUrl` redirects that tool's imports. Committing on
+  an unread branch runs that branch's `commitlint.config.js` from the commit hook
   before any check, as a preload runs before the hook's tool.
 - `eslint.config.ts` and `commitlint.config.js` run as code in a gate only in the form its constant holds
   (below). The `commits` job runs a pull request's `commitlint.config.js` in CI, contained by the same read-only,
@@ -499,6 +500,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     `--ignore-scripts` install still applies it;
   - a tracked `.npmrc`, because it redirects even the frozen, script-free install.
 - Those checks import only built-in modules, so no package loads before they pass.
+- A Bun gate refuses `paths` and `baseUrl` in any tracked `tsconfig.json` or `jsconfig.json`, `extends` chains
+  included. Under `bunx --bun` Bun applies the root one to a tool's own imports, so a `paths` entry for a package
+  commitlint imports ran repository code in the commit hook. A project aliases through `package.json` `imports`,
+  whose `#` names cannot redirect a bare package name.
+- A Go repository, and any other with no TypeScript, refuses a tracked `tsconfig.json` or `jsconfig.json`
+  outright. `.github` refuses every one but `scripts/tsconfig.json`, which its gate compares whole.
 - Every gate tool that searches for its own config runs with the one config named explicitly. The tools are
   Prettier, commitlint, golangci-lint, ESLint, taplo and zizmor, and rustfmt and clippy in Rust.
 - The gate refuses every other name such a tool searches, at every depth it searches, without regard to case. A
@@ -612,6 +619,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The same step refuses a tracked `.npmrc` at any depth, also without regard to case, because it redirects the
   install's registry. It refuses a `package.json` `patchedDependencies` entry for an `@commitlint` package or a
   package `commitlint.config.js` imports, because a frozen install without scripts still applies it.
+- The same step refuses `paths` and `baseUrl` in any tracked `tsconfig.json` or `jsconfig.json`, because the job
+  runs commitlint under `bunx --bun` (Gate).
 - The `workflows` workflow runs actionlint and zizmor. The gate proves ShellCheck ran by writing a canary
   workflow with an unquoted variable and requiring the finding back. actionlint exits 0 with ShellCheck absent,
   and no flag changes that.
