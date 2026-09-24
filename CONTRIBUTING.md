@@ -58,7 +58,9 @@ Every row that walks the tree says how many files it checked, and fails when tha
 and `.gitignore` never hides a tracked one. The `toml` row checks that taplo reports each file it was handed, and
 the `workflows` row that actionlint and zizmor each report every tracked workflow. The `workflows` row also fails
 unless every job passing `secrets: inherit` calls a reusable workflow of this repository, because a zizmor waiver
-binds to a file, never to what a job calls.
+binds to a file, never to what a job calls. It reads that from a zizmor pass with no config and no ignores, so no
+waiver, inline or in `.github/zizmor.yml`, hides a job from it. The `format` row asks Prettier which files it
+formats with no config search, so a `package.json` nested anywhere never loads a Prettier plugin into the gate.
 
 Before any row, the gate refuses to run beside what Bun reads before the gate's first line:
 
