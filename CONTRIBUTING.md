@@ -6,13 +6,13 @@ Install before committing. [docs/dev.md#prerequisites](docs/dev.md#prerequisites
 and `bun install` installs the dependencies and the git hooks. The commit hook checks every commit message
 before it is recorded, and the push hook runs the gate and refuses the push when it fails.
 
-The commit hook runs commitlint as `bun --no-env-file ./node_modules/@commitlint/cli/cli.js`, under Bun rather
-than a `node` on `PATH`, and it fails when the package is missing. The `format` and `prepare` scripts start their
-tools the same way, by path under `node_modules/`. None of them uses `bunx`, which falls back to `PATH`, a parent
-`node_modules/.bin` or its own cache when a package is missing. The push hook runs
-`bun --no-env-file scripts/check.ts`. Both hooks, the `check` and `check:rows` scripts, CI's gate step and every
-Bun a gate row starts pass `--no-env-file`, so Bun loads no `.env` into them. The `format` and `prepare` scripts
-are for your own use and keep env loading.
+The commit hook runs commitlint as `BUN_OPTIONS= bun --no-env-file ./node_modules/@commitlint/cli/cli.js`, under
+Bun rather than a `node` on `PATH`, and it fails when the package is missing. The `format` and `prepare` scripts
+start their tools the same way, by path under `node_modules/`. None of them uses `bunx`, which falls back to
+`PATH`, a parent `node_modules/.bin` or its own cache when a package is missing. The push hook runs
+`BUN_OPTIONS= bun --no-env-file scripts/check.ts`. Both hooks, the `check` and `check:rows` scripts, CI's gate
+step and every Bun a gate row starts pass `--no-env-file`, so Bun loads no `.env` into them, and the hooks empty
+`BUN_OPTIONS`. The `format` and `prepare` scripts are for your own use and keep env loading.
 The hook script `lefthook install` writes fails open. When it finds no lefthook binary, as in a checkout whose
 `node_modules/` is gone, it prints `Can't find lefthook in PATH` and exits 0, and the commit or push goes through
 unchecked. A fresh clone runs no hook at all until `bun install` runs. CI's `commits` job and gate hold both
@@ -26,8 +26,7 @@ you did not write, read its diff, then install it with `bun install --ignore-scr
 `node_modules/.bin` first on `PATH`. A tracked `node_modules/.bin/bun` then runs before the gate's refusal can.
 Bun also runs a `bunfig.toml` preload before the gate's first line, whichever way the gate starts, and before the
 commit hook's commitlint and in the `format` and `prepare` scripts, since each runs under Bun.
-`eslint.config.ts` and `commitlint.config.js` are code too: the `lint` row and the commit hook run them. The gate
-holds both whole, so a change to either changes its copy under `scripts/` in the same commit. The
+`eslint.config.ts` and `commitlint.config.js` are code too: the `lint` row and the commit hook run them. The
 gate's refusals keep such a branch from merging, and nothing in the gate can stop its first run on your machine,
 so the diff read is what catches one there. Read it before you commit on the branch too, since the commit hook
 runs the branch's own code.
@@ -45,7 +44,7 @@ run there.
 `bun run check:rows` lists the rows. `bun run check <row>` runs one row, resolving the pinned binaries without
 installing them.
 
-The `workflows` row runs zizmor online when `gh auth token` answers within its deadline, and hands that token to
+The `workflows` row runs zizmor online when `gh auth token` answers with a token, and hands that token to
 zizmor's process alone. Otherwise it runs zizmor offline, and the row's label says which. `ZIZMOR_OFFLINE`, set to
 any value, forces offline. In CI the gate runs zizmor offline and holds no token. gh reads its token from the
 system credential store, so an empty `GH_CONFIG_DIR` leaves it reachable. When the gate starts, it takes every
@@ -62,6 +61,12 @@ Prettier with `--config .prettierrc` and `--no-editorconfig`, taplo with `--conf
 `--config commitlint.config.js`. The gate clears `SHELLCHECK_OPTS` for every process it starts, since it reaches
 ShellCheck through actionlint. It clears `BUN_OPTIONS` too, since Bun reads it as arguments ahead of its own,
 where a test name pattern hides tests from a count and a preload runs code inside a tool.
+
+Each named form was measured to stop the tool's other config names, so the gate refuses none of those names.
+Prettier still reads a nested `.editorconfig` under `--config`, which `--no-editorconfig` stops. The gate holds no
+config's text against a copy in its own code. `CODEOWNERS` makes the owner's review a merge condition for every
+change to the gate or to a config a row reads, `.prettierrc`, `.prettierignore`, `.taplo.toml`, `eslint.config.ts`,
+`commitlint.config.js` and `.github/zizmor.yml` among them.
 
 Every row that walks the tree says how many files it checked, and fails when that is none. The `format`, `toml`,
 `workflows` and `renovate` rows hand their tool the tracked files, so a new file counts once `git add` names it,
@@ -82,15 +87,16 @@ Before any row, the gate refuses to run beside what Bun reads before the gate's 
   below the root, since Bun, tsc and typescript-eslint resolve a bare import from the nearest one first;
 - a `bunfig.toml` holding anything but `[install] minimumReleaseAge`, since Bun runs a `preload` it names and
   applies a `[define]` table;
-- a `scripts/tsconfig.json` that differs from the copy in `scripts/startup.ts`, and any other `tsconfig.json`,
-  `jsconfig.json`, `package.json` or `node_modules` under `scripts/`, since Bun resolves the gate's imports through
-  them;
-- a root `tsconfig.json` that differs from the copy in `scripts/expected.ts`, and any other `tsconfig.json` or
-  `jsconfig.json` on disk, at any depth outside `node_modules` and Claude Code's worktrees, with every file an
-  `extends` names held too. The root one reads `eslint.config.ts` alone, and the `typecheck` row reads both projects
-  and fails on a tracked TypeScript file neither reads. Bun applies a config's `paths` and `baseUrl` to every
-  import below it, `node_modules` code included, so either can send a package a commit hook's tool imports to
-  repository code;
+- a missing `scripts/tsconfig.json`, and any other `tsconfig.json`, `jsconfig.json`, `package.json` or
+  `node_modules` under `scripts/`, since Bun resolves the gate's imports through them;
+- a `tsconfig.json` or `jsconfig.json` on disk, at any depth outside `node_modules` and Claude Code's worktrees,
+  other than `scripts/tsconfig.json` and the root `tsconfig.json` that `scripts/expected.ts` lists, since
+  typescript-eslint reads the nearest one for each file. The root one reads `eslint.config.ts` alone, and the
+  `typecheck` row reads both projects and fails on a tracked TypeScript file neither reads;
+- `paths` or `baseUrl` in either project config or in a file its `extends` chain reads, and an `extends` naming a
+  package, an absolute path, a missing file or a file outside the checkout. Bun applies a config's `paths` and
+  `baseUrl` to every import below it, `node_modules` code included, so either can send a package a commit hook's
+  tool imports to repository code;
 - a `patchedDependencies` key in any tracked `package.json`, since a frozen install applies a patch past the
   lockfile's integrity check, and a `package.json` that does not parse;
 - a package the root `package.json` names that `node_modules` lacks, or holds through a link out of the checkout,
@@ -103,24 +109,11 @@ Before any row, the gate refuses to run beside what Bun reads before the gate's 
 - a key repeated within one object of any JSON file the gate reads, since Bun reads the first where a JSON parser
   reads the last.
 
-It also refuses a config a tool would read in place of the one the gate names, and a change to what a row skips or
-waives, so that change is always a change to the gate. A config that changes what a row reports is refused on
-disk, tracked or not, so the gate on your machine agrees with CI:
+It also refuses a config a tool reads whatever the gate names, and a waiver no tool checks. A config that changes
+what a row reports is refused on disk, tracked or not, so the gate on your machine agrees with CI:
 
-- a `.prettierrc` that differs from the copy in `scripts/startup.ts`, any other Prettier config file anywhere in the
-  tree, a `package.yaml`, and a `prettier` key in any tracked `package.json`, since Prettier loads a config written
-  as code and any plugin a config names;
-- an `eslint.config.ts` that differs from the copy in `scripts/expected.ts`, and any other `eslint.config.*`
-  anywhere, since ESLint runs the one nearest each file it lints when no config is named;
-- a `commitlint.config.js` that differs from the copy in `scripts/startup.ts`, any other `.commitlintrc*` or
-  `commitlint.config.*` anywhere, and a `commitlint` or `cosmiconfig` key in any tracked `package.json`;
-- a `.prettierignore` whose patterns differ from the shared ones in `scripts/startup.ts` and this repository's own
-  `/REPOS.md` in `scripts/expected.ts`. Every Prettier run passes `--ignore-path .prettierignore`, so `.gitignore`
-  never narrows Prettier;
-- a `.taplo.toml` that differs from the copy in `scripts/startup.ts`, and any other `.taplo.toml` or `taplo.toml`;
-- a `.github/zizmor.yml` that differs from the copy in `scripts/expected.ts`, any other `zizmor.yml` or
-  `zizmor.yaml`, and a tracked file under `.github` carrying a `zizmor: ignore[...]` comment. A waiver is an entry
-  in `.github/zizmor.yml`, under that audit's ignore list. It names `file:line`, so a move of the finding turns the
+- a tracked file under `.github` carrying a `zizmor: ignore[...]` comment. A waiver is an entry in
+  `.github/zizmor.yml`, under that audit's ignore list. It names `file:line`, so a move of the finding turns the
   gate red, except a `secrets-inherit` waiver, which names the file because the `workflows` row holds its callee;
 - any ShellCheck directive in a workflow script. The `workflows` row hands actionlint the stand-in in
   `scripts/shellcheck.ts` as its ShellCheck, which reads each script as ShellCheck does and refuses a
@@ -135,13 +128,14 @@ disk, tracked or not, so the gate on your machine agrees with CI:
 - a lefthook config beside `lefthook.yml` (`lefthook.*` or `.lefthook.*`), which lefthook reads when
   `lefthook.yml` is missing, and a tracked `lefthook-local.*` or `.lefthook-local.*`, which lefthook merges over
   `lefthook.yml`. `.gitignore` lists the local ones for your own use;
-- a `.config` directory at the root, which mise, lefthook and commitlint's cosmiconfig each read;
+- a `.config` directory at the root, which mise, lefthook and commitlint's cosmiconfig each read whatever a flag
+  names;
 - a tracked workflow whose path is not `.github/workflows/<name>.yml` exactly, and a tracked path under a `.git`,
   `.sl`, `.svn`, `.hg` or `.jj` directory, since the workflows or format row would count it and never check it;
 - a root file whose name before the first dot is a program the gate, its hooks or an install start, `bun`, `bunx`,
   `gh`, `git`, `mise` or `node`, whatever its extension. `bun.lock`, `mise.toml` and `mise.lock` pass.
 
-Each name is compared through Unicode case folding, broader than any filesystem's, so a spelling that a
+Each name is compared with its default-ignorable code points stripped and its case folded, so a spelling that a
 case-insensitive filesystem opens as a refused name is refused too. A template such as `.env.example` passes, and
 so does your own untracked env file, `.npmrc` or `lefthook-local.yml`. The gate loads nothing from `node_modules/`
 until these checks pass, so a planted package never runs ahead of its refusal.
@@ -229,8 +223,8 @@ git log --oneline v0.1.0..v0.2.0
 - `.github/workflows/`: the reusable workflows and this repository's own callers.
 - `renovate/`: the base preset and one preset per kind.
 - `scripts/`: the gate. `check.ts` is the runner, `startup.ts` holds the preflight checks, `expected.ts` holds
-  what this repository's own configs must say, `tools.ts` holds the mise expectations, `run.ts` starts every
-  process with a deadline, `github.ts` reads gh's token, `shellcheck.ts` is the ShellCheck stand-in the
+  this repository's project config paths and untyped sources, `tools.ts` holds the mise expectations, `run.ts`
+  starts every process, `github.ts` reads gh's token, `shellcheck.ts` is the ShellCheck stand-in the
   `workflows` row hands actionlint, and `tsconfig.json` is the gate's own TypeScript config.
   The `*.test.ts` files are the gate's own tests, and `stand-ins.ts` holds the programs they start in place of the
   real ones. `run.ts`, `tools.ts` and `startup.ts` are the same in every Bun repository of the set.
@@ -249,10 +243,9 @@ checks on the rest of the tree, and the break round in the alignment record prov
 
 ## Code
 
-- Every process the gate starts goes through `scripts/run.ts`, so every one carries a deadline. A process still
-  running at its deadline is killed with every process it started. A process that exits while one it started
-  still holds its output fails its row, which says so. That process runs on, since nothing the gate can reach
-  ends a process whose parent is gone, so end it yourself.
+- Every process the gate starts goes through `scripts/run.ts`. No row has a deadline of its own: CI's job timeout
+  bounds the gate, and on your machine Ctrl-C ends a hung tool. A row fails when a process its tool started still
+  holds the tool's output 10 seconds after the tool exits, and says so. That process runs on, so end it yourself.
 - `scripts/run.ts` resolves every program to an absolute path from `PATH` alone, and Bun itself runs as
   `process.execPath`. A program found through a link back into the checkout is passed over. On Windows a bare
   program name resolves from the current directory before `PATH`, so a committed `gh.bat` would otherwise run in
@@ -269,7 +262,7 @@ checks on the rest of the tree, and the break round in the alignment record prov
 - Every package runs from its absolute path under `node_modules`, and every tool `mise.toml` pins from the path
   `mise which` prints. mise, gh and git each start from an absolute `PATH` entry outside the checkout.
 - ESLint lints and Prettier formats. An ESLint rule that is wrong for this code is turned off in
-  `eslint.config.ts` with its reason beside it, and its copy in `scripts/expected.ts` changes in the same commit.
+  `eslint.config.ts` with its reason beside it.
 - An inline `eslint-disable` names its rules and gives a reason after `--`, which the eslint-comments plugin
   checks, and an unused one fails the `lint` row.
 
