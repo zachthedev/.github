@@ -499,13 +499,14 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A Bun gate refuses a tracked env file Bun loads on its own, `.env` and its variants, at any depth, because Bun
   loads it into the gate's environment (Known defects). The names match without regard to case. A template such as
   `.env.example` passes.
-- Bun also loads `.env`, `.env.local` and `.env.development` into each tool it runs, and only a `bunfig.toml`
-  `env = false` stops that. `bunfig.toml` stays the cooldown alone (Updates), so a contributor's own untracked env
-  file is the named residual. An env value can turn a row red, as `PRETTIER_EXPERIMENTAL_CLI` does, and runs no
-  code.
+- Every `bun <file>` start in a gate row, the gate's own entry, a hook or a check script passes `--no-env-file`, so
+  Bun loads no `.env` into it. Bun otherwise loads `.env`, `.env.local` and `.env.development` into each tool it
+  runs, and an env value can turn a row red, as `PRETTIER_EXPERIMENTAL_CLI` does. A dev or deploy script keeps env
+  loading. `bunfig.toml` stays the cooldown alone (Updates), so it never sets `env = false`.
 - Before its first row, a Bun gate also refuses what changes which code runs before or inside it:
   - a `bunfig.toml` other than the cooldown, compared whole, because a top-level `preload`, a `[test] preload`
-    and `[define]` each run or rewrite code;
+    and `[define]` each run or rewrite code. `bun --config=<file> <entry>`, with the equals sign, drops the
+    checkout's `bunfig.toml`, while `-c <file>`, `--config <file>` and `-c=<file>` still run its preload;
   - a `scripts/` directory without its own `tsconfig.json`, compared whole, or one holding a `jsconfig.json`, a
     `package.json` or a `node_modules`, because the root `tsconfig.json`'s `paths`, `extends` and `baseUrl`
     otherwise redirect the gate's imports;
@@ -1410,10 +1411,11 @@ bears on, the defect, and the condition that removes it.
   and `[vars]`, even from a home with no trust state, while `mise which` refuses an untrusted config.
   `MISE_NO_ENV` and `MISE_NO_HOOKS` leave `[vars]` running, so the `mise.toml` allow-list is the control, not an
   environment pin. Removed once `mise install` refuses an untrusted config as `mise which` does.
-- mise global config (Tools, Gate): Bun loads a committed `.env` into the gate's environment. That file can name
-  `MISE_GLOBAL_CONFIG_FILE`, which mise honors whatever the config-name pins say. `jdx/mise-action` trusts the
-  whole workspace, so a hook in any repository file then runs. The environment allow-list and the `.env` refusal
-  exist for this. Removed once mise holds `MISE_GLOBAL_CONFIG_FILE` to the config-name pins.
+- mise global config (Tools, Gate): Bun loads a committed `.env` into any process it starts without
+  `--no-env-file`. That file can name `MISE_GLOBAL_CONFIG_FILE`, which mise honors whatever the config-name pins
+  say. `jdx/mise-action` trusts the whole workspace, so a hook in any repository file then runs. The environment
+  allow-list, `--no-env-file` and the `.env` refusal exist for this. Removed once mise holds
+  `MISE_GLOBAL_CONFIG_FILE` to the config-name pins.
 - Immutable releases (Tags): an immutable release locks the tag with its assets. The cleanup in
   `gh release delete --cleanup-tag` is a ref deletion, so it is refused. A bad release leaves the tag on the
   wrong commit with the version spent. Removed once a fork of release-please tracks burned version tags and
