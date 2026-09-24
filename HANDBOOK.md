@@ -375,10 +375,10 @@ API reports the value only on a `required_reviewers` rule.
   `rules.secrets-inherit.ignore: [cd.yml, deps.yml]` for the files that pass it (Gate). Every other caller passes
   nothing through.
 - No zizmor waiver binds the callee. A `file:line` entry matches any location the finding reports, which for
-  `secrets-inherit` is the `uses:` line or the `secrets:` line, not the lines between. Every gate and the shared
-  `workflows` job therefore fail unless each job passing `secrets: inherit` calls
-  `zachthedev/.github/.github/workflows/`. They also fail when a file the waiver names holds no such call, so a
-  waiver never outlives its job.
+  `secrets-inherit` is the `uses:` line or the `secrets:` line, not the lines between. The shared `workflows`
+  job therefore fails unless each job passing `secrets: inherit` calls `zachthedev/.github/.github/workflows/`,
+  as the one CI copy (Gate). It also fails when a file the waiver names holds no such call, so a waiver never
+  outlives its job.
 - That hold reads a zizmor pass run with `--no-config --no-ignores`. `--no-config` alone still honors an inline
   `# zizmor: ignore[secrets-inherit]`, which hides the job, and `--no-ignores` drops config ignores and inline
   comments alike. The hold then stands on its own, beside the inline refusal (Gate).
@@ -475,12 +475,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   current directory or a tracked tool directory before `PATH`.
 - Every gate hands its children a `PATH` with no entry inside the checkout, so a child resolving a bare name
   cannot reach one either.
-- Where a stack's spawn searches such a directory, the gate also refuses a file named like a program it,
-  its hooks or an install start: `bun`, `bunx`, `gh`, `git`, `mise` or `node`, with an executable extension or
-  none. The preflight refuses one before any row, so no spawn reaches it. Per stack:
+- Where a stack's spawn searches such a directory, a file named like a program a gate, its hooks or an install
+  start is refused before a merge (the one CI copy, below): `bun`, `bunx`, `gh`, `git`, `mise` or `node`, with an
+  executable extension or none. Per stack:
   - Bun: `Bun.spawnSync` searches the current directory first, in CreateProcess's order. `scripts/run.ts`
-    therefore resolves every program itself and runs Bun as `process.execPath`, and the gate refuses tool-named
-    files at the root, committed or not.
+    therefore resolves every program itself and runs Bun as `process.execPath`.
   - C#: Cake's tool locator globs `./tools/**/<name>` before `PATH`. Each tool therefore resolves through a
     `PATH`-only lookup passed to `WithToolPath`, and the gate refuses tool-named files under `tools/` and at the
     root.
@@ -494,10 +493,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     outside the checkout, accepts `.exe` alone on Windows, and passes the same narrowed `PATH` to every child.
 - Bun's script runner puts the checkout's `node_modules/.bin` first on `PATH`, so under `bun run` a committed
   `node_modules/.bin/bun` would replace the gate itself. In a Bun repository CI therefore installs with
-  `bun install --frozen-lockfile --ignore-scripts`, the shared `commits` job's install included, and the gate
-  refuses any tracked path with a `node_modules` segment, at any depth, before its first row. `bun run check` stays
-  the documented command. CI and the `pre-push` hook call the gate script directly, as `bun scripts/check.ts`,
-  because a bare `bun <file>` skips the script runner. The refusal therefore runs before every merge.
+  `bun install --frozen-lockfile --ignore-scripts`, the shared `commits` job's install included, and a tracked
+  `node_modules` is refused before a merge (the one CI copy, below). `bun run check` stays the documented command.
+  CI and the `pre-push` hook call the gate script directly, as `bun scripts/check.ts`, because a bare
+  `bun <file>` skips the script runner.
 - A pull request controls its own gate code: `package.json` scripts, `check.ts`, `cake.cs`, an MSBuild `Exec`, a
   `build.rs`. No gate therefore makes running an untrusted pull request safe, in CI or on a contributor's
   machine. In CI, GitHub's approval for a fork's pull request and the gate job's read-only, tokenless shape
@@ -512,6 +511,13 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   one, and a root `tsconfig.json` with `paths` or `baseUrl` redirects that tool's imports. Committing on
   an unread branch runs that branch's `commitlint.config.js` from the commit hook
   before any check, as a preload runs before the hook's tool.
+- The shared `commits` and `workflows` jobs are the one CI copy of the refusals that block a merge: a tracked env
+  file, a tracked `node_modules`, a `patchedDependencies` key, a `bunfig.toml` key, tsconfig `paths` and
+  `baseUrl`, a duplicated JSON key, a root file named like a program, an inline zizmor waiver and the
+  `secrets: inherit` callee hold. A pull request cannot edit them. A gate need not repeat them once its
+  repository pins the `.github` release that carries them. The gate keeps what no shared job reads and what keeps
+  a local run in step with CI: the mise assertions, the `scripts/` shield, the tsconfig location rule, every
+  on-disk config-name refusal, the stand-in, the `shell:` hold, and the Go module and Rust toolchain checks.
 - `CODEOWNERS`, `* @zachthedev`, with `require_code_owner_review` on `default-branch`, makes the owner's review a
   merge condition for every change to gate code or to a config a row reads. The owner's own pull request merges
   through the admin bypass (Branch rules).
@@ -519,20 +525,20 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   from an ignore file, it reads the committed file.
 - `eslint.config.ts` and `commitlint.config.js` are code the rows and the commit hook run. The `commits` job runs
   a pull request's `commitlint.config.js` in CI, contained by the same read-only, tokenless shape as the gate job.
-- A Bun gate refuses a tracked env file Bun loads on its own, `.env` and its variants, at any depth, because Bun
-  loads it into the gate's environment (Known defects). The names match without regard to case. A template such as
-  `.env.example` passes.
+- A tracked env file Bun loads on its own, `.env` and its variants, is refused before a merge (the one CI copy,
+  above), because Bun loads it into the gate's environment (Known defects). The names match without regard to
+  case. A template such as `.env.example` passes.
 - Every `bun <file>` start in a gate row, the gate's own entry, a hook or a check script passes `--no-env-file`, so
   Bun loads no `.env` into it. Bun otherwise loads `.env`, `.env.local` and `.env.development` into each tool it
   runs, and an env value can turn a row red, as `PRETTIER_EXPERIMENTAL_CLI` does. A dev or deploy script keeps env
   loading. `bunfig.toml` stays the cooldown alone (Updates), so it never sets `env = false`.
-- Before its first row, a Bun gate also refuses what changes which code runs before or inside it:
-  - a `bunfig.toml` holding any key but `[install] minimumReleaseAge`, because a top-level `preload`, a
-    `[test] preload` and `[define]` each run or rewrite code. `bun --config=<file> <entry>`, with the equals sign,
-    drops the checkout's `bunfig.toml`, while `-c <file>`, `--config <file>` and `-c=<file>` still run its preload;
-  - a `scripts/` directory without its own `tsconfig.json`, or one holding a `jsconfig.json`, a `package.json` or
-    a `node_modules`, because the root `tsconfig.json`'s `paths`, `extends` and `baseUrl`
-    otherwise redirect the gate's imports.
+- A `bunfig.toml` holding any key but `[install] minimumReleaseAge` is refused before a merge (the one CI copy,
+  above), because a top-level `preload`, a `[test] preload` and `[define]` each run or rewrite code.
+  `bun --config=<file> <entry>`, with the equals sign, drops the checkout's `bunfig.toml`, while `-c <file>`,
+  `--config <file>` and `-c=<file>` still run its preload.
+- Before its first row, a Bun gate refuses a `scripts/` directory without its own `tsconfig.json`, or one holding
+  a `jsconfig.json`, a `package.json` or a `node_modules`, because the root `tsconfig.json`'s `paths`, `extends`
+  and `baseUrl` otherwise redirect the gate's imports.
 - Nothing refuses a tracked `.npmrc`, and a reviewer does. A registry it names fails every package's integrity
   check against `bun.lock`.
 - Those checks import only built-in modules, so no package loads before they pass.
@@ -541,15 +547,16 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   install is the contributor's to refresh (Troubleshooting in `CONTRIBUTING.md`).
 - A Bun gate's ESLint refuses an import attribute other than `type: 'json'`. Bun runs any file as a module under
   `with { type: 'js' }`, a `.txt` included, and no row reads such a file.
-- Every gate refuses a `patchedDependencies` key in any tracked `package.json`. A patch rewrites a pinned
-  package's code under a frozen, script-free install and passes the lockfile's integrity check. A scope as narrow
-  as the gate's own imports misses lint configs and tools.
+- A `patchedDependencies` key in any tracked `package.json` is refused before a merge (the one CI copy, above).
+  A patch rewrites a pinned package's code under a frozen, script-free install and passes the lockfile's
+  integrity check. A scope as narrow as the gate's own imports misses lint configs and tools.
 - A Bun gate refuses a `tsconfig.json` or `jsconfig.json` on disk, tracked or not, at any depth outside
   `node_modules` and `.claude/worktrees`, except at the paths the gate names. typescript-eslint's project service
   reads the nearest one for each file, so this is a location rule for a tool with no named config form, with no
   hold on the text.
-- The gate walks each named one along its `extends` chain. It refuses `paths` or `baseUrl`, and an `extends`
-  naming a package, an absolute path, a missing file or a file outside the checkout. A `noCheck: true` lets the
+- Each project config is walked along its `extends` chain before a merge (the one CI copy, above). `paths` or
+  `baseUrl` is refused, and so is an `extends` naming a package, an absolute path, a missing file or a file
+  outside the checkout. A `noCheck: true` lets the
   typecheck row pass over a type error while it prints its full count, so a project config is gate config under
   `CODEOWNERS`. Bun applies the root one to a tool's own imports, so a `paths` entry for a package commitlint
   imports ran repository code in the commit hook. A project aliases through `package.json` `imports`, whose `#`
@@ -558,9 +565,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   or on disk at the root, since none of its tools reads a nested one.
 - Every tracked `tsconfig.json` and `jsconfig.json` is plain JSON with no comments, because every gate and the
   `commits` job read one with a strict parser.
-- Every gate refuses a duplicated key, at any depth, in any JSON file it parses to decide a refusal. Bun's own
-  reader keeps the first copy, while `JSON.parse` and Go's `encoding/json` keep the last. A duplicate therefore
-  lets the gate pass one value while Bun uses the other.
+- A duplicated key, at any depth, in any JSON file read to decide a refusal is refused (the one CI copy, above).
+  Bun's own reader keeps the first copy, while `JSON.parse` and Go's `encoding/json` keep the last. A duplicate
+  therefore lets a check pass one value while Bun uses the other.
 - A config that changes a gate row's result is refused when it is present on disk, committed or not, so a local
   gate agrees with CI. A personal file, a `lefthook-local` or `.lefthook-local` file in any form or an env file,
   is refused only when committed, and `.gitignore` names it.
@@ -648,8 +655,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - An ignore file a row reads, such as `.prettierignore` or the excludes in `.taplo.toml`, a lint config that
   carries exclusions, rules or the linter list, and `.github/zizmor.yml` each narrow what a row checks, so each
   is gate config under `CODEOWNERS` (above).
-- Every gate, and the shared `workflows` job, refuses a `zizmor: ignore[` comment in a tracked file under
-  `.github`, so every waiver lives in `.github/zizmor.yml`. An inline comment waives any audit on its line,
+- The shared `workflows` job refuses a `zizmor: ignore[` comment in a tracked file under `.github` (the one CI
+  copy, above), so every waiver lives in `.github/zizmor.yml`. An inline comment waives any audit on its line,
   `unpinned-uses` included.
 - A waiver in `.github/zizmor.yml` names `file:line`, as an `artipacked` waiver does, so an edit that moves the
   finding turns the gate red and the waiver is read again. `secrets-inherit` alone takes the file form,
@@ -831,11 +838,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `.github/actions`, and it never walks `node_modules`, a worktree or a submodule. A composite action outside
   `.github` is named as a second file input, with the reason beside it.
 - The shared `workflows` job runs beside the caller's gate, not after it, so a red gate stops nothing there.
-  Before any mise command reads the checkout, the job refuses what the gate refuses: another mise config, lock or
-  rc file, a root file named like a program a gate starts, and a link at the root or under `.config`, `.mise` or
-  `mise`. Its `Refused keys` step then reads `mise.toml` and `mise.lock` with Python's `tomllib` and refuses any
-  key outside the gate's allow-lists (Tools), `[settings.aqua]` included, which holds `github_attestations`
-  alone. A job holding a token loads no `mise.toml` whose keys are unchecked.
+  Before any mise command reads the checkout, the job refuses another mise config, lock or rc file, a root file
+  named like a program a gate starts, and a link at the root or under `.config`, `.mise` or `mise`. Its
+  `Refused keys` step then reads `mise.toml` and `mise.lock` with Python's `tomllib` and refuses any key outside
+  the gate's allow-lists (Tools), `[settings.aqua]` included, which holds `github_attestations` alone. A job
+  holding a token loads no `mise.toml` whose keys are unchecked.
 - The step also refuses a form the gate does not read: a `[tools]` entry that is neither a version nor a table,
   the `[[tools.<name>]]` array of tables included, a `[tools]`, `[tool_config]` or `[settings]` that is not a
   table, and a `mise.lock` tool that is not a list of tables. mise reads an array-of-tables entry, a postinstall
