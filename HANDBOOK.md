@@ -493,16 +493,21 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     `--ignore-scripts` install still applies it;
   - a tracked `.npmrc`, because it redirects even the frozen, script-free install.
 - Those checks import only built-in modules, so no package loads before they pass.
-- Every gate refuses any commitlint config but the root `commitlint.config.js`: a `.commitlintrc*`, another
-  `commitlint.config.*` and a `package.json` `commitlint` key. commitlint searches those first, so one would
-  replace the shared config.
+- Every gate tool that searches for its own config runs with the one config named explicitly. The tools are
+  Prettier, commitlint, golangci-lint, ESLint, taplo and zizmor, and rustfmt and clippy in Rust.
+- The gate refuses every other name such a tool searches, at every depth it searches, without regard to case. A
+  config the tool finds first replaces the shared one: a committed `.golangci.json` beside `.golangci.yml`
+  replaced the lint config and hid a `govet` finding.
+  - Prettier: every config file name but the root `.prettierrc`, a `package.json` `prettier` key and a
+    `package.yaml`.
+  - commitlint: a `.commitlintrc*`, a `commitlint.config.*` other than the root `commitlint.config.js`, a
+    `package.json` `commitlint` key and a `package.yaml`.
 - Every row that walks the tree prints what it checked, the files or their count, and fails on zero. A row that
   checked nothing reads green otherwise: taplo and Prettier each exit 0 on empty input.
   - The actionlint row names the workflow files. With no file argument actionlint also needs a `.git`, so it fails
     in an archive copy of the tree.
   - The zizmor row checks the count of files it reports as completed.
-  - The toml row fails unless taplo's own list of found files matches the files the row handed it. taplo's own
-    walk skips a name such as `docs/BAD.TOML`, which that comparison catches.
+  - The toml row fails unless taplo's own list of found files matches the files the row handed it (Formatting).
 - Every ignore file a row reads, such as `.prettierignore` and the excludes in `.taplo.toml`, is compared whole
   against a constant in that repository's gate. A change to what a row skips is then a gate change a reviewer
   sees.
@@ -573,7 +578,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   lint and the commit hook keep the caller's ignores. A `Revert "..."` or merge subject fails the subject lint.
   The revert form (Commits) and squash-only merging make that right, and a pull request GitHub's revert button
   opens passes once it is retitled.
-- The workflow refuses any other commitlint config before its install, as every gate does (Gate).
+- Before its install, the workflow refuses the commitlint configs every gate refuses (Gate), at any depth and
+  without regard to case. It reads every tracked `package.json`, nested ones included, for a `commitlint` key.
 - Before its install, the `commits` workflow refuses any tracked path with a `node_modules` segment, nested ones
   included, without regard to case. `bun install` keeps a tracked package directory at the locked version, and
   `bunx` then runs that copy. The job runs beside every caller's gate, whatever the caller's stack, so it holds
@@ -715,20 +721,22 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - One exact Prettier version across every repository, never a range. A bump is one pull request per repository.
 - `.editorconfig` agrees with the config for every file Prettier owns.
 - Every Prettier run, the row's, a hook's and the `format` script's, passes `--config .prettierrc` and
-  `--ignore-path .prettierignore`, with no glob. `--config` stops every other config search. `--ignore-path` keeps
+  `--ignore-path .prettierignore`, with no glob. `--config` names the one config (Gate). `--ignore-path` keeps
   `.gitignore` from narrowing the check, so `.prettierignore` itself names `.claude/worktrees/` and every other
   local-only path. A generated file the owning tool formats goes in `.prettierignore` too.
 - A Prettier config can name a plugin, and Prettier loads it before it checks anything. The gate therefore
-  parses `.prettierrc` as JSON and compares it whole against the identical file's values, so key order and
-  whitespace pass and a file that does not parse is refused. It refuses any other Prettier config file at any
-  depth and in any case, a `package.json` `prettier` key and a `package.yaml`.
+  compares `.prettierrc` whole against the identical file, by its bytes or by its parsed JSON values. Either
+  comparison refuses a changed value or a file that does not parse.
 - C# is formatted by CSharpier at the same width.
 - taplo formats every TOML file in every kind, from `.taplo.toml`. A repository carrying TOML pins taplo in
   `mise.toml` and runs it as a gate row.
-- The taplo row checks what `.taplo.toml` includes, never a list of files by name. It passes
-  `--config .taplo.toml`, because a bare `taplo fmt --check` checks zero files and exits 0 when `TAPLO_CONFIG`
-  names a config matching nothing.
-- taplo reads no `.gitignore`, so the exclude list in `.taplo.toml` is the one control over what it walks.
+- The taplo row lists the tracked TOML files itself, folding case, and hands them to taplo by name, because
+  taplo's own walk skips a name such as `docs/BAD.TOML`. An exclude in `.taplo.toml` that drops a named file then
+  fails the found-list comparison (Gate), where taplo alone exits 0.
+- The row also passes `--config .taplo.toml`, because a bare `taplo fmt --check` checks zero files and exits 0
+  when `TAPLO_CONFIG` names a config matching nothing.
+- taplo reads no `.gitignore`, so the excludes in `.taplo.toml` are the one control over what a bare `taplo fmt`
+  walks.
 - A repository joining the standard pays one formatting-only commit touching every file Prettier owns.
 
 ## Updates
