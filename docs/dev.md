@@ -8,6 +8,9 @@
 - [gh](https://cli.github.com), optional. When `gh auth token` succeeds, the gate runs zizmor online; otherwise
   zizmor runs offline and no token is needed.
 
+When a process outlives its deadline, the gate also starts the system's own `taskkill` on Windows, or `ps`
+elsewhere, to end it and every process it started.
+
 ## First run
 
 ```sh

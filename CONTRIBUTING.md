@@ -46,21 +46,36 @@ The gate starts git with no system or global config. In a checkout another accou
 repository as dubious ownership, and the gate stops. Fix it by making your account the directory's owner. The gate
 reads no `safe.directory` entry, by design.
 
+Every row that walks the tree says how many files it checked, and fails when that is none. The `format`, `toml`,
+`workflows` and `renovate` rows hand their tool the tracked files, so a new file counts once `git add` names it,
+and `.gitignore` never hides a tracked one. The `toml` row checks that taplo reports each file it was handed, and
+the `workflows` row that actionlint and zizmor each report every tracked workflow.
+
 Before any row, the gate's preflight refuses to run beside what Bun or Prettier reads before a row starts:
 
 - a tracked env file Bun loads, in any case;
 - a tracked `.npmrc`, which names the registry `bun install` fetches from;
-- a tracked path under a `node_modules` directory at any depth;
+- a tracked `node_modules`, or a tracked path under one, at any depth;
 - a `bunfig.toml` holding anything but `[install] minimumReleaseAge`, since Bun runs a `preload` it names and
   applies a `[define]` table;
 - a `scripts/tsconfig.json` that differs from the copy in `scripts/startup.ts`, and any other `tsconfig.json`,
   `jsconfig.json`, `package.json` or `node_modules` under `scripts/`, since Bun resolves the gate's imports through
   them;
-- a `patchedDependencies` entry in `package.json` for a package the gate's scripts import;
+- a `patchedDependencies` entry in `package.json` for a package the gate's scripts import, and a `package.json`
+  that does not parse;
 - a `.prettierrc` that differs from the copy in `scripts/startup.ts`, any other Prettier config file anywhere in the
   tree, in any case, a `prettier` key in any `package.json` and a `package.yaml`, since Prettier loads a config
   written as code and any plugin a config names. The `format` row and the `format` script pass
-  `--config .prettierrc`, which stops Prettier's search for any other.
+  `--config .prettierrc`, which stops Prettier's search for any other;
+- a root file whose name before the first dot is a program the gate, its hooks or an install start, `bun`, `bunx`,
+  `gh`, `git`, `mise` or `node`, whatever its extension. `bun.lock`, `mise.toml` and `mise.lock` pass.
+
+It also refuses a change to what a row skips or waives, so that change is always a change to the gate:
+
+- a `.prettierignore` whose patterns differ from the ones `scripts/startup.ts` lists. Every Prettier run passes
+  `--ignore-path .prettierignore`, so `.gitignore` never narrows Prettier;
+- a `.taplo.toml` or `.github/zizmor.yml` that differs from the copy in `scripts/startup.ts`;
+- a tracked `.github/actionlint.yaml` or `.github/actionlint.yml`, which can silence any actionlint finding.
 
 A template such as `.env.example` passes, and so does your own untracked env file or `.npmrc`. The gate loads
 nothing from `node_modules/` until these checks pass, so a planted package never runs ahead of its refusal. The
@@ -161,19 +176,20 @@ None. The gate's rows are the checks, and the break round in the alignment recor
 
 ## Code
 
-- Every process the gate starts goes through `scripts/run.ts`, so every one carries a deadline.
+- Every process the gate starts goes through `scripts/run.ts`, so every one carries a deadline. At the deadline
+  the gate kills the process and every process it started.
 - `scripts/run.ts` resolves every program to an absolute path from `PATH` alone, and Bun itself runs as
   `process.execPath`. On Windows a bare program name resolves from the current directory before `PATH`, so a
-  committed `gh.bat` would otherwise run in place of gh. The gate refuses a root file whose name before the first
-  dot is a program it, its hooks or an install start, `bun`, `bunx`, `gh`, `git`, `mise` or `node`, whatever its
-  extension. `bun.lock`, `mise.toml` and `mise.lock` are the named exceptions.
+  committed `gh.bat` would otherwise run in place of gh, which the preflight refuses ([The gate](#the-gate)).
+- Every process the gate starts gets `PATH` narrowed to its absolute entries outside the checkout, so a program
+  one starts by name never resolves inside it.
 - The gate starts mise with an environment built from an allow-list, never the one it inherited.
 - Bun's script runner puts `node_modules/.bin` first on `PATH`, so under `bun run` a committed
   `node_modules/.bin/bun` would replace the gate. CI installs with `bun install --frozen-lockfile --ignore-scripts`,
   and CI and the push hook call `bun scripts/check.ts` directly, which skips the script runner, so the preflight's
   `node_modules` refusal runs before every merge.
 - A row throws with the tool's own output, so a red row reads the same as running the tool by hand.
-- Every package runs from its path under `node_modules`, and every tool `mise.toml` pins from the path
+- Every package runs from its absolute path under `node_modules`, and every tool `mise.toml` pins from the path
   `mise which` prints. mise, gh and git each start from an absolute `PATH` entry outside the checkout.
 - ESLint lints and Prettier formats. An ESLint rule that is wrong for this code is turned off in
   `eslint.config.ts` with its reason beside it.
