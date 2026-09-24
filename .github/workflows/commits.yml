@@ -88,9 +88,10 @@ jobs:
           fi
       # Bun reads bunfig.toml at the root each time it starts, and bun install reads its [install]
       # table. A preload there runs code inside commitlint before its first line, and no step here
-      # names another config. So a tracked one, matched without regard to case, holds the one
-      # shape the set allows: [install] minimumReleaseAge alone, at three days or more. python3's
-      # tomllib reads it, and a file it cannot parse, or one that is not a plain file, is refused.
+      # names another config. So a tracked one, matched without regard to case, carries one key
+      # at most: [install] minimumReleaseAge, whatever its value, as the caller's gate allows.
+      # python3's tomllib reads it, and a file it cannot parse, or one that is not a plain file,
+      # is refused.
       - name: Refused bunfig
         run: |
           python3 - <<'PY'
@@ -110,12 +111,16 @@ jobs:
               except (OSError, tomllib.TOMLDecodeError) as error:
                   found.append(f"{name!r} does not parse as TOML: {error}")
                   continue
-              install = held.get("install")
-              age = install.get("minimumReleaseAge") if isinstance(install, dict) else None
-              if type(age) is not int or age < 259200 or list(held) != ["install"] or list(install) != ["minimumReleaseAge"]:
-                  found.append(f"{name!r} holds more than [install] minimumReleaseAge at 259200 or higher")
+              install = held.get("install", {})
+              extra = [key for key in held if key != "install"]
+              if isinstance(install, dict):
+                  extra += [f"install.{key}" for key in install if key != "minimumReleaseAge"]
+              else:
+                  found.append(f"{name!r} carries install as something other than a table")
+              if extra:
+                  found.append(f"{name!r} carries {', '.join(map(repr, extra))}")
           for finding in found:
-              print(f"::error::{finding}. Bun reads bunfig.toml before commitlint runs, and the one shape allowed is the install cooldown.")
+              print(f"::error::{finding}. Bun reads bunfig.toml before commitlint runs, and the one key allowed is [install] minimumReleaseAge.")
           sys.exit(1 if found else 0)
           PY
       # Bun runs commitlint and applies a tsconfig.json or jsconfig.json to its own imports, so a

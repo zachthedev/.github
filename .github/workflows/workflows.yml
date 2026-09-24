@@ -67,9 +67,9 @@ jobs:
       # This job runs beside the caller's gate, not after it, so a red gate stops nothing here.
       # The job therefore refuses what the gate refuses, before any mise command reads the
       # checkout: every mise config, lock or rc file other than mise.toml and mise.lock, in the
-      # root and in .config, every file at the root named like a program a gate starts, with any
-      # extension, which Windows runs from the current directory ahead of PATH under any
-      # extension PATHEXT lists, and every link at the root or
+      # root and in .config, every file at the root named like a program a gate, its hooks or an
+      # install start, or like bunx, with any extension, which Windows runs from the current
+      # directory ahead of PATH under any extension PATHEXT lists, and every link at the root or
       # under .config, .mise or mise, which mise would follow past the names. Names compare
       # without regard to case, as they do on Windows and macOS. mise.semver.toml and its lock
       # are a Rust repository's named exception, and MISE_ENV above keeps mise from reading
@@ -81,7 +81,8 @@ jobs:
               -o -iname .mise.toml -o -iname .mise.lock -o -iname '.mise.*.toml' -o -iname '.mise.*.lock' \
               -o -iname 'mise.*.toml' -o -iname 'mise.*.lock' \) ! -name mise.semver.toml ! -name mise.semver.lock -print
             find . -mindepth 1 -maxdepth 1 ! -type d \( -iname gh -o -iname 'gh.*' -o -iname bun -o -iname 'bun.*' \
-              -o -iname git -o -iname 'git.*' -o -iname mise -o -iname 'mise.*' \) \
+              -o -iname git -o -iname 'git.*' -o -iname mise -o -iname 'mise.*' -o -iname bunx -o -iname 'bunx.*' \
+              -o -iname node -o -iname 'node.*' \) \
               ! -name bun.lock ! -name mise.toml ! -name mise.lock ! -name mise.semver.toml ! -name mise.semver.lock -print
             find . -mindepth 2 -maxdepth 2 -ipath './.config/mise*' -print
             find . -mindepth 1 -maxdepth 1 -type l -print

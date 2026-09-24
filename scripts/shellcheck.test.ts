@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, setDefaultTimeout, test } from 'bun:test';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { isolate, StandIns } from './stand-ins';
 
 // Every case starts Bun twice, and a loaded machine starts one in seconds, so a
@@ -9,6 +9,14 @@ setDefaultTimeout(30_000);
 
 /** The module under test, which actionlint starts once per workflow script. */
 const STAND_IN = join(import.meta.dir, 'shellcheck.ts');
+
+/** The running Bun's directory, which every case starts the stand-in in. */
+const BUN_DIRECTORY = dirname(process.execPath);
+
+// A path relative to Bun's own directory reaches Bun on every layout. No
+// relative path reaches Bun from a checkout on another Windows drive. There
+// path.relative returns the absolute path, which the stand-in accepts.
+const RELATIVE_BUN = `.${sep}${basename(process.execPath)}`;
 
 /** The arguments actionlint 1.7.12 hands ShellCheck for a bash script. */
 const SHELLCHECK_ARGS: readonly string[] = [
@@ -23,12 +31,13 @@ const SHELLCHECK_ARGS: readonly string[] = [
   '-',
 ];
 
-// A program in ShellCheck's place. It records its arguments, the names in its
-// environment and the bytes on its stdin, read unless FAKE_SKIP_READ is set,
-// then prints and exits as the FAKE_ variables say.
+// A program in ShellCheck's place. It records its working directory, its
+// arguments, the names in its environment and the bytes on its stdin, read
+// unless FAKE_SKIP_READ is set. Then it prints and exits as the FAKE_
+// variables say.
 const FAKE = `import { writeFileSync } from 'node:fs';
 const stdin = process.env.FAKE_SKIP_READ === undefined ? new Uint8Array(await Bun.stdin.arrayBuffer()) : new Uint8Array();
-writeFileSync(process.env.FAKE_RECORD, JSON.stringify({ args: process.argv.slice(2), names: Object.keys(process.env), stdin: [...stdin] }));
+writeFileSync(process.env.FAKE_RECORD, JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2), names: Object.keys(process.env), stdin: [...stdin] }));
 process.stdout.write(process.env.FAKE_STDOUT ?? '');
 process.stderr.write(process.env.FAKE_STDERR ?? '');
 process.exitCode = Number(process.env.FAKE_EXIT ?? '0');
@@ -36,6 +45,7 @@ process.exitCode = Number(process.env.FAKE_EXIT ?? '0');
 
 /** What the fake recorded about the one start of it. */
 interface Recorded {
+  readonly cwd: string;
   readonly args: readonly string[];
   readonly names: readonly string[];
   readonly stdin: readonly number[];
@@ -75,7 +85,7 @@ afterEach(() => {
   restore();
 });
 
-/** Starts the stand-in the way actionlint does, with `script` on stdin, in place of `program` when given. */
+/** Starts the stand-in as actionlint does, in Bun's directory, with `script` on stdin and `program` as ShellCheck. */
 function standIn(
   script: string | Uint8Array,
   env: Readonly<Record<string, string>> = {},
@@ -83,6 +93,7 @@ function standIn(
 ): Ended {
   const child = Bun.spawnSync({
     cmd: [process.execPath, '--no-env-file', STAND_IN, ...program, ...SHELLCHECK_ARGS],
+    cwd: BUN_DIRECTORY,
     env: { ...process.env, FAKE_RECORD: record, ...env },
     stdin: typeof script === 'string' ? new TextEncoder().encode(script) : script,
     stdout: 'pipe',
@@ -219,17 +230,27 @@ test('SHELLCHECK_OPTS reaches ShellCheck in no spelling, and every other variabl
 
 /* ///// Failing closed ///// */
 
+test("ShellCheck starts in Bun's directory, where the relative path names the running Bun", () => {
+  expect(isAbsolute(RELATIVE_BUN)).toBe(false);
+  expect(resolve(BUN_DIRECTORY, RELATIVE_BUN)).toBe(process.execPath);
+
+  standIn('echo "$V"\n');
+
+  const ran = recorded();
+  expect(ran).toBeDefined();
+  // getcwd reports a working directory by its real path, and process.execPath
+  // can keep a link, so both sides are compared resolved.
+  expect(realpathSync.native(ran?.cwd ?? '')).toBe(realpathSync.native(BUN_DIRECTORY));
+});
+
 // actionlint reads an exit other than 0 with nothing on stdout as a failed
 // run, so each of these fails the row rather than passing a script unread. The
-// relative path names a Bun that exists, so only the stand-in's own check
-// refuses it.
+// relative path names the running Bun from the directory the stand-in starts
+// in, so only the stand-in's own check refuses it.
 test.each([
   ['no ShellCheck named', (): string[] => []],
   ['ShellCheck named by a bare name', (): string[] => ['shellcheck']],
-  [
-    'ShellCheck named by a relative path that exists',
-    (): string[] => [relative(process.cwd(), process.execPath), '--no-env-file', fake],
-  ],
+  ['ShellCheck named by a relative path that exists', (): string[] => [RELATIVE_BUN, '--no-env-file', fake]],
   ['a ShellCheck that does not exist', (): string[] => [join(import.meta.dir, 'no-such-shellcheck.exe')]],
 ] as const)('%s exits 2 with nothing on stdout, and starts nothing', (_label: string, program: () => string[]) => {
   const ended = standIn('echo "$V"\n', {}, program());
