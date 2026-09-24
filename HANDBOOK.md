@@ -1064,8 +1064,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - After a manual first publish, the owner creates the `<crate>-v<version>` tags at the commit each crate's
     `.cargo_vcs_info.json` names. release-plz never tags a version already on crates.io. A squash merge and the
     branch's deletion leave that commit unreachable, so without the tags release-plz walks the whole history and
-    proposes a spurious release. The tag ruleset admits the releaser app alone, so the tags are an owner step in
-    the first-publish procedure.
+    proposes a spurious release.
+  - The tag ruleset admits the releaser app alone, so those tags are an owner step. The owner sets the ruleset to
+    `disabled`, creates each tag with `POST /repos/{owner}/{repo}/git/refs`, sets it back to `active` and reads it
+    back. A git push never creates them, because it runs the `pre-push` gate while the ruleset is disabled and
+    widens that window to minutes.
 
 ## Versioning
 
