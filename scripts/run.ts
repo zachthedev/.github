@@ -1,67 +1,5 @@
-import { accessSync, constants, readFileSync, realpathSync, statSync } from 'node:fs';
+import { accessSync, constants, realpathSync, statSync } from 'node:fs';
 import { delimiter, extname, isAbsolute, join, sep } from 'node:path';
-
-/** The deadline for the one git call the tracked-file check makes. */
-const GIT_TIMEOUT_MS = 60_000;
-
-/**
- * The files Bun 1.4.2 loads into the environment of `bun run` from the
- * directory it starts in: the plain pair and each mode's pair. Bun matches
- * them without regard to case where the filesystem does.
- */
-const BUN_ENV_FILES: readonly string[] = [
-  '.env',
-  '.env.local',
-  '.env.development',
-  '.env.development.local',
-  '.env.production',
-  '.env.production.local',
-  '.env.test',
-  '.env.test.local',
-];
-
-/** The file bun install reads a registry and its scopes from, in the directory it starts in. */
-const NPMRC = '.npmrc';
-
-/**
- * The config files actionlint reads from `.github` on its own. One can ignore
- * any finding by pattern, ShellCheck's included, and the set carries none.
- */
-const ACTIONLINT_CONFIGS: readonly string[] = ['.github/actionlint.yaml', '.github/actionlint.yml'];
-
-/**
- * Every file name Prettier 3 searches for a config, beside the one
- * `.prettierrc` the gate names with `--config`. A `.js`, `.ts`, `.mjs`,
- * `.mts`, `.cjs` or `.cts` one runs as code, and any of them can name a
- * plugin, which runs too.
- */
-const PRETTIER_CONFIGS: readonly string[] = [
-  '.prettierrc',
-  '.prettierrc.json',
-  '.prettierrc.yml',
-  '.prettierrc.yaml',
-  '.prettierrc.json5',
-  '.prettierrc.js',
-  'prettier.config.js',
-  '.prettierrc.ts',
-  'prettier.config.ts',
-  '.prettierrc.mjs',
-  'prettier.config.mjs',
-  '.prettierrc.mts',
-  'prettier.config.mts',
-  '.prettierrc.cjs',
-  'prettier.config.cjs',
-  '.prettierrc.cts',
-  'prettier.config.cts',
-  '.prettierrc.toml',
-  'package.yaml',
-];
-
-/** The one Prettier config the gate reads, at the root. */
-export const PRETTIERRC = '.prettierrc';
-
-/** How many tracked paths under node_modules a finding names before it counts the rest. */
-const NODE_MODULES_SHOWN = 5;
 
 /** Characters that change how a line reads without printing: bidi controls, zero-width marks, line and paragraph separators, and interlinear annotation marks. */
 const INVISIBLE = /[\u061C\u200B-\u200F\u2028-\u202E\u2060-\u206F\uFEFF\uFFF9-\uFFFB]/g;
@@ -78,106 +16,27 @@ export function quote(value: string): string {
   );
 }
 
-/**
- * Whether the `package.json` at `path` carries a top-level `prettier` key. A
- * file that does not parse is read as carrying one, so it is refused rather
- * than passed.
- */
-function packageNamesPrettier(path: string): boolean {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
-    return typeof parsed === 'object' && parsed !== null && Object.hasOwn(parsed, 'prettier');
-  } catch {
-    // Unreadable or malformed: refused, since Prettier's reading of it is unknown.
-    return true;
-  }
-}
-
-/** The last segment of a `/`-separated path, lowercased. */
-function baseName(path: string): string {
-  return (path.split('/').pop() ?? path).toLowerCase();
-}
+/** Code points Unicode lists as default-ignorable, which HFS+ leaves out when it compares names. */
+const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
 
 /**
- * Every tracked file the gate refuses to run beside, as findings: an env file
- * Bun loads here, an `.npmrc`, an actionlint config, any path under a
- * `node_modules` directory at any depth, and every Prettier config but the
- * root `.prettierrc`, a `package.json` `prettier` key included.
+ * `name` keyed for comparison against a name a tool reads: compatibility
+ * normalized, default-ignorable code points removed, then mapped to upper and
+ * back to lower case, and normalized again.
  *
  * @remarks
- * Bun loads an env file into the gate's environment before the gate runs, so
- * a committed one sets variables for every process the gate starts. bun
- * install fetches from the registry an `.npmrc` names, and CI's install runs
- * before the gate. `bun install` keeps a committed file under `node_modules`
- * in place of what it would install, `bun run` puts `node_modules/.bin` ahead
- * of PATH, and a nearer `node_modules` shadows the installed package for the
- * files beside it. The format row and the commit hook pass `--config
- * .prettierrc`, which stops Prettier's search, so another config loads only
- * where Prettier runs without the flag. The gate calls this before any other
- * process. A contributor's own untracked env file or `.npmrc` passes. git
- * starts with its two config switches and nothing else, so no variable an env
- * file set reaches it.
+ * A case-insensitive filesystem hands a tool a tracked file under a spelling
+ * that differs from the one the tool asks for. The key merges everything
+ * simple case folding merges with an ASCII letter, which is ſ with s and the
+ * Kelvin sign with k, beside ASCII case. It also merges full case folding's
+ * expansions such as ß with ss, compatibility forms such as ﬁ with fi,
+ * dotless ı with i, and the ignorable marks HFS+ skips. Every name the gate
+ * refuses is ASCII and every file it names passes in its exact spelling
+ * alone, so a merge beyond what a filesystem does costs a false refusal at
+ * worst.
  */
-export async function trackedFindings(): Promise<string[]> {
-  // icase, because Bun on Windows and macOS opens `.ENV` as `.env`, and a
-  // literal pathspec matches case-sensitively even under core.ignorecase.
-  const startupFiles = [...BUN_ENV_FILES, NPMRC, ...ACTIONLINT_CONFIGS].map((name) => `:(icase,literal)${name}`);
-  const prettierFiles = [...PRETTIER_CONFIGS, 'package.json'].map((name) => `:(icase,glob)**/${name}`);
-  const listed = await run(
-    [
-      'git',
-      'ls-files',
-      '-z',
-      '--',
-      ':(icase,glob)**/node_modules',
-      ':(icase,glob)**/node_modules/**',
-      ...startupFiles,
-      ...prettierFiles,
-    ],
-    GIT_TIMEOUT_MS,
-    // /dev/null is the spelling Git for Windows reads as an empty file too.
-    { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
-    { inherit: false },
-  );
-  if (listed.exitCode !== 0) {
-    return [`git could not list the tracked files the gate refuses: it ${describe(listed)}`];
-  }
-  const paths = listed.stdout.split('\0').filter((path) => path.length > 0);
-  // node_modules itself too: a tracked link by that name stands in for the whole directory.
-  const modules = paths.filter((path) => /(^|\/)node_modules(\/|$)/i.test(path));
-  const found: string[] = [];
-  for (const path of paths.filter((entry) => !modules.includes(entry))) {
-    const name = baseName(path);
-    if (name === 'package.json') {
-      if (packageNamesPrettier(path)) {
-        found.push(`${quote(path)} carries a prettier key, and ${PRETTIERRC} is the one Prettier config`);
-      }
-    } else if (PRETTIER_CONFIGS.includes(name)) {
-      if (path.toLowerCase() !== PRETTIERRC) {
-        found.push(`${quote(path)} is a Prettier config, and ${PRETTIERRC} at the root is the one Prettier config`);
-      }
-    } else if (name === NPMRC) {
-      found.push(
-        `${quote(path)} is tracked, and bun install fetches from the registry it names. Remove it from the index: git rm --cached -- ${path}`,
-      );
-    } else if (ACTIONLINT_CONFIGS.includes(path.toLowerCase())) {
-      found.push(
-        `${quote(path)} is tracked, and actionlint reads it to ignore findings by pattern. The workflows row runs with no actionlint config. Remove it: git rm -- ${path}`,
-      );
-    } else {
-      found.push(
-        `${quote(path)} is tracked, and Bun loads it into the environment of every bun run here. Remove it from the index: git rm --cached -- ${path}`,
-      );
-    }
-  }
-  if (modules.length > 0) {
-    const shown = modules.slice(0, NODE_MODULES_SHOWN).map((path) => quote(path));
-    const more = modules.length > NODE_MODULES_SHOWN ? ` and ${String(modules.length - NODE_MODULES_SHOWN)} more` : '';
-    found.push(
-      `${shown.join(', ')}${more} ${modules.length === 1 ? 'is' : 'are'} tracked as or under a node_modules directory. bun install keeps what it finds there, bun run puts node_modules/.bin ahead of PATH, and Bun resolves an import from the nearest node_modules first. Remove each from the index with git rm -r --cached`,
-    );
-  }
-  return found;
+export function fold(name: string): string {
+  return name.normalize('NFKC').replace(IGNORABLE, '').toUpperCase().toLowerCase().normalize('NFKC');
 }
 
 /**
@@ -193,12 +52,12 @@ export async function trackedFindings(): Promise<string[]> {
 export const PROGRAM_NAMES: readonly string[] = ['bun', 'bunx', 'gh', 'git', 'mise', 'node'];
 
 /**
- * Whether `name`'s part before its first dot, compared without regard to
- * case, is a program name. Windows runs a file for a bare name under any
- * extension PATHEXT lists, and a machine can list more than the defaults.
+ * Whether `name`'s part before its first dot, compared through {@link fold},
+ * is a program name. Windows runs a file for a bare name under any extension
+ * PATHEXT lists, and a machine can list more than the defaults.
  */
 export function isProgramName(name: string): boolean {
-  const stem = name.toLowerCase().split('.')[0] ?? '';
+  const stem = fold(name).split('.')[0] ?? '';
   return PROGRAM_NAMES.includes(stem);
 }
 
@@ -231,19 +90,19 @@ function repositoryRoot(): string {
 }
 
 /**
- * Whether the PATH entry `directory` resolves to the repository root or a
- * directory inside it, comparing canonical paths without regard to case where
- * the filesystem ignores it.
+ * Whether `path`, a PATH entry or a program found in one, resolves to the
+ * repository root or a path inside it, comparing canonical paths without
+ * regard to case where the filesystem ignores it.
  *
  * @remarks
- * An entry whose canonical path cannot be resolved counts as inside, so it is
- * never searched: a missing directory holds no program, and one the system
- * cannot resolve is not one the gate can place.
+ * A path whose canonical form cannot be resolved counts as inside, so it is
+ * never used: a missing directory holds no program, and one the system cannot
+ * resolve is not one the gate can place.
  */
-function isInsideRepository(directory: string, root: string): boolean {
+function isInsideRepository(path: string, root: string): boolean {
   let resolved: string;
   try {
-    resolved = realpathSync.native(directory);
+    resolved = realpathSync.native(path);
   } catch {
     return true;
   }
@@ -280,11 +139,13 @@ function searchedDirectories(): string[] {
  * @remarks
  * Only the {@link searchedDirectories} are searched. On Windows each PATHEXT
  * extension is tried in PATHEXT's order, as cmd.exe tries them, unless the
- * name already carries one. A program given as an absolute path is returned
- * as it is, and a relative path is never resolved.
+ * name already carries one. A candidate whose own canonical path lies inside
+ * the repository is passed over, since a link in a directory outside can lead
+ * back in. A program given as an absolute path is returned as it is, and a
+ * relative path is never resolved.
  *
  * @returns The path to start, or undefined when no absolute PATH entry that
- * resolves outside the repository holds it
+ * resolves outside the repository holds a program that resolves outside it too
  */
 export function resolveProgram(program: string): string | undefined {
   if (isAbsolute(program)) {
@@ -299,10 +160,11 @@ export function resolveProgram(program: string): string | undefined {
     : [];
   const carries = extensions.some((extension) => extension.toLowerCase() === extname(program).toLowerCase());
   const names = windows && !carries ? extensions.map((extension) => program + extension) : [program];
+  const root = repositoryRoot();
   for (const directory of searchedDirectories()) {
     for (const name of names) {
       const candidate = join(directory, name);
-      if (isRunnable(candidate)) {
+      if (isRunnable(candidate) && !isInsideRepository(candidate, root)) {
         return candidate;
       }
     }
@@ -314,7 +176,10 @@ export function resolveProgram(program: string): string | undefined {
  * One finished process: what it printed and how it ended.
  */
 export interface Finished {
-  /** The exit code, or -1 when the process was killed at the timeout. */
+  /**
+   * The exit code, or -1 when the process was killed at its deadline or a
+   * process it started held its output open after it exited.
+   */
   readonly exitCode: number;
   /** Standard output, decoded as UTF-8. */
   readonly stdout: string;
@@ -322,6 +187,12 @@ export interface Finished {
   readonly stderr: string;
   /** True when the process ran past `timeoutMs` and was killed. */
   readonly timedOut: boolean;
+  /**
+   * True when the process exited and a process it started still held its
+   * output open {@link KILL_GRACE_MS} later, so what it printed may be cut
+   * short.
+   */
+  readonly heldOpen: boolean;
 }
 
 /** How {@link run} starts a process, beyond its command, deadline and variables. */
@@ -352,11 +223,15 @@ export const PROXY_NAMES: readonly string[] = [
   'no_proxy',
 ];
 
-/** How long the tree kill, and the reads after it, may take once a deadline passes. */
+/**
+ * How long the tree kill, and the reads after it, may take once a deadline
+ * passes, and how long a process's output may stay open after it exits.
+ */
 const KILL_GRACE_MS = 10_000;
 
 /**
- * Kills `pid` and every process it started, at a deadline.
+ * Kills `child`, which is still running, and every process it started, at a
+ * deadline.
  *
  * @remarks
  * A tool can start processes of its own, as actionlint starts ShellCheck and
@@ -364,15 +239,17 @@ const KILL_GRACE_MS = 10_000;
  * running with no parent. Windows walks the tree with `taskkill /T`. POSIX
  * has no such command, so the tree comes from one `ps` listing of every
  * process and its parent. A process group would need a new session, and a
- * child in its own session never sees the Ctrl-C that stops the gate.
+ * child in its own session never sees the Ctrl-C that stops the gate. The
+ * child itself dies through Bun's handle, which ends nothing once it exited,
+ * and it dies first, so it starts no process after the listing.
  */
-function killTree(pid: number): void {
-  const tree = [pid];
+function killTree(child: ReturnType<typeof Bun.spawn>): void {
+  const descendants: number[] = [];
   if (process.platform === 'win32') {
     const taskkill = resolveProgram('taskkill');
     if (taskkill !== undefined) {
       Bun.spawnSync({
-        cmd: [taskkill, '/T', '/F', '/PID', String(pid)],
+        cmd: [taskkill, '/T', '/F', '/PID', String(child.pid)],
         stdout: 'ignore',
         stderr: 'ignore',
         timeout: KILL_GRACE_MS,
@@ -390,24 +267,26 @@ function killTree(pid: number): void {
       const children = new Map<number, number[]>();
       for (const line of listed.stdout.toString().split('\n')) {
         const fields = line.trim().split(/\s+/);
-        const child = Number(fields[0]);
+        const pid = Number(fields[0]);
         const parent = Number(fields[1]);
-        if (fields.length === 2 && Number.isInteger(child) && Number.isInteger(parent)) {
-          children.set(parent, [...(children.get(parent) ?? []), child]);
+        if (fields.length === 2 && Number.isInteger(pid) && Number.isInteger(parent)) {
+          children.set(parent, [...(children.get(parent) ?? []), pid]);
         }
       }
+      const tree = [child.pid];
       // An array's iterator reads its length on every step, so the loop walks what it appends.
       for (const member of tree) {
-        tree.push(...(children.get(member) ?? []).filter((child) => !tree.includes(child)));
+        tree.push(...(children.get(member) ?? []).filter((pid) => !tree.includes(pid)));
       }
+      descendants.push(...tree.slice(1));
     }
   }
-  // The root last, so no member outlives the walk by being orphaned mid-kill.
-  for (const member of tree.reverse()) {
+  child.kill('SIGKILL');
+  for (const pid of descendants) {
     try {
-      process.kill(member, 'SIGKILL');
+      process.kill(pid, 'SIGKILL');
     } catch {
-      // Already gone: taskkill or an earlier kill in this loop ended it.
+      // Already gone: it ended with the child or on its own.
     }
   }
 }
@@ -444,7 +323,11 @@ async function readAll(stream: unknown, stop: Promise<void>): Promise<string> {
  * @remarks
  * Every process the gate starts goes through here, so every one carries a
  * deadline. A tool that hangs is a red row, not a hung gate. At the deadline
- * the process and every process it started are killed.
+ * a process still running is killed with every process it started. A process
+ * that already exited is never killed by its pid, which the system is free to
+ * give another process. When a process it started still holds its output
+ * {@link KILL_GRACE_MS} after it exited, the run fails, and that process runs
+ * on, since nothing Bun offers reaches a process whose parent is gone.
  *
  * The program starts from the path {@link resolveProgram} finds, never from
  * the working directory. A program no absolute PATH entry holds is a failed
@@ -509,6 +392,7 @@ export async function run(
       stdout: '',
       stderr: `${program}: no absolute PATH entry holds it, and the working directory is never searched`,
       timedOut: false,
+      heldOpen: false,
     };
   }
   let child: ReturnType<typeof Bun.spawn>;
@@ -523,24 +407,43 @@ export async function run(
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    return { exitCode: 127, stdout: '', stderr: `${program}: ${message}`, timedOut: false };
+    return { exitCode: 127, stdout: '', stderr: `${program}: ${message}`, timedOut: false, heldOpen: false };
   }
   let timedOut = false;
+  let heldOpen = false;
+  let exited = false;
+  let settled = false;
   let stopReading: () => void = () => undefined;
   const stopped = new Promise<void>((resolve) => {
     stopReading = resolve;
   });
   let grace: ReturnType<typeof setTimeout> | undefined;
+  let drain: ReturnType<typeof setTimeout> | undefined;
+  void child.exited.then(() => {
+    exited = true;
+    if (!settled) {
+      drain = setTimeout(() => {
+        heldOpen = true;
+        stopReading();
+      }, KILL_GRACE_MS);
+    }
+  });
   const deadline = setTimeout(() => {
+    // An exited child's pid can belong to another process by now, and the drain above ends the reads.
+    if (exited) {
+      return;
+    }
     timedOut = true;
-    killTree(child.pid);
+    killTree(child);
     grace = setTimeout(stopReading, KILL_GRACE_MS);
   }, timeoutMs);
   const [stdout, stderr] = await Promise.all([readAll(child.stdout, stopped), readAll(child.stderr, stopped)]);
   const exitCode = await Promise.race([child.exited, stopped.then(() => -1)]);
+  settled = true;
   clearTimeout(deadline);
   clearTimeout(grace);
-  return { exitCode: timedOut ? -1 : exitCode, stdout, stderr, timedOut };
+  clearTimeout(drain);
+  return { exitCode: timedOut || heldOpen ? -1 : exitCode, stdout, stderr, timedOut, heldOpen };
 }
 
 /**
@@ -549,6 +452,10 @@ export async function run(
  */
 export function describe(finished: Finished): string {
   const printed: string = [finished.stdout, finished.stderr].join('\n').trim();
-  const ending: string = finished.timedOut ? 'was killed at its deadline' : `exited ${String(finished.exitCode)}`;
+  const ending: string = finished.timedOut
+    ? 'was killed at its deadline'
+    : finished.heldOpen
+      ? `exited, and a process it started still held its output ${String(KILL_GRACE_MS / 1000)} s later and runs on, so its output may be cut short. Find and end that process`
+      : `exited ${String(finished.exitCode)}`;
   return `${ending} saying: ${printed.length === 0 ? 'nothing' : printed}`;
 }

@@ -11,12 +11,13 @@
  * No row resolves a program from the working directory. Bun is the process
  * running this file, every package runs from its absolute path under
  * node_modules, every pinned tool resolves through `mise which`, and mise, gh
- * and git start from an absolute PATH entry outside the checkout alone. Before
- * any row, the gate refuses to run beside a tracked env file Bun loads, a
- * tracked `.npmrc`, a tracked path under node_modules, a Prettier config other
- * than the root `.prettierrc` it expects, a bunfig.toml that holds anything but
- * the install cooldown, anything that would steer how Bun resolves the gate's
- * own imports, a changed config or ignore file a row reads, or a root file
+ * and git start from an absolute PATH entry outside the checkout alone. Every
+ * tool that searches for a config runs with its one config named. Before any
+ * row, the gate refuses to run beside a tracked env file Bun loads, a tracked
+ * `.npmrc`, a tracked path under node_modules, a config a tool would read in
+ * place of the one the gate names, a bunfig.toml that holds anything but the
+ * install cooldown, anything that would steer how Bun resolves an import, a
+ * changed config or ignore file a row reads, an inline waiver, or a root file
  * named like a program. Every row that walks the tree says how many files it
  * checked and fails when that is none.
  */
@@ -30,8 +31,16 @@ import { styleText } from 'node:util';
 // under node_modules loads before the preflight in main() refuses a planted
 // package. tools.ts imports zod and the format row imports prettier, so each
 // loads where a row needs it.
-import { describe, type Finished, PRETTIERRC, quote, run, trackedFindings } from './run';
-import { PRETTIERIGNORE, startupFindings, ZIZMOR_CONFIG } from './startup';
+import { describe, type Finished, fold, quote, run } from './run';
+import {
+  ESLINT_CONFIG,
+  PRETTIERIGNORE,
+  PRETTIERRC,
+  startupFindings,
+  TAPLO_CONFIG,
+  trackedFindings,
+  ZIZMOR_CONFIG,
+} from './startup';
 
 /** The deadline for one linter or formatter pass over the tree. */
 const TOOL_TIMEOUT_MS = 300_000;
@@ -55,9 +64,6 @@ const GH_TIMEOUT_MS = 5_000;
  */
 const ARGUMENT_BUDGET = 24_000;
 
-/** The taplo config the toml row names. */
-const TAPLO_CONFIG = '.taplo.toml';
-
 // Every name gh, zizmor and mise read a GitHub token from is taken out of the
 // environment every row's processes inherit. gh's own two are kept aside for
 // `gh auth token` alone, so gh answers as it would from the contributor's
@@ -75,6 +81,10 @@ delete process.env['ZIZMOR_GITHUB_TOKEN'];
 delete process.env['MISE_GITHUB_TOKEN'];
 delete process.env['MISE_GITHUB_ENTERPRISE_TOKEN'];
 delete process.env['GITHUB_API_TOKEN'];
+
+// ShellCheck reads extra flags from SHELLCHECK_OPTS whatever actionlint's --norc
+// says, and one can exclude any finding, so no process the gate starts gets it.
+delete process.env['SHELLCHECK_OPTS'];
 
 /** A row of the gate: its name, what it checks, and the check itself. */
 interface Row {
@@ -194,37 +204,29 @@ function files(count: number): string {
   return `${String(count)} ${count === 1 ? 'file' : 'files'}`;
 }
 
-/* ///// Inline waivers ///// */
-
-/** An inline zizmor ignore comment, in any case and spacing. zizmor honors it outside .github/zizmor.yml. */
-const ZIZMOR_INLINE = /zizmor:\s*ignore\[/i;
+/* ///// ShellCheck directives ///// */
 
 /** A ShellCheck directive that turns a check off, in any case and spacing. actionlint's ShellCheck honors it. */
 const SHELLCHECK_OFF = /#\s*shellcheck\s+disable/i;
 
 /**
- * Every inline waiver in a tracked file under .github, as findings: a zizmor
- * ignore comment anywhere there, and a ShellCheck disable directive in a
- * workflow.
+ * Every ShellCheck disable directive in a tracked workflow, as findings.
  *
  * @remarks
- * Each waives a finding outside a file the gate holds whole. Every zizmor
- * waiver lives in .github/zizmor.yml, and ShellCheck has no waiver file, so a
- * script that needs one is rewritten. The shared workflows job refuses the
- * same in every caller.
+ * A directive silences ShellCheck for its script under actionlint, and
+ * ShellCheck has no waiver file here, so a script that needs one is
+ * rewritten. startup.ts refuses an inline zizmor waiver beside it, and the
+ * shared workflows job refuses both in every caller.
  */
-async function inlineWaiverFindings(): Promise<string[]> {
+async function shellcheckDirectiveFindings(): Promise<string[]> {
   const found: string[] = [];
-  for (const path of await trackedFiles(':(glob).github/**')) {
-    const workflow = path.startsWith('.github/workflows/');
+  for (const path of await trackedFiles()) {
+    if (!fold(path).startsWith('.github/workflows/')) {
+      continue;
+    }
     const lines = (await Bun.file(path).text()).split('\n');
     for (const [index, line] of lines.entries()) {
-      if (ZIZMOR_INLINE.test(line)) {
-        found.push(
-          `${quote(path)} line ${String(index + 1)} waives a zizmor audit inline. Move it into .github/zizmor.yml, under that audit's ignore list`,
-        );
-      }
-      if (workflow && SHELLCHECK_OFF.test(line)) {
+      if (SHELLCHECK_OFF.test(line)) {
         found.push(
           `${quote(path)} line ${String(index + 1)} disables ShellCheck. Rewrite the script so ShellCheck passes it`,
         );
@@ -251,7 +253,8 @@ async function tools(): Promise<undefined> {
 // The native TypeScript 7 compiler, called by its alias's path because the
 // 6.x `typescript` package that typescript-eslint needs ships a tsc of its
 // own. The gate is the only TypeScript here, so scripts/ holds the one config,
-// and a root config would have no inputs. --listFiles names every file the
+// and a root config would have no inputs. The project is named, so tsc never
+// searches past the checkout for a config. --listFiles names every file the
 // program read, so the row counts the ones from the repository.
 async function typecheck(): Promise<string> {
   const root = comparable('.') + sep;
@@ -309,10 +312,20 @@ function isLintResult(value: unknown): value is LintResult {
 }
 
 // The json formatter names every file ESLint linted, so the row counts them
-// and prints each problem itself.
+// and prints each problem itself. --config names the one config, so ESLint
+// runs no eslint.config.* nearer a file than the root.
 async function lint(): Promise<string> {
   const finished = await run(
-    [BUN, join(PACKAGES, 'eslint/bin/eslint.js'), '.', '--max-warnings=0', '--format', 'json'],
+    [
+      BUN,
+      join(PACKAGES, 'eslint/bin/eslint.js'),
+      '--config',
+      ESLINT_CONFIG,
+      '.',
+      '--max-warnings=0',
+      '--format',
+      'json',
+    ],
     TOOL_TIMEOUT_MS,
   );
   let results: unknown;
@@ -349,7 +362,7 @@ async function lint(): Promise<string> {
 // ignore file, and counts that list. --ignore-path names .prettierignore
 // alone, so .gitignore never narrows it, and --config names the one config, so
 // Prettier searches for no other file and a config under a subdirectory never
-// loads.
+// loads. --no-editorconfig keeps any .editorconfig from setting an option.
 async function format(): Promise<string> {
   const { getFileInfo } = await import('prettier');
   const checked: string[] = [];
@@ -371,6 +384,7 @@ async function format(): Promise<string> {
       PRETTIERRC,
       '--ignore-path',
       PRETTIERIGNORE,
+      '--no-editorconfig',
       '--',
       ...batch,
     ]);
@@ -396,7 +410,7 @@ function taploFound(printed: string): string[] | undefined {
 // line at that level and a contributor's own setting would hide it.
 async function toml(): Promise<string> {
   const taplo = await binary('taplo');
-  const handed = await trackedFiles(':(icase,glob)**/*.toml');
+  const handed = (await trackedFiles()).filter((path) => fold(path).endsWith('.toml'));
   if (handed.length === 0) {
     throw new Error('no TOML file is tracked, so the row checks nothing');
   }
@@ -675,12 +689,13 @@ const rows: readonly Row[] = [
   },
   {
     name: 'lint',
-    checks: 'eslint over the tree with no warnings allowed, counting the files it linted',
+    checks: 'eslint over the tree with eslint.config.ts alone and no warnings allowed, counting the files it linted',
     check: lint,
   },
   {
     name: 'format',
-    checks: 'prettier --check over every tracked file Prettier formats, with .prettierrc and .prettierignore alone',
+    checks:
+      'prettier --check over every tracked file Prettier formats, with .prettierrc and .prettierignore alone and no .editorconfig',
     check: format,
   },
   {
@@ -736,7 +751,11 @@ async function main(): Promise<number> {
   // stands in for what bun install would put there. So no row runs beside
   // any of them. This comes before any other process the gate starts, and a
   // single row run passes through it too.
-  const refused = [...(await trackedFindings()), ...(await startupFindings()), ...(await inlineWaiverFindings())];
+  const refused = [
+    ...(await trackedFindings()),
+    ...(await startupFindings()),
+    ...(await shellcheckDirectiveFindings()),
+  ];
   if (refused.length > 0) {
     console.log(`  ${glyph(false)} ${'preflight'.padEnd(width)}  ${dim('no row ran')}`);
     console.log(`    ${refused.join('\n    ')}`);

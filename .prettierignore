@@ -1,16 +1,23 @@
-# The one ignore file every Prettier run names with --ignore-path, held whole
-# by scripts/startup.ts, so a pattern added here is a gate change.
+# The one ignore file every Prettier run names with --ignore-path. Its
+# patterns are the shared ones scripts/startup.ts lists and this repository's
+# own in scripts/expected.ts, so a pattern added here is a gate change. Each
+# is anchored at the root, so a file of the same name deeper in the tree is
+# formatted.
 #
 # Written by release-please on every release. Its bullets are `*` and its
 # version headers carry a blank line prettier would collapse, so formatting it
 # turns each release into a failing check on main. The manifest is written on
 # one line by the same tool.
-CHANGELOG.md
-.release-please-manifest.json
+/CHANGELOG.md
+/.release-please-manifest.json
 
-# Directories a checkout fills locally, which `bun run format` walks into
-# because .gitignore no longer narrows Prettier: Claude Code's worktrees, each
-# a whole checkout of its own, and test and build output.
+# Directories a checkout fills locally, which `bun run format` walks into,
+# since --ignore-path keeps .gitignore from narrowing Prettier: Claude Code's
+# worktrees, each a whole checkout of its own, and test and build output.
 .claude/worktrees/
-coverage/
-dist/
+/coverage/
+/dist/
+
+# This repository's own, in scripts/expected.ts: the maintainer's local alignment table,
+# which .gitignore keeps out of the index.
+/REPOS.md

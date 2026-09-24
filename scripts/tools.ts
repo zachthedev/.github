@@ -22,7 +22,7 @@ import { dlopen, FFIType, type Pointer, ptr, toArrayBuffer } from 'bun:ffi';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { describe, type Finished, PROXY_NAMES, quote, run } from './run';
+import { describe, type Finished, fold, PROXY_NAMES, quote, run } from './run';
 import { directoryEntries, isTable, LOCK, PINS, quoteValue, sameValue } from './startup';
 
 /** The command that rewrites {@link LOCK} after an edit to {@link PINS}. */
@@ -331,23 +331,23 @@ const PlatformSchema = z.object({
  * {@link LOCK}.
  *
  * @remarks
- * The names are mise's own discovery list, compared without regard to case
- * because Windows and macOS open a file that way: `.tool-versions`,
+ * The names are mise's own discovery list, compared through {@link fold}
+ * because Windows and macOS open a file under another spelling: `.tool-versions`,
  * `.miserc.toml`, the `mise` and `.mise` directories, and every
  * `[.]mise[.<name>].toml` or `.lock` beside the two pinned files, which
  * covers the local and the per-environment files.
  */
 function isOtherMiseFile(name: string): boolean {
-  const lower = name.toLowerCase();
-  if (lower === PINS || lower === LOCK) {
+  const folded = fold(name);
+  if (folded === PINS || folded === LOCK) {
     return false;
   }
   return (
-    lower === '.tool-versions' ||
-    lower === '.miserc.toml' ||
-    lower === 'mise' ||
-    lower === '.mise' ||
-    /^\.?mise(\..+)?\.(toml|lock)$/.test(lower)
+    folded === '.tool-versions' ||
+    folded === '.miserc.toml' ||
+    folded === 'mise' ||
+    folded === '.mise' ||
+    /^\.?mise(\..+)?\.(toml|lock)$/.test(folded)
   );
 }
 
@@ -385,10 +385,10 @@ async function rootFindings(): Promise<string[]> {
   const found: string[] = [];
   for (const entry of await readdir('.', { withFileTypes: true })) {
     const name = entry.name;
-    const lower = name.toLowerCase();
+    const folded = fold(name);
     if (entry.isSymbolicLink()) {
       found.push(`${quote(name)} is a link, and mise follows a link where a name scan never looks`);
-    } else if (lower === '.config' || lower === '.mise' || lower === 'mise') {
+    } else if (folded === '.config' || folded === '.mise' || folded === 'mise') {
       for (const link of await linksUnder(name)) {
         found.push(`${quote(link)} is a link, and mise follows a link where a name scan never looks`);
       }
@@ -396,9 +396,9 @@ async function rootFindings(): Promise<string[]> {
     if (isOtherMiseFile(name)) {
       found.push(`mise reads ${quote(name)} beside ${PINS} and ${LOCK}, and the gate installs from those two alone`);
     }
-    if (lower === '.config') {
+    if (folded === '.config') {
       for (const inner of await directoryEntries(name)) {
-        if (inner.name.toLowerCase().startsWith('mise')) {
+        if (fold(inner.name).startsWith('mise')) {
           found.push(
             `mise reads ${quote(`${name}/${inner.name}`)} beside ${PINS} and ${LOCK}, and the gate installs from those two alone`,
           );
