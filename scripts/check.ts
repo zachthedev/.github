@@ -34,8 +34,10 @@ import { styleText } from 'node:util';
 import { describe, type Finished, fold, quote, run } from './run';
 import {
   ESLINT_CONFIG,
+  isTable,
   PRETTIERIGNORE,
   PRETTIERRC,
+  quoteValue,
   startupFindings,
   TAPLO_CONFIG,
   trackedFindings,
@@ -215,8 +217,10 @@ const SHELLCHECK_OFF = /#\s*shellcheck\s+disable/i;
  * @remarks
  * A directive silences ShellCheck for its script under actionlint, and
  * ShellCheck has no waiver file here, so a script that needs one is
- * rewritten. startup.ts refuses an inline zizmor waiver beside it, and the
- * shared workflows job refuses both in every caller.
+ * rewritten. This reads the file's text, so a directive that YAML escapes or
+ * folds passes it. The shared workflows job refuses every directive through a
+ * stand-in that reads the decoded script, and this check gives way to the Bun
+ * set's stand-in when the kickstart carries one.
  */
 async function shellcheckDirectiveFindings(): Promise<string[]> {
   const found: string[] = [];
@@ -229,6 +233,79 @@ async function shellcheckDirectiveFindings(): Promise<string[]> {
       if (SHELLCHECK_OFF.test(line)) {
         found.push(
           `${quote(path)} line ${String(index + 1)} disables ShellCheck. Rewrite the script so ShellCheck passes it`,
+        );
+      }
+    }
+  }
+  return found;
+}
+
+/* ///// Shell values ///// */
+
+/** The shells a workflow step may name: the two actionlint hands ShellCheck, and pwsh. */
+const HELD_SHELLS: readonly string[] = ['bash', 'sh', 'pwsh'];
+
+/** Each shell value a parsed workflow sets, with where: its defaults, each job's defaults, and each step. */
+function shellValues(workflow: Record<string, unknown>): { where: string; value: unknown }[] {
+  const values: { where: string; value: unknown }[] = [];
+  const fromDefaults = (holder: Record<string, unknown>, where: string): void => {
+    const defaults = holder['defaults'];
+    const run = isTable(defaults) ? defaults['run'] : undefined;
+    if (isTable(run) && Object.hasOwn(run, 'shell')) {
+      values.push({ where, value: run['shell'] });
+    }
+  };
+  fromDefaults(workflow, 'defaults.run');
+  const jobs = workflow['jobs'];
+  for (const [id, job] of Object.entries(isTable(jobs) ? jobs : {})) {
+    if (!isTable(job)) {
+      continue;
+    }
+    fromDefaults(job, `jobs.${id}.defaults.run`);
+    const steps = job['steps'];
+    for (const [index, step] of (Array.isArray(steps) ? (steps as unknown[]) : []).entries()) {
+      if (isTable(step) && Object.hasOwn(step, 'shell')) {
+        values.push({ where: `jobs.${id}.steps[${String(index)}]`, value: step['shell'] });
+      }
+    }
+  }
+  return values;
+}
+
+/**
+ * Every shell a tracked workflow names outside {@link HELD_SHELLS}, as
+ * findings.
+ *
+ * @remarks
+ * actionlint hands ShellCheck a script only when its shell is bash or sh, or
+ * starts with "bash " or "sh ", so a step naming `/bin/bash -e {0}` runs bash
+ * with no ShellCheck at all. Each workflow is read as YAML, so an escaped or
+ * aliased key reads as the key it decodes to. A file that does not parse is a
+ * finding, since the parser here refuses some text actionlint's accepts.
+ */
+async function shellFindings(): Promise<string[]> {
+  const found: string[] = [];
+  for (const path of await trackedFiles()) {
+    if (!fold(path).startsWith('.github/workflows/')) {
+      continue;
+    }
+    let parsed: unknown;
+    try {
+      parsed = Bun.YAML.parse(await Bun.file(path).text());
+    } catch (error: unknown) {
+      found.push(
+        `${quote(path)} does not parse as YAML here, so the shells it names are unknown: ${quote(error instanceof Error ? error.message : String(error))}`,
+      );
+      continue;
+    }
+    if (!isTable(parsed)) {
+      found.push(`${quote(path)} is not one YAML mapping, so the shells it names are unknown`);
+      continue;
+    }
+    for (const { where, value } of shellValues(parsed)) {
+      if (typeof value !== 'string' || !HELD_SHELLS.includes(value)) {
+        found.push(
+          `${quote(path)} ${where} sets shell ${quoteValue(value)}, and actionlint runs ShellCheck for bash and sh alone. Name bash, sh or pwsh`,
         );
       }
     }
@@ -759,6 +836,7 @@ async function main(): Promise<number> {
     ...(await trackedFindings()),
     ...(await startupFindings()),
     ...(await shellcheckDirectiveFindings()),
+    ...(await shellFindings()),
   ];
   if (refused.length > 0) {
     console.log(`  ${glyph(false)} ${'preflight'.padEnd(width)}  ${dim('no row ran')}`);
