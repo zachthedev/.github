@@ -358,8 +358,9 @@ API reports the value only on a `required_reviewers` rule.
 - A credential belongs to the environment that uses it. A repository-level secret is the exception, and the
   workflow that consumes it says why in a comment beside the read.
 - A `uses:` job takes the called workflow's job-level environment. The caller runs in no environment, so it
-  cannot name an environment secret. A caller whose called workflow reads one passes `secrets: inherit`, with
-  zizmor's `secrets-inherit` audit ignored on that line. Every other caller passes nothing through.
+  cannot name an environment secret. A caller whose called workflow reads one passes `secrets: inherit`, and
+  `.github/zizmor.yml` waives the `secrets-inherit` audit for that file under `rules.secrets-inherit.ignore`
+  (Gate). Every other caller passes nothing through.
 
 ### Apps
 
@@ -506,6 +507,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   whose `#` names cannot redirect a bare package name.
 - A Go repository, and any other with no TypeScript, refuses a tracked `tsconfig.json` or `jsconfig.json`
   outright. `.github` refuses every one but `scripts/tsconfig.json`, which its gate compares whole.
+- Where a repository keeps a root `tsconfig.json`, the gate compares it whole against that repository's own
+  constant, beside `scripts/tsconfig.json`. A `noCheck: true` there let the typecheck row pass over a type error
+  while it printed its full count.
+- Every gate refuses a duplicated key, at any depth, in any JSON file it parses to decide a refusal. Bun's own
+  reader keeps the first copy, while `JSON.parse` and Go's `encoding/json` keep the last. A duplicate therefore
+  lets the gate pass one value while Bun uses the other.
 - Every gate tool that searches for its own config runs with the one config named explicitly. The tools are
   Prettier, commitlint, golangci-lint, ESLint, taplo and zizmor, and rustfmt and clippy in Rust.
 - The gate refuses every other name such a tool searches, at every depth it searches, without regard to case. A
@@ -535,12 +542,22 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     its tool loads it. Changing one means changing the constant in the gate beside it, which a reviewer sees.
 - `.github/zizmor.yml` is compared whole against a constant in that repository's gate as well, because it can
   disable an audit. A waiver is then a gate change a reviewer sees.
+- Every gate, and the shared `workflows` job, refuses a `zizmor: ignore[` comment in a tracked file under
+  `.github`, so every waiver lives in `.github/zizmor.yml`. An inline comment waives any audit on its line,
+  `unpinned-uses` included.
 - The gate refuses a committed `.github/actionlint.yaml` or `.github/actionlint.yml`, in any case. actionlint
   reads either one, and its `paths` block can silence every finding. A canonical one is added the day a
   repository needs it.
-- When a row passes its deadline, the gate's run helper kills the row's whole process tree: `taskkill /T` on
-  Windows, a process walk elsewhere. A timed-out row then leaves nothing running, a detached descendant such as
-  `workerd` included.
+- The gate refuses a workflow file whose extension is not a lowercase `.yml`. actionlint's file list and zizmor's
+  collection each missed a `.github/workflows/UP.YML`.
+- The gate refuses a tracked path with a `.git`, `.sl`, `.svn`, `.hg` or `.jj` segment. Prettier's CLI skips a
+  named file under one without a word, while `getFileInfo` accepts it.
+- When a row passes its deadline, the gate's run helper kills the row's process tree: `taskkill /T` on Windows,
+  and elsewhere a process walk that kills the root first.
+- The helper records a child's exit and never kills an exited child by its pid, because that pid is free for
+  reuse. A descendant that still holds the child's output at the deadline fails the row by name.
+- A descendant whose parent already exited is out of that walk's reach. Only a job object reaches it, and Bun
+  exposes none, so a Bun gate names that orphan as a residual in `CONTRIBUTING.md` and `docs/dev.md`.
 - Where a runtime loads an env file before the gate starts, such as Task's `dotenv`, CI and the `pre-push` hook
   run the tracked-file refusal as their own step, before that runtime starts.
 - In a Go repository the gate job and the `pre-push` hook set `GOWORK=off` and `GOFLAGS=-mod=readonly`, and the
@@ -756,11 +773,15 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - `.prettierrc` carries only the keys whose values differ from Prettier's defaults, and the kickstart's file is
   the source. `proseWrap` is not written. Prose stays as the author wrapped it.
 - One exact Prettier version across every repository, never a range. A bump is one pull request per repository.
-- `.editorconfig` agrees with the config for every file Prettier owns.
-- Every Prettier run, the row's, a hook's and the `format` script's, passes `--config .prettierrc` and
-  `--ignore-path .prettierignore`, with no glob. `--config` names the one config (Gate). `--ignore-path` keeps
-  `.gitignore` from narrowing the check, so `.prettierignore` itself names `.claude/worktrees/` and every other
-  local-only path. A generated file the owning tool formats goes in `.prettierignore` too.
+- `.editorconfig` agrees with the config for every file Prettier owns, for the editors that read it.
+- Every Prettier run, the row's, a hook's and the `format` script's, passes `--config .prettierrc`,
+  `--ignore-path .prettierignore` and `--no-editorconfig`, with no glob. `--config` names the one config (Gate).
+  Under `--config` alone Prettier still reads a nested `.editorconfig`, which can reindent a subtree.
+- `--ignore-path` keeps `.gitignore` from narrowing the check, so `.prettierignore` itself names
+  `.claude/worktrees/` and every other local-only path. A generated file the owning tool formats goes in
+  `.prettierignore` too.
+- Every `.prettierignore` pattern is anchored to the root, with a leading slash where it has no other, so it
+  cannot hide a same-named file deeper in the tree.
 - A Prettier config can name a plugin, and Prettier loads it before it checks anything. The gate therefore
   compares `.prettierrc` whole against the identical file, by its bytes or by its parsed JSON values. Either
   comparison refuses a changed value or a file that does not parse.
