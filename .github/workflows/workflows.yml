@@ -298,11 +298,10 @@ jobs:
           if [ "${GITHUB_REPOSITORY,,}" = zachthedev/.github ]; then
             own=./.github/workflows/
           fi
-          callers=$(printf '%s' "$report" | jq -r '.[] | select(.ident == "secrets-inherit") | .locations[] | select(.symbolic.kind == "Primary") | [(.symbolic.key.Local.verbatim_path // "unknown"), (.concrete.location.start_point.row + 1 | tostring), .concrete.feature] | @tsv')
+          callers=$(printf '%s' "$report" | jq -r '.[] | select(.ident == "secrets-inherit") | .locations[] | select(.symbolic.kind == "Primary") | [(.symbolic.key.Local.verbatim_path // "unknown" | gsub("\\\\"; "/")), (.concrete.location.start_point.row + 1 | tostring), .concrete.feature] | @tsv')
           refused=0
           while IFS=$'\t' read -r path line callee; do
             [ -n "$path" ] || continue
-            path=${path//\\//}
             callee=${callee#[\"\']}
             callee=${callee%[\"\']}
             lowered=${callee,,}
