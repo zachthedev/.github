@@ -251,8 +251,8 @@ git log --oneline v0.1.0..v0.2.0
   starts every process, `rows.ts` reads what each row's tool printed, `github.ts` reads gh's token,
   `shellcheck.ts` is the ShellCheck stand-in the `workflows` row hands actionlint, and `tsconfig.json` is the
   gate's own TypeScript config. The `*.test.ts` files are the gate's own tests, and `stand-ins.ts` holds the
-  programs they start in place of the real ones. Every file under `scripts/` but `check.ts`, `expected.ts` and
-  `tsconfig.json` is the same in every Bun repository of the set.
+  programs they start in place of the real ones. Which of these every Bun repository shares byte for byte is
+  under [Gate](HANDBOOK.md#gate).
 - The root `tsconfig.json`: the TypeScript config for `eslint.config.ts`, the one TypeScript file outside
   `scripts/`.
 - The root and `.github/`: the community files GitHub serves as defaults, and this repository's own boilerplate.
@@ -266,9 +266,9 @@ reads. After each, when another row follows, the checks before the first row run
 prints as `preflight  after <row>, no later row ran`. `bun run check:rows` prints the order. Every program a test
 would start is a stand-in from `scripts/stand-ins.ts`, never the real gh, git, mise or the network. The
 `scripts:test` row reads skipped, todo and filtered tests beside the passing ones, and it fails when it counts no
-test or every test it counts was skipped. It runs with `CI=true`, so a file holding `test.only` fails the row.
-The other rows are the checks on the rest of the tree, and the break round in the alignment record proves they go
-red.
+test, when every test it counts was skipped, and when a name pattern filtered any test out. It runs with
+`CI=true`, so a file holding `test.only` fails the row. The other rows are the checks on the rest of the tree, and
+the break round in the alignment record proves they go red.
 
 ## Code
 
