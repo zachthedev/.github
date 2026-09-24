@@ -475,8 +475,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The refusals keep such a file off the default branch. They cannot stop the first local run of an unread branch:
   a `bunfig.toml` preload, a `paths` redirect in the gate's own `scripts/tsconfig.json` or a Task `dotenv` runs
   before any row does. Under `bunx --bun` a preload also runs before each commit hook's tool and in any script
-  that calls it. `eslint.config.ts` and `commitlint.config.js` run as code in a gate only in the form its
-  constant holds (below).
+  that calls it. Committing on an unread branch runs that branch's `commitlint.config.js` from the commit hook
+  before any check, as a preload runs before the hook's tool.
+- `eslint.config.ts` and `commitlint.config.js` run as code in a gate only in the form its constant holds
+  (below). The `commits` job runs a pull request's `commitlint.config.js` in CI, contained by the same read-only,
+  tokenless shape as the gate job.
 - A Bun gate refuses a tracked env file Bun loads on its own, `.env` and its variants, because Bun loads it into
   the gate's environment (Known defects). The names match without regard to case. A template such as
   `.env.example` passes.
