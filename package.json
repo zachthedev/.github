@@ -7,7 +7,7 @@
   "scripts": {
     "check": "bun --no-env-file scripts/check.ts",
     "check:rows": "bun --no-env-file scripts/check.ts --rows",
-    "format": "bun ./node_modules/prettier/bin/prettier.cjs --config .prettierrc --no-editorconfig --ignore-path .prettierignore --write .",
+    "format": "bun x --bun --no-install prettier --config .prettierrc --no-editorconfig --ignore-path .prettierignore --write .",
     "prepare": "bun ./node_modules/lefthook/bin/index.js install"
   },
   "devDependencies": {
