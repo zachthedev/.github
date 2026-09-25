@@ -38,7 +38,7 @@ version: migrating later costs more than changing now.
 | Branch rules | none     | two default-branch rulesets: squash pull requests, then the checks and code scanning no merge bypasses     |
 | Actions      | none     | read-only default token, Actions cannot approve pull requests, SHA pinning required                        |
 | Environments | none     | a scope per credential, a tier per deployment, an approval per reviewed publish, each with a policy        |
-| Secrets      | none     | an identifier is a variable, only a value that grants access is a secret, held where it is used            |
+| Secrets      | none     | a public identifier is a variable, a private identifier or a credential is a secret, held where used       |
 | Apps         | none     | release pull requests, tags and dependency updates run as GitHub Apps, never as a user                     |
 | Tags         | none     | one ruleset over every tag restricting creation, update and deletion, the releaser app its bypass          |
 | Dependabot   | none     | alerts on everywhere, security updates on in `rust-crates`, `rust-app` and `csharp-installer` alone        |
@@ -370,7 +370,8 @@ An environment has one of three purposes, and its name says which.
 - A credential scope serves a job that deploys nothing. It is named for the workflow that consumes it, in
   kebab-case (`deps` for `deps.yml`), or for a capability several workflows share (`release-pr`,
   `archive-write`). It sets `deployment: false`. It takes a reviewer only where a human approves. A scheduled
-  run takes none.
+  run takes none, unless its job reaches the environment only when an earlier job finds work, as `archive-write`'s
+  does. The approval is then asked for only when there is something to approve.
 - A publish approval holds a human approval and nothing else, and is named for the act: `release`. A Rust
   repository's `release` also holds the releaser pair, because its release job creates the tags (Releases).
 
@@ -378,10 +379,22 @@ Every environment carries a custom deployment branch policy naming the refs its 
 environment with a reviewer sets `prevent_self_review: false`, because a sole reviewer otherwise deadlocks. The
 API reports the value only on a `required_reviewers` rule.
 
+The `release` environment sets `can_admins_bypass: false` in every repository, so an admin deploys to it only
+through its reviewer's approval, as anyone else does. `release-pr` and `deps` keep the default, `true`.
+
 ### Secrets
 
-- An identifier is a variable: an account id, a database or namespace id, a domain, a fingerprint, an app client
-  id. Only a value that grants access is a secret. Variables print unmasked in run logs.
+Every value a workflow reads falls in one of three classes, and its class decides where it lives.
+
+| Class              | What it is                                              | Examples                                                                               | Held as    |
+| ------------------ | ------------------------------------------------------- | -------------------------------------------------------------------------------------- | ---------- |
+| Public identifier  | a value already public, or one a committed file carries | an app client id, a Worker's `account_id` in `wrangler.jsonc`                          | a variable |
+| Private identifier | a value that is not public and grants nothing alone     | a cloud access key id, a token id, an account id or a domain no committed file carries | a secret   |
+| Credential         | a value that grants access                              | a private key, an API token, a secret access key                                       | a secret   |
+
+- A variable prints unmasked in a public repository's run logs, and a secret is masked. Holding a private
+  identifier as a secret costs nothing and keeps it out of those logs.
+- An account id a committed file carries is public already, so it stays in that file.
 - A credential belongs to the environment that uses it. A repository-level secret is the exception, and the
   workflow that consumes it says why in a comment beside the read.
 - A `uses:` job takes the called workflow's job-level environment. The caller runs in no environment, so it
