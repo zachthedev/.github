@@ -103,7 +103,7 @@ const ARGUMENT_BUDGET = 24_000;
 delete process.env['SHELLCHECK_OPTS'];
 
 /** A row of the gate: its name, what it checks, and the check itself. */
-interface Row {
+export interface Row {
   readonly name: string;
   readonly checks: string;
   /** Runs the check. A string it returns prints after the row's time. */
@@ -315,6 +315,8 @@ interface LintMessage {
 interface LintResult {
   readonly filePath: string;
   readonly messages: readonly LintMessage[];
+  /** The reports a directive turned off, which ESLint lists whatever the directive says. */
+  readonly suppressedMessages: readonly LintMessage[];
 }
 
 /** Whether `value`, parsed from ESLint's json output, is one file's result. */
@@ -323,13 +325,41 @@ function isLintResult(value: unknown): value is LintResult {
     typeof value === 'object' &&
     value !== null &&
     typeof (value as { filePath?: unknown }).filePath === 'string' &&
-    Array.isArray((value as { messages?: unknown }).messages)
+    Array.isArray((value as { messages?: unknown }).messages) &&
+    Array.isArray((value as { suppressedMessages?: unknown }).suppressedMessages)
+  );
+}
+
+/** The rule that refuses a waiver whose reason holds no letter or digit. */
+const VISIBLE_REASON = 'gate/visible-reason';
+
+/**
+ * Every report of {@link VISIBLE_REASON} a directive turned off, as findings
+ * naming the file, line and column.
+ *
+ * @remarks
+ * ESLint applies a directive to the reports at its own position, so a
+ * directive naming the rule hides the rule's report on that directive, and a
+ * block disable naming it hides every report up to its enable. ESLint lists
+ * each report a directive turned off under `suppressedMessages`, and no
+ * directive removes one from that list.
+ */
+export function suppressedReasonFindings(results: readonly LintResult[]): string[] {
+  return results.flatMap((result) =>
+    result.suppressedMessages
+      .filter((message) => message.ruleId === VISIBLE_REASON)
+      .map(
+        (message) =>
+          `${quote(result.filePath)}:${String(message.line ?? 0)}:${String(message.column ?? 0)}  a directive turned off ${VISIBLE_REASON}, which no directive may do. Take the rule out of the directive and give each waiver a reason in words`,
+      ),
   );
 }
 
 // The json formatter names every file ESLint linted, so the row counts them
-// and prints each problem itself. --config names the one config, so ESLint
-// runs no eslint.config.* nearer a file than the root.
+// and prints each problem itself. It also refuses every report of the
+// visible-reason rule a directive turned off, which ESLint lists apart from
+// the problems and counts in no exit code. --config names the one config, so
+// ESLint runs no eslint.config.* nearer a file than the root.
 async function lint(): Promise<string> {
   const finished = await run([
     ...jsTool('eslint'),
@@ -356,13 +386,17 @@ async function lint(): Promise<string> {
         `${quote(result.filePath)}:${String(message.line ?? 0)}:${String(message.column ?? 0)}  ${message.severity === 2 ? 'error' : 'warning'}  ${message.message ?? ''}  ${message.ruleId ?? ''}`,
     ),
   );
+  const suppressed = suppressedReasonFindings(results);
   if (finished.exitCode !== 0) {
     throw new Error(
-      `eslint exited ${String(finished.exitCode)} over ${files(results.length)}:\n${[...problems, finished.stderr.trim()].filter((line) => line.length > 0).join('\n')}`,
+      `eslint exited ${String(finished.exitCode)} over ${files(results.length)}:\n${[...problems, ...suppressed, finished.stderr.trim()].filter((line) => line.length > 0).join('\n')}`,
     );
   }
   if (results.length === 0) {
     throw new Error('eslint linted no file, so it checked nothing');
+  }
+  if (suppressed.length > 0) {
+    throw new Error(suppressed.join('\n'));
   }
   return files(results.length);
 }
@@ -701,7 +735,7 @@ async function renovate(): Promise<string> {
 // eslint.config.ts, and scripts:test runs the gate's own tests. So every row
 // that reads a config runs before any code could write one. A single row run
 // keeps this order.
-const rows: readonly Row[] = [
+export const rows: readonly Row[] = [
   {
     name: 'tools',
     checks: 'the root, mise.toml and mise.lock against scripts/tools.ts, then the install',
@@ -737,7 +771,8 @@ const rows: readonly Row[] = [
   },
   {
     name: 'lint',
-    checks: 'eslint over the tree with eslint.config.ts alone and no warnings allowed, counting the files it linted',
+    checks:
+      'eslint over the tree with eslint.config.ts alone and no warnings allowed, counting the files it linted, and no gate/visible-reason report a directive turned off',
     check: lint,
     runsCode: true,
   },
@@ -830,4 +865,8 @@ async function main(): Promise<number> {
   return 1;
 }
 
-process.exitCode = await main();
+// Run as a file, the gate runs. Imported, as scripts/check.test.ts does, it
+// runs nothing and hands over its rows.
+if (import.meta.main) {
+  process.exitCode = await main();
+}
