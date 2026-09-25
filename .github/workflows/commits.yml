@@ -40,34 +40,28 @@ jobs:
       # then runs that copy. It keeps a tracked node_modules link the same way, with no check
       # against bun.lock, so node_modules itself is refused beside any path below it. Every other
       # tracked symbolic link is refused too: Bun reads through one to a file bun.lock never
-      # named. A tracked .npmrc, at any depth, redirects the install's registry. A
-      # package.json patchedDependencies key is applied even by a frozen install without scripts,
-      # so the key is refused in every tracked package.json, whatever it patches. bun install loads
+      # named. A tracked .npmrc, at any depth, redirects the install's registry. bun install loads
       # an env file at the root, frozen and without scripts, and no flag stops that. A variable
       # there can move its registry, skip the lockfile or point its cache at a committed folder,
-      # which swaps a package with no bun.lock change. So each of the eight names Bun loads is
-      # refused at the root, the one place the install reads them. Both commitlint steps name
-      # commitlint.config.js, which stops commitlint reading any other config. cosmiconfig, which
-      # commitlint searches through, still reads a meta config from a root .config directory when
-      # it starts, whatever --config names, and runs a .config/config.js, .mjs, .cjs or .ts as
-      # code. So a tracked root .config is refused. Paths match without regard to case, as Windows
-      # and macOS open them. A failed git or jq call, a malformed package.json among them, stops
-      # the step.
+      # which swaps a package with no bun.lock change. Bun loads an env file from the directory
+      # each start runs in, and a caller starts Bun below the root too, so each of the eight names
+      # Bun loads is refused at any depth. Both commitlint steps name commitlint.config.js, which
+      # stops commitlint reading any other config. cosmiconfig, which commitlint searches through,
+      # still reads its own settings from a root .config directory and a root package.yaml when it
+      # starts, whatever --config names. It runs a .config/config.js, .mjs, .cjs or .ts as code,
+      # and a module a $import there names. So a tracked root .config and a root package.yaml are
+      # refused. git lists paths with core.quotepath off, so a name past ASCII reaches each
+      # pattern as its own characters rather than octal escapes. Paths match without regard to
+      # case, as Windows and macOS open them. A failed git call stops the step.
       - name: Refused paths
         run: |
-          tracked=$(git ls-files)
+          tracked=$(git -c core.quotepath=off ls-files)
           found=$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)node_modules("?$|/)|(^"?|/)\.npmrc"?$' || true)
           links=$(git ls-files -s | awk -F '\t' '$1 ~ /^120000 / { print $2 }')
           meta=$(printf '%s\n' "$tracked" | grep -iE '^"?\.config(/|"?$)' || true)
-          envs=$(printf '%s\n' "$tracked" | grep -iE '^"?\.env(\.local|\.(development|production|test)(\.local)?)?"?$' || true)
-          patched=""
-          while IFS= read -r manifest; do
-            [ -n "$manifest" ] || continue
-            if [ "$(jq 'has("patchedDependencies")' "$manifest")" = true ]; then
-              patched+="$(printf '%q' "$manifest")"$'\n'
-            fi
-          done <<< "$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)package\.json"?$' || true)"
-          if [ -n "$found" ] || [ -n "$links" ] || [ -n "$meta" ] || [ -n "$envs" ] || [ -n "$patched" ]; then
+          yaml=$(printf '%s\n' "$tracked" | grep -iE '^"?package\.yaml"?$' || true)
+          envs=$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)\.env(\.local|\.(development|production|test)(\.local)?)?"?$' || true)
+          if [ -n "$found" ] || [ -n "$links" ] || [ -n "$meta" ] || [ -n "$yaml" ] || [ -n "$envs" ]; then
             while IFS= read -r path; do
               [ -n "$path" ] && echo "::error::$(printf '%q' "$path") is tracked, and bun install would read it in place of what bun.lock names."
             done <<< "$found"
@@ -78,12 +72,12 @@ jobs:
               [ -n "$path" ] && echo "::error::$(printf '%q' "$path") is under the root .config, where cosmiconfig reads a config before commitlint loads the one named."
             done <<< "$meta"
             while IFS= read -r path; do
-              [ -n "$path" ] && echo "::error::$(printf '%q' "$path") is an env file bun install loads, which can swap a package with no bun.lock change."
+              [ -n "$path" ] && echo "::error::$(printf '%q' "$path") is a root package.yaml, where cosmiconfig reads its own settings before commitlint loads the config named."
+            done <<< "$yaml"
+            while IFS= read -r path; do
+              [ -n "$path" ] && echo "::error::$(printf '%q' "$path") is an env file Bun loads, which can swap a package with no bun.lock change."
             done <<< "$envs"
-            while IFS= read -r manifest; do
-              [ -n "$manifest" ] && echo "::error::$manifest carries a patchedDependencies key, and bun install applies each patch it names even frozen and without scripts."
-            done <<< "$patched"
-            echo "::error::Remove each path and key named above."
+            echo "::error::Remove each path named above."
             exit 1
           fi
       # Bun reads bunfig.toml at the root each time it starts, and bun install reads its [install]
@@ -123,62 +117,88 @@ jobs:
               print(f"::error::{finding}. Bun reads bunfig.toml before commitlint runs, and the one key allowed is [install] minimumReleaseAge.")
           sys.exit(1 if found else 0)
           PY
-      # Bun runs commitlint and applies a tsconfig.json or jsconfig.json to its own imports, so a
-      # paths entry or a baseUrl there runs checkout code in place of a package commitlint loads.
-      # Every tracked one, at any depth and in any case, and every file its extends names, is read
-      # for either. An extends naming a package or a file outside the checkout is refused, since
-      # the step cannot read it before the install. A failed git or jq call stops the step: a
-      # malformed file among them, and one carrying comments, which jq does not read. This is a
-      # step of its own because actionlint stalls on Windows handing ShellCheck a script past 4 KB.
-      - name: Refused TypeScript path aliases
+      # Bun reads package.json and a project config keeping the first of two equal keys, where jq
+      # and JSON.parse keep the last, and jq stops at a nesting depth Bun passes. So python3's json
+      # module reads every tracked package.json, tsconfig.json and jsconfig.json, at any depth and
+      # in any case, and every file an extends names. It refuses a key repeated in one object and
+      # anything that is not plain JSON: a trailing comma, a comment, a byte order mark, NaN, a
+      # depth it cannot read. A package.json patchedDependencies key is applied even by a frozen
+      # install without scripts, so the key is refused in every tracked package.json, whatever it
+      # patches. cosmiconfig reads a cosmiconfig key in the root package.json whatever --config
+      # names, and runs a module a $import there names, so the key is refused. Bun applies a
+      # project config to commitlint's own imports, so a paths entry or a baseUrl there, or in a
+      # file its extends names, runs checkout code in place of a package commitlint loads. An
+      # extends naming a package, an absolute path, a missing file or a file outside the checkout
+      # is refused, since the step cannot read it before the install. This is a step of its own
+      # because actionlint stalls on Windows handing ShellCheck a script past 4 KB.
+      - name: Refused JSON keys
         run: |
-          tracked=$(git ls-files)
-          aliased=""
-          root=$(realpath -m -- "$PWD")
-          mapfile -t queue < <(printf '%s\n' "$tracked" | grep -iE '(^"?|/)(tsconfig|jsconfig)\.json"?$' || true)
-          declare -A visited=()
-          index=0
-          while [ "$index" -lt "${#queue[@]}" ]; do
-            file=${queue[$index]}
-            index=$((index + 1))
-            [ -n "$file" ] || continue
-            [ -z "${visited[$file]+set}" ] || continue
-            visited[$file]=1
-            if [ ! -f "$file" ]; then
-              aliased+="$(printf '%q' "$file") is not a file this step can read, so what it sets is unknown."$'\n'
-              continue
-            fi
-            set_keys=$(jq -r 'if type != "object" then error("is not an object") else (.compilerOptions // {}) | if type != "object" then error("compilerOptions is not an object") else [keys[] | select(. == "paths" or . == "baseUrl")] | join(" and ") end end' "$file")
-            if [ -n "$set_keys" ]; then
-              aliased+="$(printf '%q' "$file") sets $set_keys, which Bun applies to the imports of commitlint's own code."$'\n'
-            fi
-            targets=$(jq -r '(.extends // empty) | if type == "array" then .[] elif type == "string" then . else error("extends is neither a string nor a list") end' "$file")
-            while IFS= read -r target; do
-              [ -n "$target" ] || continue
-              case "$target" in
-                ./* | ../*) ;;
-                *)
-                  aliased+="$(printf '%q' "$file") extends $(printf '%q' "$target"), a package this step cannot read before the install."$'\n'
+          python3 - <<'PY'
+          import json, os, subprocess, sys
+          listed = subprocess.run(["git", "-c", "core.quotepath=off", "ls-files", "-z"], capture_output=True, check=True)
+          root = os.path.realpath(".")
+          found = []
+          MISSING = object()
+          def unique(pairs):
+              seen, repeated = set(), set()
+              for key, _ in pairs:
+                  (repeated if key in seen else seen).add(key)
+              if repeated:
+                  raise ValueError(f"repeats {', '.join(map(repr, sorted(repeated)))} in one object")
+              return dict(pairs)
+          def refuse(constant):
+              raise ValueError(f"holds {constant}")
+          def read(name):
+              try:
+                  with open(name, encoding="utf-8") as file:
+                      return json.load(file, object_pairs_hook=unique, parse_constant=refuse)
+              except (OSError, UnicodeDecodeError, ValueError, RecursionError) as error:
+                  found.append(f"{name!r} is not plain JSON with each key once per object ({error}). Rewrite it that way")
+                  return MISSING
+          queue = []
+          for name in map(os.fsdecode, filter(None, listed.stdout.split(b"\0"))):
+              base = name.rsplit("/", 1)[-1].lower()
+              if base in ("tsconfig.json", "jsconfig.json"):
+                  queue.append(name)
+              if base != "package.json" or (held := read(name)) is MISSING:
                   continue
-                  ;;
-              esac
-              resolved=$(realpath -m -- "$(dirname -- "$file")/$target")
-              if [ ! -f "$resolved" ] && [ -f "$resolved.json" ]; then
-                resolved=$resolved.json
-              fi
-              case "$resolved" in
-                "$root"/*) queue+=("${resolved#"$root"/}") ;;
-                *) aliased+="$(printf '%q' "$file") extends $(printf '%q' "$target"), outside the checkout."$'\n' ;;
-              esac
-            done <<< "$targets"
-          done
-          if [ -n "$aliased" ]; then
-            while IFS= read -r finding; do
-              [ -n "$finding" ] && echo "::error::$finding"
-            done <<< "$aliased"
-            echo "::error::Remove each paths and baseUrl setting named above. Alias through package.json imports instead."
-            exit 1
-          fi
+              if not isinstance(held, dict):
+                  found.append(f"{name!r} is not a JSON object. Make it one")
+                  continue
+              if "patchedDependencies" in held:
+                  found.append(f"{name!r} carries patchedDependencies, and bun install applies each patch it names even frozen and without scripts. Remove the key")
+              if name.lower() == "package.json" and "cosmiconfig" in held:
+                  found.append(f"{name!r} carries a cosmiconfig key, whose $import runs a module inside commitlint whatever --config names. Remove the key")
+          seen = set()
+          while queue:
+              name = queue.pop()
+              if name in seen:
+                  continue
+              seen.add(name)
+              if (held := read(name)) is MISSING:
+                  continue
+              options = held.get("compilerOptions", {}) if isinstance(held, dict) else None
+              if not isinstance(options, dict):
+                  found.append(f"{name!r} is not an object with an object compilerOptions. Make it one")
+                  continue
+              aliased = [key for key in ("paths", "baseUrl") if key in options]
+              if aliased:
+                  found.append(f"{name!r} sets {' and '.join(aliased)}, which Bun applies to commitlint's own imports. Remove it, and alias through package.json imports instead")
+              targets = held.get("extends", [])
+              for target in targets if isinstance(targets, list) else [targets]:
+                  resolved = ""
+                  if isinstance(target, str) and target.startswith(("./", "../")) and "\0" not in target:
+                      resolved = os.path.realpath(os.path.join(os.path.dirname(name), target))
+                      if not os.path.isfile(resolved) and os.path.isfile(resolved + ".json"):
+                          resolved += ".json"
+                  if not os.path.isfile(resolved) or os.path.commonpath([root, resolved]) != root:
+                      found.append(f"{name!r} extends {target!r}, which is no file in the checkout this step can read before the install. Extend one by a ./ or ../ path")
+                  else:
+                      queue.append(os.path.relpath(resolved, root).replace(os.sep, "/"))
+          for finding in found:
+              print(f"::error::{finding}.")
+          sys.exit(1 if found else 0)
+          PY
       # --ignore-scripts, so no lifecycle script and no prepare script from the caller's tree
       # runs here. commitlint needs none of them.
       - run: bun install --frozen-lockfile --ignore-scripts
