@@ -206,17 +206,21 @@ jobs:
       # by its path under node_modules, which the install above wrote from bun.lock, so a missing
       # copy fails the step. bunx --no-install would fall back to PATH, a parent node_modules/.bin
       # or its cache. Bun runs the file itself, so no shebang picks a node. --no-env-file keeps Bun
-      # from loading a .env from the checkout into commitlint's environment. --config names the
-      # caller's one config, so no name commitlint searches before it can stand in for it.
-      # COMMITLINT_DEPENDABOT_PULL_REQUEST is true on a pull request Dependabot opened alone, and
-      # the set's commitlint.config.js skips a Dependabot-shaped commit only then, since anyone can
-      # type Dependabot's header and trailer.
+      # from loading a .env from the checkout into commitlint's environment. --no-install makes a
+      # bare import that no node_modules answers an error, where Bun would fetch a copy from its
+      # install cache or the registry, whatever bun.lock pins. --config names the caller's one
+      # config, so no name commitlint searches before it can stand in for it. No --verbose: the
+      # runner keeps the first 64 KiB of Bun's output and drops the rest, and a verbose log of a
+      # long range runs past that, so the step prints each problem and the summary alone. The exit
+      # code covers every commit either way. COMMITLINT_DEPENDABOT_PULL_REQUEST is true on a pull
+      # request Dependabot opened alone, and the set's commitlint.config.js skips a
+      # Dependabot-shaped commit only then, since anyone can type Dependabot's header and trailer.
       - name: Pull request commits
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           COMMITLINT_DEPENDABOT_PULL_REQUEST: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
-        run: bun --no-env-file ./node_modules/@commitlint/cli/cli.js --config commitlint.config.js --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
+        run: bun --no-env-file --no-install ./node_modules/@commitlint/cli/cli.js --config commitlint.config.js --from "$BASE_SHA" --to "$HEAD_SHA"
       # GitHub's default squash message lands a one-commit pull request under that commit's subject
       # and a longer one under the title, each with the pull request number appended. That string
       # reaches the default branch, so it is the one the header length rule reads. Every value
@@ -225,10 +229,10 @@ jobs:
       # commitlint's defaults (merge, revert, fixup and version subjects) each match text a
       # contributor can type into a title or subject. The config that turns them off is written
       # to the runner's temporary directory, outside the checkout, so no tracked path takes part.
-      # commitlint resolves a config's extends from that config's own directory, and outside any
-      # node_modules Bun answers with a copy from its install cache or the registry, whatever
-      # bun.lock pins. So the written config resolves each extends of the caller's config from the
-      # caller's config file and hands commitlint absolute paths.
+      # commitlint resolves a config's extends from that config's own directory, where no
+      # node_modules sits. So the written config resolves each extends of the caller's config from
+      # the caller's config file and hands commitlint absolute paths. --no-install, as in the step
+      # above, turns any other bare import there into an error rather than a fetch.
       - name: Squash subject
         env:
           TITLE: ${{ github.event.pull_request.title }}
@@ -258,4 +262,4 @@ jobs:
             defaultIgnores: false,
           };
           JS
-          printf '%s (#%s)\n' "$subject" "$NUMBER" | bun --no-env-file ./node_modules/@commitlint/cli/cli.js --config "$config" --verbose
+          printf '%s (#%s)\n' "$subject" "$NUMBER" | bun --no-env-file --no-install ./node_modules/@commitlint/cli/cli.js --config "$config" --verbose
