@@ -931,8 +931,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   from the specification. Scopes live in `.github/commit-scopes.json`, an array of `{scope, covers}` objects,
   which `commitlint.config.js` reads and `CONTRIBUTING.md` points at.
 - A scope never repeats the type. `docs(docs)`, `ci(ci)` and `test(tests)` take the bare type, `docs:`, `ci:` and
-  `test:`. A scope stays only where it adds information. No `commit-scopes.json` lists a type name, `test` or
-  `tests` included, so commitlint's `scope-enum` refuses the repeat with no custom rule.
+  `test:`. A scope stays only where it adds information.
 - A header lands at most 72 characters, because github.com cuts a subject at 73. The `commits` job lints what
   lands: a pull request's title, or a one-commit pull request's subject, with ` (#N)` appended (Workflows). An
   author therefore writes 64 to 67 characters, fewer as the pull request number grows. The `commit-msg` hook checks
