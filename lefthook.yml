@@ -1,21 +1,35 @@
 # Git hooks, installed by `lefthook install`, which the package.json prepare
 # script runs on every `bun install`.
 #
-# Every job resolves its tool with `bunx --no-install`, so the version that
-# runs is the one bun.lock pins and nothing is fetched at commit time. With no
-# installed package the job exits 1, which is a refusal rather than a pass.
+# Every job starts its tool by its path under node_modules, so the version that
+# runs is the one bun.lock pins, nothing is fetched at commit time, and a
+# missing package fails the job. bunx --no-install would fall back to PATH, a
+# parent node_modules/.bin or its cache. Bun runs the file itself, so no
+# shebang picks a node, and --no-env-file keeps it from loading a .env into the
+# tool's environment. The loop ahead of each Bun unsets BUN_OPTIONS,
+# BUN_INSPECT, BUN_INSPECT_CONNECT_TO and BUN_INSPECT_PRELOAD in every
+# spelling, since Bun on Windows reads each in any case and they hand it an
+# --env-file or a preload ahead of its own arguments. BUN_INSPECT_PRELOAD
+# cannot be emptied instead: Bun exits 1 on an empty value. When node_modules
+# is gone, lefthook itself is missing: the installed hook script exits 0 and
+# the commit or push goes through. CI's commits job and gate are the control
+# for that case.
 
 commit-msg:
   jobs:
     # {1} is the message file git hands the hook. The type list comes from the
     # Conventional Commits specification and the scopes from
     # .github/commit-scopes.json, both by way of commitlint.config.js.
+    # --config names that one config, so no name commitlint searches before it
+    # can stand in for it.
     - name: commitlint
-      run: bunx --no-install commitlint --edit {1}
+      run: for name in $(env | cut -d= -f1 | grep -ixE 'bun_options|bun_inspect|bun_inspect_connect_to|bun_inspect_preload'); do unset "$name"; done; bun --no-env-file ./node_modules/@commitlint/cli/cli.js --config commitlint.config.js --edit {1}
 
 pre-push:
   jobs:
     # The gate, the same script the ci workflow's gate job runs. It runs over
-    # the working tree, so uncommitted edits count toward the result.
+    # the working tree, so uncommitted edits count toward the result. Bun runs
+    # the file directly rather than through the package script, whose runner
+    # puts node_modules/.bin first on PATH.
     - name: check
-      run: bun run check
+      run: for name in $(env | cut -d= -f1 | grep -ixE 'bun_options|bun_inspect|bun_inspect_connect_to|bun_inspect_preload'); do unset "$name"; done; bun --no-env-file scripts/check.ts

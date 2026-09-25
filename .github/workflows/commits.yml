@@ -4,8 +4,8 @@ name: commits
 # package.json and bun.lock carry commitlint, and its commitlint.config.js carries the rules and
 # reads .github/commit-scopes.json. The job therefore lints what the caller's commit-msg hook
 # lints, from the same lockfile. The range is the pull request's base..head, and commitlint reads
-# it from git. The title is linted as the subject a squash merge writes: the title with the pull
-# request number appended.
+# it from git. The subject a squash writes is linted too: the only commit's subject for a
+# one-commit pull request, the title otherwise, with the pull request number appended.
 #
 # A caller's uses: job grants permissions: contents: read. A called job can only lower what its
 # caller passes, and a caller passing none is refused before any step runs.
@@ -34,19 +34,204 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: package.json
-      - run: bun install --frozen-lockfile
-      # --from and --to are commitlint's own range: it walks base..head in git. --no-install runs
-      # the lockfile's commitlint and refuses to fetch another.
+      # This job runs beside the caller's gate, whatever its stack, so before the install it refuses
+      # what would hand commitlint a copy the lockfile does not name. bun install keeps a tracked
+      # package directory at the locked version in place of the one it would fetch, and commitlint
+      # then runs that copy. It keeps a tracked node_modules link the same way, with no check
+      # against bun.lock, so node_modules itself is refused beside any path below it. Every other
+      # tracked symbolic link is refused too: Bun reads through one to a file bun.lock never
+      # named. A tracked .npmrc, at any depth, redirects the install's registry. A
+      # package.json patchedDependencies key is applied even by a frozen install without scripts,
+      # so the key is refused in every tracked package.json, whatever it patches. bun install loads
+      # an env file at the root, frozen and without scripts, and no flag stops that. A variable
+      # there can move its registry, skip the lockfile or point its cache at a committed folder,
+      # which swaps a package with no bun.lock change. So each of the eight names Bun loads is
+      # refused at the root, the one place the install reads them. Both commitlint steps name
+      # commitlint.config.js, which stops commitlint reading any other config. cosmiconfig, which
+      # commitlint searches through, still reads a meta config from a root .config directory when
+      # it starts, whatever --config names, and runs a .config/config.js, .mjs, .cjs or .ts as
+      # code. So a tracked root .config is refused. Paths match without regard to case, as Windows
+      # and macOS open them. A failed git or jq call, a malformed package.json among them, stops
+      # the step.
+      - name: Refused paths
+        run: |
+          tracked=$(git ls-files)
+          found=$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)node_modules("?$|/)|(^"?|/)\.npmrc"?$' || true)
+          links=$(git ls-files -s | awk -F '\t' '$1 ~ /^120000 / { print $2 }')
+          meta=$(printf '%s\n' "$tracked" | grep -iE '^"?\.config(/|"?$)' || true)
+          envs=$(printf '%s\n' "$tracked" | grep -iE '^"?\.env(\.local|\.(development|production|test)(\.local)?)?"?$' || true)
+          patched=""
+          while IFS= read -r manifest; do
+            [ -n "$manifest" ] || continue
+            if [ "$(jq 'has("patchedDependencies")' "$manifest")" = true ]; then
+              patched+="$(printf '%q' "$manifest")"$'\n'
+            fi
+          done <<< "$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)package\.json"?$' || true)"
+          if [ -n "$found" ] || [ -n "$links" ] || [ -n "$meta" ] || [ -n "$envs" ] || [ -n "$patched" ]; then
+            while IFS= read -r path; do
+              [ -n "$path" ] && echo "::error::$(printf '%q' "$path") is tracked, and bun install would read it in place of what bun.lock names."
+            done <<< "$found"
+            while IFS= read -r path; do
+              [ -n "$path" ] && echo "::error::$(printf '%q' "$path") is a tracked symbolic link. bun install keeps a link as it finds it, and what Bun reads through one is no file bun.lock names."
+            done <<< "$links"
+            while IFS= read -r path; do
+              [ -n "$path" ] && echo "::error::$(printf '%q' "$path") is under the root .config, where cosmiconfig reads a config before commitlint loads the one named."
+            done <<< "$meta"
+            while IFS= read -r path; do
+              [ -n "$path" ] && echo "::error::$(printf '%q' "$path") is an env file bun install loads, which can swap a package with no bun.lock change."
+            done <<< "$envs"
+            while IFS= read -r manifest; do
+              [ -n "$manifest" ] && echo "::error::$manifest carries a patchedDependencies key, and bun install applies each patch it names even frozen and without scripts."
+            done <<< "$patched"
+            echo "::error::Remove each path and key named above."
+            exit 1
+          fi
+      # Bun reads bunfig.toml at the root each time it starts, and bun install reads its [install]
+      # table. A preload there runs code inside commitlint before its first line, and no step here
+      # names another config. So a tracked one, matched without regard to case, carries one key
+      # at most: [install] minimumReleaseAge, whatever its value, as the caller's gate allows.
+      # python3's tomllib reads it, and a file it cannot parse, or one that is not a plain file,
+      # is refused.
+      - name: Refused bunfig
+        run: |
+          python3 - <<'PY'
+          import subprocess, sys, tomllib
+          listed = subprocess.run(["git", "ls-files", "-s", "-z"], capture_output=True, check=True).stdout.decode()
+          found = []
+          for entry in filter(None, listed.split("\0")):
+              info, name = entry.split("\t", 1)
+              if name.lower() != "bunfig.toml":
+                  continue
+              if not info.startswith("100"):
+                  found.append(f"{name!r} is not a plain file")
+                  continue
+              try:
+                  with open(name, "rb") as file:
+                      held = tomllib.load(file)
+              except (OSError, tomllib.TOMLDecodeError) as error:
+                  found.append(f"{name!r} does not parse as TOML: {error}")
+                  continue
+              install = held.get("install", {})
+              extra = [key for key in held if key != "install"]
+              if isinstance(install, dict):
+                  extra += [f"install.{key}" for key in install if key != "minimumReleaseAge"]
+              else:
+                  found.append(f"{name!r} carries install as something other than a table")
+              if extra:
+                  found.append(f"{name!r} carries {', '.join(map(repr, extra))}")
+          for finding in found:
+              print(f"::error::{finding}. Bun reads bunfig.toml before commitlint runs, and the one key allowed is [install] minimumReleaseAge.")
+          sys.exit(1 if found else 0)
+          PY
+      # Bun runs commitlint and applies a tsconfig.json or jsconfig.json to its own imports, so a
+      # paths entry or a baseUrl there runs checkout code in place of a package commitlint loads.
+      # Every tracked one, at any depth and in any case, and every file its extends names, is read
+      # for either. An extends naming a package or a file outside the checkout is refused, since
+      # the step cannot read it before the install. A failed git or jq call stops the step: a
+      # malformed file among them, and one carrying comments, which jq does not read. This is a
+      # step of its own because actionlint stalls on Windows handing ShellCheck a script past 4 KB.
+      - name: Refused TypeScript path aliases
+        run: |
+          tracked=$(git ls-files)
+          aliased=""
+          root=$(realpath -m -- "$PWD")
+          mapfile -t queue < <(printf '%s\n' "$tracked" | grep -iE '(^"?|/)(tsconfig|jsconfig)\.json"?$' || true)
+          declare -A visited=()
+          index=0
+          while [ "$index" -lt "${#queue[@]}" ]; do
+            file=${queue[$index]}
+            index=$((index + 1))
+            [ -n "$file" ] || continue
+            [ -z "${visited[$file]+set}" ] || continue
+            visited[$file]=1
+            if [ ! -f "$file" ]; then
+              aliased+="$(printf '%q' "$file") is not a file this step can read, so what it sets is unknown."$'\n'
+              continue
+            fi
+            set_keys=$(jq -r 'if type != "object" then error("is not an object") else (.compilerOptions // {}) | if type != "object" then error("compilerOptions is not an object") else [keys[] | select(. == "paths" or . == "baseUrl")] | join(" and ") end end' "$file")
+            if [ -n "$set_keys" ]; then
+              aliased+="$(printf '%q' "$file") sets $set_keys, which Bun applies to the imports of commitlint's own code."$'\n'
+            fi
+            targets=$(jq -r '(.extends // empty) | if type == "array" then .[] elif type == "string" then . else error("extends is neither a string nor a list") end' "$file")
+            while IFS= read -r target; do
+              [ -n "$target" ] || continue
+              case "$target" in
+                ./* | ../*) ;;
+                *)
+                  aliased+="$(printf '%q' "$file") extends $(printf '%q' "$target"), a package this step cannot read before the install."$'\n'
+                  continue
+                  ;;
+              esac
+              resolved=$(realpath -m -- "$(dirname -- "$file")/$target")
+              if [ ! -f "$resolved" ] && [ -f "$resolved.json" ]; then
+                resolved=$resolved.json
+              fi
+              case "$resolved" in
+                "$root"/*) queue+=("${resolved#"$root"/}") ;;
+                *) aliased+="$(printf '%q' "$file") extends $(printf '%q' "$target"), outside the checkout."$'\n' ;;
+              esac
+            done <<< "$targets"
+          done
+          if [ -n "$aliased" ]; then
+            while IFS= read -r finding; do
+              [ -n "$finding" ] && echo "::error::$finding"
+            done <<< "$aliased"
+            echo "::error::Remove each paths and baseUrl setting named above. Alias through package.json imports instead."
+            exit 1
+          fi
+      # --ignore-scripts, so no lifecycle script and no prepare script from the caller's tree
+      # runs here. commitlint needs none of them.
+      - run: bun install --frozen-lockfile --ignore-scripts
+      # --from and --to are commitlint's own range: it walks base..head in git. commitlint starts
+      # by its path under node_modules, which the install above wrote from bun.lock, so a missing
+      # copy fails the step. bunx --no-install would fall back to PATH, a parent node_modules/.bin
+      # or its cache. Bun runs the file itself, so no shebang picks a node. --no-env-file keeps Bun
+      # from loading a .env from the checkout into commitlint's environment. --config names the
+      # caller's one config, so no name commitlint searches before it can stand in for it.
       - name: Pull request commits
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: bunx --no-install commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
-      # A squash merge lands the title with the number appended, so that string is what reaches
-      # the default branch and what the header length rule applies to. Both values arrive through
-      # the environment and reach commitlint on stdin, so neither is ever a shell word.
-      - name: Pull request title
+        run: bun --no-env-file ./node_modules/@commitlint/cli/cli.js --config commitlint.config.js --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
+      # GitHub's default squash message lands a one-commit pull request under that commit's subject
+      # and a longer one under the title, each with the pull request number appended. That string
+      # reaches the default branch, so it is the one the header length rule reads. Every value
+      # arrives through the environment and reaches commitlint on stdin, so none is ever a shell
+      # word. The caller's rules apply with every ignore off: its config's own ignores and
+      # commitlint's defaults (merge, revert, fixup and version subjects) each match text a
+      # contributor can type into a title or subject. The config that turns them off is written
+      # to the runner's temporary directory, outside the checkout, so no tracked path takes part.
+      # commitlint resolves a config's extends from that config's own directory, and outside any
+      # node_modules Bun answers with a copy from its install cache or the registry, whatever
+      # bun.lock pins. So the written config resolves each extends of the caller's config from the
+      # caller's config file and hands commitlint absolute paths.
+      - name: Squash subject
         env:
           TITLE: ${{ github.event.pull_request.title }}
           NUMBER: ${{ github.event.pull_request.number }}
-        run: printf '%s (#%s)\n' "$TITLE" "$NUMBER" | bunx --no-install commitlint --verbose
+          COMMITS: ${{ github.event.pull_request.commits }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$COMMITS" = "1" ]; then
+            subject=$(git log -1 --format=%s "$HEAD_SHA")
+          else
+            subject=$TITLE
+          fi
+          config=$RUNNER_TEMP/commitlint-landing.mjs
+          rm -f -- "$config"
+          cat > "$config" <<'JS'
+          import { createRequire } from 'node:module';
+          import { join } from 'node:path';
+          import { pathToFileURL } from 'node:url';
+
+          const caller = join(process.cwd(), 'commitlint.config.js');
+          const { default: config } = await import(pathToFileURL(caller).href);
+          const require = createRequire(caller);
+          export default {
+            ...config,
+            extends: [config.extends ?? []].flat().map((id) => require.resolve(id)),
+            ignores: [],
+            defaultIgnores: false,
+          };
+          JS
+          printf '%s (#%s)\n' "$subject" "$NUMBER" | bun --no-env-file ./node_modules/@commitlint/cli/cli.js --config "$config" --verbose

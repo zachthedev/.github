@@ -1,11 +1,9 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": [
-    "A deployed Bun service, such as a Cloudflare Worker. The bundle carries the dependency tree, so a runtime bump and a lock refresh both change what runs. Each cuts a release.",
+    "A deployed Bun service, such as a Cloudflare Worker. The bundle carries the dependency tree, so a runtime bump changes what runs and cuts a release.",
+    "Lock file maintenance is a chore, as in every preset, so a refreshed transitive dependency ships with the next release a user-facing change cuts. An advisory against one does not wait for it: the daily audit reports it, and its fix is a fix commit.",
     "config:recommended makes a runtime dependency a fix commit and everything else a chore."
   ],
-  "extends": ["./default"],
-  "lockFileMaintenance": {
-    "semanticCommitType": "fix"
-  }
+  "extends": ["./default"]
 }

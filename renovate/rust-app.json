@@ -1,7 +1,8 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": [
-    "A Rust workspace that publishes nothing to crates.io and ships a built artifact, such as a game mod. Same rules as rust-crates. The difference is what the repository adds, such as a submodule pointer or a crate it consumes from crates.io."
+    "A Rust workspace that publishes nothing to crates.io and ships a built artifact, such as a game mod. Same rules as rust-crates. The difference is what the repository adds, such as a submodule pointer or a crate it consumes from crates.io.",
+    "A toolchain bump is a fix here too, by rust-crates' rule: the toolchain builds the artifact this repository ships, and the standard library links into that binary."
   ],
   "extends": ["./rust-crates"]
 }

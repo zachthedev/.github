@@ -4,8 +4,11 @@
 
 ## Read first
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/dev.md](docs/dev.md) before changing anything. They bind an
-agent as they bind a person.
+Read these before changing anything, in order. They bind an agent as they bind a person.
+
+1. [README.md](README.md)
+2. [CONTRIBUTING.md](CONTRIBUTING.md), whole
+3. [SECURITY.md](SECURITY.md)
 
 ## Verify
 
@@ -18,19 +21,23 @@ agent as they bind a person.
 ## Never
 
 - Never run `bun add` or `bun install` with `--minimum-release-age` below the value in `bunfig.toml`, and never
-  pass `--ignore-scripts` to work around a blocked install script. The cooldown is the window in which a
-  malicious release is pulled, and a version installed under a lowered one lands in `bun.lock` for every later
-  install, where no cooldown reads it again.
+  pass `--ignore-scripts` to work around a blocked install script in your own install. Installing an unread pull
+  request branch passes `--ignore-scripts` on purpose ([Safety](CONTRIBUTING.md#safety)). The cooldown is the
+  window in which a malicious release is pulled, and a version installed under a lowered one lands in `bun.lock`
+  for every later install, where no cooldown reads it again.
 - Never hand-edit `CHANGELOG.md`, the version in `package.json` or `.release-please-manifest.json`
   ([why](CONTRIBUTING.md#what-never-happens)).
-- Never write a version number into `HANDBOOK.md` ([why](CONTRIBUTING.md#what-never-happens)).
+- Never run `gh auth token` where its output is visible. gh answers from the system credential store, so the
+  output is the owner's live token, and a transcript holding it forces a rotation.
 - Never write a `mise.lock` line outside `mise lock`, except a checksum computed as `mise.toml` says
   ([why](CONTRIBUTING.md#what-never-happens)).
-- Never merge a preset or workflow change past a red gate ([why](CONTRIBUTING.md#what-never-happens)).
+- Never commit a mise config or lock file beside `mise.toml` and `mise.lock`
+  ([why](CONTRIBUTING.md#what-never-happens)).
+- Never merge past a red gate ([why](CONTRIBUTING.md#what-never-happens)).
 
 ## Deviations
 
-A comment beside a line that names the handbook records a deliberate deviation. It is a decision, not a defect.
+A comment beside a deviating line records a deliberate deviation. It is a decision, not a defect.
 
 ## Where the rest is
 

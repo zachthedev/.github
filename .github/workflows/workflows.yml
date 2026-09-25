@@ -1,10 +1,15 @@
 name: workflows
 
-# actionlint and zizmor over the caller's workflows, at the versions the caller's mise.toml pins
-# and from the artifacts its mise.lock records. mise-action finds the lockfile and runs
-# mise install --locked, so the job installs the bytes the caller's gate installs. A run of this
-# job and a run of the gate read the same two files, and both prove ShellCheck ran before they
-# trust a clean actionlint run.
+# actionlint and zizmor over the caller's .github directory, at the versions the caller's
+# mise.toml pins and from the artifacts its mise.lock records. The job installs taplo, ShellCheck,
+# actionlint and zizmor, the four tools it runs, locked, so it installs the bytes the caller's gate
+# installs for them. A run of this job and a run of the gate read the same two files, and both
+# prove ShellCheck ran before they trust a clean actionlint run.
+#
+# The job token sits in this job and in no gate job. Inside a job a step's environment is not a
+# boundary, since any step can read the token from the runner, so the token goes to the job that
+# installs no dependencies and runs no build or test. Two steps name it: the lockfile asset check
+# and zizmor, whose online audits need it.
 #
 # A caller's uses: job grants permissions: contents: read. A called job can only lower what its
 # caller passes, and a caller passing none is refused before any step runs.
@@ -13,6 +18,20 @@ on:
 
 permissions: {}
 
+# Every mise command in the workflow reads mise.toml and mise.lock alone, the two files the
+# caller's gate asserts. mise merges every config file it discovers and each one's sibling
+# lockfile, so a committed mise.local.toml with a lockfile of its own would otherwise send the
+# install to any url. The names and values are the gate's own: no other config filename, no
+# .tool-versions, no environment-specific file, and the url_replacements rule that sends mise's
+# url_api fallback to a host that does not resolve. The environment outranks every file mise
+# reads, .miserc.toml included. A called workflow inherits no caller's env, so these are set here.
+env:
+  MISE_OVERRIDE_CONFIG_FILENAMES: mise.toml
+  MISE_OVERRIDE_TOOL_VERSIONS_FILENAMES: none
+  MISE_ENV: ''
+  MISE_AUTO_ENV: 'false'
+  MISE_URL_REPLACEMENTS: '{"regex:^https://api\\.github\\.com/repos/[^/]+/[^/]+/releases/assets/.*$":"https://url-api-refused.invalid/"}'
+
 jobs:
   workflows:
     runs-on: ubuntu-latest
@@ -20,29 +39,324 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      # The action verifies its own download against the release's minisign-signed checksums.
-      # With mise.lock in the checkout it runs mise install --locked, which refuses a tool the
-      # lockfile does not pin for this platform. The caller's mise.toml settings apply, because
-      # the action trusts the checkout. cache: false, so every run installs cold and mise
-      # re-verifies each artifact and its provenance line. A restored cache would skip both.
+      # Before the checkout, so no repository file exists while the action runs. It always runs
+      # mise --version and mise ls, and trusts the workspace, so a caller's mise.toml would have
+      # its [env] and [vars] exec templates evaluated here, ahead of every refusal below. With
+      # install: false and a pinned version it reads no repository file, and the bin directory it
+      # puts on PATH lies outside the workspace the checkout cleans. The action verifies its own
+      # download against the release's minisign-signed checksums. cache: false, so nothing is
+      # restored. github_token: '', because a locked install of a tool mise's registry routes, as
+      # the four this job installs are, makes no GitHub API request, and the default exports the
+      # job token as MISE_GITHUB_TOKEN to every later step. env: false
+      # and export_path: false, because the defaults write the output of mise env --json to
+      # GITHUB_ENV and mise's PATH entries to GITHUB_PATH. add_shims_to_path: false, so a bare
+      # program name in a later step never resolves to a tool the caller's mise.toml pins. Every
+      # step reaches a pinned tool through the path mise which prints.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
           version: 2026.9.11
+          install: false
           cache: false
-      # actionlint exits 0 with ShellCheck absent or unable to start, and no flag changes that. A
-      # path that resolves to nothing turns the rule off with no word outside -verbose. This step
-      # writes a workflow whose one finding belongs to ShellCheck and requires the finding back, so
-      # the clean run below carries weight. The path is resolved in its own statement, so a failed
-      # resolution stops the step, and the run below reads the path this step proved.
+          github_token: ''
+          env: false
+          export_path: false
+          add_shims_to_path: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # This job runs beside the caller's gate, not after it, so a red gate stops nothing here.
+      # The job therefore refuses what the gate refuses, before any mise command reads the
+      # checkout: every mise config, lock or rc file other than mise.toml and mise.lock, in the
+      # root and in .config, every file at the root named like a program a gate, its hooks or an
+      # install start, or like bunx, with any extension, which Windows runs from the current
+      # directory ahead of PATH under any extension PATHEXT lists, and every link at the root or
+      # under .config, .mise or mise, which mise would follow past the names. Names compare
+      # without regard to case, as they do on Windows and macOS. mise.semver.toml and its lock
+      # are a Rust repository's named exception, and MISE_ENV above keeps mise from reading
+      # them here. The pins above are the second layer.
+      - name: Refused files
+        run: |
+          found=$(
+            find . -mindepth 1 -maxdepth 1 \( -iname .tool-versions -o -iname .miserc.toml -o -iname mise -o -iname .mise \
+              -o -iname .mise.toml -o -iname .mise.lock -o -iname '.mise.*.toml' -o -iname '.mise.*.lock' \
+              -o -iname 'mise.*.toml' -o -iname 'mise.*.lock' \) ! -name mise.semver.toml ! -name mise.semver.lock -print
+            find . -mindepth 1 -maxdepth 1 ! -type d \( -iname gh -o -iname 'gh.*' -o -iname bun -o -iname 'bun.*' \
+              -o -iname git -o -iname 'git.*' -o -iname mise -o -iname 'mise.*' -o -iname bunx -o -iname 'bunx.*' \
+              -o -iname node -o -iname 'node.*' \) \
+              ! -name bun.lock ! -name mise.toml ! -name mise.lock ! -name mise.semver.toml ! -name mise.semver.lock -print
+            find . -mindepth 2 -maxdepth 2 -ipath './.config/mise*' -print
+            find . -mindepth 1 -maxdepth 1 -type l -print
+            find . -mindepth 2 \( -ipath './.config/*' -o -ipath './.mise/*' -o -ipath './mise/*' \) -type l -print
+          )
+          if [ -n "$found" ]; then
+            while IFS= read -r path; do
+              echo "::error::mise or a gate reads $(printf '%q' "$path") in place of mise.toml, mise.lock or the program on PATH."
+            done <<< "$found"
+            echo "::error::Remove each file and link named above."
+            exit 1
+          fi
+      # zizmor honors an inline ignore comment, which waives any audit on its line outside
+      # .github/zizmor.yml, the one file the caller's gate compares whole. So every zizmor waiver
+      # lives in that file, and a tracked file under .github carrying such a comment is refused,
+      # matched without regard to case or spacing. git grep exits 1 on no match. A ShellCheck
+      # directive is refused where ShellCheck reads it, by the stand-in below.
+      - name: Refused zizmor waivers
+        run: |
+          status=0
+          waivers=$(git grep -I -n -i -E 'zizmor:[[:space:]]*ignore\[' -- .github) || status=$?
+          if [ "$status" -gt 1 ]; then
+            echo "::error::git grep could not read the tracked files under .github."
+            exit 1
+          fi
+          if [ -n "$waivers" ]; then
+            while IFS= read -r match; do
+              path=${match%%:*}
+              rest=${match#*:}
+              echo "::error::$(printf '%q' "$path") line ${rest%%:*} waives a zizmor audit inline. Move it into .github/zizmor.yml, under that audit's ignore list."
+            done <<< "$waivers"
+            exit 1
+          fi
+      # actionlint reads .github/actionlint.yaml or .yml from the checkout, and a paths ignore there
+      # drops any finding by pattern, ShellCheck's and the stand-in's refusal included. So a
+      # tracked one is refused, matched without regard to case, as the caller's gate refuses it.
+      # A failed git call stops the step.
+      - name: Refused actionlint config
+        run: |
+          tracked=$(git ls-files)
+          configs=$(printf '%s\n' "$tracked" | grep -iE '^"?\.github/actionlint\.ya?ml"?$' || true)
+          if [ -n "$configs" ]; then
+            while IFS= read -r path; do
+              echo "::error::$(printf '%q' "$path") is an actionlint config, which can ignore any finding this job reports. Remove it."
+            done <<< "$configs"
+            exit 1
+          fi
+      # actionlint hands ShellCheck a script only when its shell is bash or sh, or starts with
+      # "bash " or "sh ", so a step or defaults.run shell such as /bin/bash -e {0} runs bash with
+      # no ShellCheck at all. Every shell key in a tracked workflow is held to bash, sh or pwsh,
+      # written plainly on its own line, with no continuation on a deeper line. No YAML parser is
+      # pinned here, so the check reads every line but comments, script text included, and
+      # decodes every double-quoted string's escapes first, so an escaped key reads as its text.
+      # A script line that spells a shell key is refused too. An explicit ? key and an alias
+      # written as a key are refused, since either can name a key the line never spells.
+      # actionlint refuses a key in another case, so the match is exact.
+      - name: Held shell values
+        run: |
+          python3 - <<'PY'
+          import re, subprocess, sys
+          listed = subprocess.run(["git", "ls-files", "-z", "--", ".github/workflows"], capture_output=True, check=True)
+          KEY = re.compile(r"(?:^|[^A-Za-z0-9_-])shell[\s\"']*:")
+          HELD = re.compile(r"^(\s*(?:-\s+)?)shell[:]\s+(?:bash|sh|pwsh)\s*(?:#.*)?$")
+          EXPLICIT = re.compile(r"^\s*(?:-\s+)?\?(?:\s|$)")
+          ALIAS = re.compile(r"(?:^|[\s{,])\*[^\s:]+\s*:(?:\s|$)")
+          QUOTED = re.compile(r'"((?:[^"\\]|\\.)*)"')
+          ESCAPE = re.compile(r"\\(x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|.)")
+          def decoded(text):
+              return ESCAPE.sub(lambda m: chr(int(m[1][1:], 16)) if len(m[1]) > 1 else m[1], text)
+          found = []
+          for name in filter(None, listed.stdout.decode().split("\0")):
+              with open(name, encoding="utf-8", errors="replace") as file:
+                  lines = file.read().split("\n")
+              for number, line in enumerate(lines, 1):
+                  if line.lstrip().startswith("#"):
+                      continue
+                  plain = QUOTED.sub(lambda m: '"' + decoded(m[1]) + '"', line)
+                  if KEY.search(line) or KEY.search(plain):
+                      held = HELD.match(line)
+                      after = next((text for text in lines[number:] if text.strip()), "")
+                      if not held or len(after) - len(after.lstrip(" ")) > len(held[1]):
+                          found.append(f"{name!r} line {number} sets a shell other than bash, sh or pwsh, or in another form")
+                  elif EXPLICIT.match(line) or ALIAS.search(line):
+                      found.append(f"{name!r} line {number} writes a key as an explicit ? key or an alias")
+          for finding in found:
+              print(f"::error::{finding}. actionlint runs ShellCheck for bash and sh alone.")
+          sys.exit(1 if found else 0)
+          PY
+      # mise runs a config's hooks, [env] and [vars] exec templates and a tool entry's
+      # postinstall command whenever it loads the file, so mise.toml holds [tools], [tool_config]
+      # and [settings] alone, each with the keys the caller's gate reads, and mise.lock holds the
+      # keys mise writes. Each [tools] entry is a version or a table, and each mise.lock tool a
+      # list of tables, as the caller's gate requires. Any other form is refused: mise reads an
+      # entry written as an array of tables, options included. The caller's gate compares the
+      # values; this step refuses a key before the install below loads the file. A key reaches the
+      # log through repr, so a control or bidirectional character prints as an escape.
+      - name: Refused keys
+        run: |
+          python3 - <<'PY'
+          import sys, tomllib
+          SECTIONS = {
+              "tool_config": {"locked"},
+              "settings": {"locked", "lockfile", "locked_verify_provenance", "provenance_api_failures_fatal",
+                           "lockfile_platforms", "url_replacements", "github_attestations", "aqua"},
+          }
+          AQUA = {"github_attestations"}
+          OPTIONS = {"version", "version_prefix"}
+          FIELDS = {"checksum", "url", "url_api", "provenance"}
+          found = []
+          with open("mise.toml", "rb") as file:
+              pins = tomllib.load(file)
+          for key, value in pins.items():
+              if key != "tools" and key not in SECTIONS:
+                  found.append(f"mise.toml carries {key!r}")
+              elif not isinstance(value, dict):
+                  found.append(f"mise.toml gives [{key}] as a {type(value).__name__}, not a table")
+              elif key in SECTIONS:
+                  found += [f"mise.toml sets {name!r} under [{key}]" for name in value if name not in SECTIONS[key]]
+                  aqua = value.get("aqua", {}) if key == "settings" else {}
+                  if not isinstance(aqua, dict):
+                      found.append(f"mise.toml gives [settings.aqua] as a {type(aqua).__name__}, not a table")
+                  else:
+                      found += [f"mise.toml sets {name!r} under [settings.aqua]" for name in aqua if name not in AQUA]
+              else:
+                  for tool, entry in value.items():
+                      if isinstance(entry, dict):
+                          found += [f"mise.toml gives {tool!r} the option {option!r}" for option in entry if option not in OPTIONS]
+                      elif not isinstance(entry, str):
+                          found.append(f"mise.toml gives {tool!r} as a {type(entry).__name__}, neither a version nor a table")
+          with open("mise.lock", "rb") as file:
+              lock = tomllib.load(file)
+          found += [f"mise.lock carries {key!r}" for key in lock if key not in ("lockfile_version", "tools")]
+          tools = lock.get("tools", {})
+          if not isinstance(tools, dict):
+              found.append(f"mise.lock gives [tools] as a {type(tools).__name__}, not a table")
+              tools = {}
+          for tool, entries in tools.items():
+              if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
+                  found.append(f"mise.lock gives {tool!r} in a form other than a list of tables")
+                  continue
+              for entry in entries:
+                  for key, value in entry.items():
+                      if key == "platforms" or key.startswith("platforms."):
+                          nested = key == "platforms" and isinstance(value, dict)
+                          for platform, fields in (value.items() if nested else [(key, value)]):
+                              if not isinstance(fields, dict):
+                                  found.append(f"mise.lock gives {tool!r} on {platform!r} a value that is not a table")
+                              else:
+                                  found += [f"mise.lock gives {tool!r} on {platform!r} the key {field!r}" for field in fields
+                                            if field not in FIELDS]
+                      elif key == "options":
+                          options = value if isinstance(value, dict) else {"(not a table)": None}
+                          found += [f"mise.lock gives {tool!r} the option {option!r}" for option in options if option not in OPTIONS]
+                      elif key not in ("version", "backend", "specifiers"):
+                          found.append(f"mise.lock gives {tool!r} the key {key!r}")
+          for finding in found:
+              print(f"::error::{finding}, which no rule reads. Remove it.")
+          sys.exit(1 if found else 0)
+          PY
+      # With the refusals passed, the four tools this job runs install, locked, so a tool the
+      # lockfile does not pin for this platform is refused. mise re-verifies each artifact and its
+      # provenance line, since nothing was restored. Each is a registry tool whose attestation
+      # mise reads from mise-versions.jdx.dev, so the step needs no token. A caller's other pins,
+      # such as a github: coordinate whose attestation only GitHub's API serves, are left alone.
+      # If mise-versions cannot verify an attestation, mise asks GitHub's API instead, without a
+      # token, and a refused or rate-limited answer fails the install.
+      - name: mise install
+        run: mise install --locked taplo shellcheck actionlint zizmor
+      # mise.lock names each artifact twice: the url mise downloads, and url_api, the same asset
+      # by id. GitHub records each asset's download address, and its sha256 for an asset uploaded
+      # since it began keeping digests. This step asks GitHub for every asset the lockfile names
+      # by id and requires the address to equal the lockfile's url and the digest, where GitHub
+      # keeps one, to equal its checksum. For a tool whose release carries no attestation,
+      # ShellCheck today, that digest is the second source for the checksum mise verifies. An
+      # asset with no digest, taplo's, is held to its address alone. Both spellings of a
+      # platform table are read, and a url_api outside the asset reference form, a failed call
+      # or a lockfile naming no asset at all fails the step. A lockfile value reaches the log
+      # through printf %q, so a control character in it prints as an escape.
+      - name: Lockfile assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          taplo=$(mise which taplo)
+          "$taplo" get -f mise.lock -o json > "$RUNNER_TEMP/lock.json"
+          jq -r '
+            .tools // {} | to_entries[] | .key as $tool | .value[] |
+            ( (to_entries[] | select(.key | startswith("platforms.")) | {platform: (.key | ltrimstr("platforms.")), entry: .value}),
+              (.platforms // {} | to_entries[] | {platform: .key, entry: .value}) ) |
+            select(.entry.url_api != null) |
+            [$tool, .platform, .entry.url_api, (.entry.url // ""), (.entry.checksum // "")] | @tsv
+          ' "$RUNNER_TEMP/lock.json" > "$RUNNER_TEMP/assets.tsv"
+          reference='^https://api\.github\.com/(repos/[A-Za-z0-9-]+/[A-Za-z0-9_.-]+/releases/assets/[0-9]+)$'
+          checked=0
+          failed=0
+          while IFS=$'\t' read -r tool platform api url checksum; do
+            label="$(printf '%q %q' "$tool" "$platform")"
+            if [[ ! "$api" =~ $reference ]] || [[ "$api" == */../* ]] || [[ "$api" == */./* ]]; then
+              echo "::error::$label url_api is not a release asset reference: $(printf '%q' "$api")"
+              failed=1
+              continue
+            fi
+            path=${BASH_REMATCH[1]}
+            if ! asset=$(gh api "$path" --jq '[.browser_download_url, (.digest // "")] | @tsv' < /dev/null); then
+              echo "::error::$label: gh api $path failed"
+              failed=1
+              continue
+            fi
+            IFS=$'\t' read -r served digest <<< "$asset"
+            if [ "$served" != "$url" ]; then
+              echo "::error::$label: GitHub serves asset $path at $served, and mise.lock records $(printf '%q' "$url")"
+              failed=1
+            fi
+            if [ -n "$digest" ] && [ "$digest" != "$checksum" ]; then
+              echo "::error::$label: GitHub records $digest for asset $path, and mise.lock records $(printf '%q' "$checksum")"
+              failed=1
+            fi
+            checked=$((checked + 1))
+          done < "$RUNNER_TEMP/assets.tsv"
+          if [ "$checked" -eq 0 ] && [ "$failed" -eq 0 ]; then
+            echo "::error::mise.lock names no release asset by id, so this step checked nothing."
+            exit 1
+          fi
+          echo "Checked $checked lockfile assets against GitHub."
+          exit "$failed"
+      # actionlint runs ShellCheck through a stand-in this step writes to RUNNER_TEMP from this
+      # workflow's own text, never from the caller's checkout. actionlint hands it each script as
+      # ShellCheck reads it, YAML decoded, so no escape or fold hides a line from it. It refuses
+      # every line holding a ShellCheck directive, in any case, as a finding in ShellCheck's JSON
+      # form, clears SHELLCHECK_OPTS, and otherwise runs the pinned ShellCheck over the same bytes.
+      # Any error exits nonzero with nothing on stdout, which fails actionlint. actionlint exits 0 when
+      # the program it names cannot start, so two canaries run with the same -shellcheck value:
+      # one needs SC2086 back, which proves ShellCheck runs behind the stand-in, and one needs the
+      # refusal back, which proves the stand-in is wired. The value quotes each path, since
+      # actionlint splits it as a command line. actionlint first looks the whole value up as one
+      # program path, relative to the checkout, so a root entry named ' would run in place of the
+      # stand-in, answer both canaries and run pull-request code here. Such an entry is refused.
       # -pyflakes= turns the Python linter off. No caller pins one, so a finding from it would be
       # one the caller's gate never reports.
-      - name: ShellCheck present
+      - name: ShellCheck stand-in
         id: shellcheck
         run: |
+          if [ -e "'" ] || [ -L "'" ]; then
+            echo "::error::A root entry named ' would run in place of the ShellCheck stand-in, since actionlint looks the whole -shellcheck value up as one path. Remove it."
+            exit 1
+          fi
           shellcheck=$(mise which shellcheck)
+          actionlint=$(mise which actionlint)
+          standin="$RUNNER_TEMP/shellcheck-stand-in.sh"
+          cat > "$standin" <<'STANDIN'
+          #!/bin/bash
+          set -uo pipefail
+          shellcheck=$1
+          shift
+          script=$(mktemp) || exit 2
+          trap 'rm -f "$script"' EXIT
+          cat > "$script" || exit 2
+          status=0
+          lines=$(grep -n -i -E '#[[:space:]]*shellcheck[[:space:]]' "$script" | cut -d: -f1) || status=$?
+          if [ "$status" -gt 1 ]; then
+            exit 2
+          fi
+          if [ -n "$lines" ]; then
+            findings=""
+            while IFS= read -r line; do
+              findings+="${findings:+,}{\"file\":\"-\",\"line\":$line,\"endLine\":$line,\"column\":1,\"endColumn\":1,\"level\":\"error\",\"code\":0,\"message\":\"A ShellCheck directive is refused in a workflow script. Rewrite the script so ShellCheck passes it.\"}"
+            done <<< "$lines"
+            printf '[%s]\n' "$findings"
+            exit 1
+          fi
+          unset SHELLCHECK_OPTS
+          exec "$shellcheck" "$@" < "$script"
+          STANDIN
+          chmod 755 "$standin"
+          command="'$standin' '$shellcheck'"
           canary=$(mktemp -d)
           cat > "$canary/canary.yml" <<'CANARY'
           name: canary
@@ -53,29 +367,93 @@ jobs:
               steps:
                 - run: echo $GITHUB_REF
           CANARY
-          found=$(mise exec -- actionlint -pyflakes= -shellcheck="$shellcheck" "$canary/canary.yml" || true)
+          hash='#'
+          cat > "$canary/directive.yml" <<CANARY
+          name: canary
+          on: push
+          jobs:
+            canary:
+              runs-on: ubuntu-latest
+              steps:
+                - run: |
+                    ${hash} shellcheck disable=SC2086
+                    echo \$GITHUB_REF
+          CANARY
+          found=$("$actionlint" -pyflakes= -shellcheck="$command" "$canary/canary.yml" || true)
           case "$found" in
             *SC2086*) ;;
             *)
-              echo "::error::actionlint found no SC2086 in a script that carries one, so ShellCheck never ran."
-              echo "::error::Check that ${shellcheck} starts."
+              echo "::error::actionlint found no SC2086 in a script that carries one, so ShellCheck never ran behind the stand-in."
               exit 1
               ;;
           esac
-          echo "path=$shellcheck" >> "$GITHUB_OUTPUT"
-      # -shellcheck names the binary the step above proved, so actionlint cannot pick another off
-      # PATH.
+          found=$("$actionlint" -pyflakes= -shellcheck="$command" "$canary/directive.yml" || true)
+          case "$found" in
+            *"ShellCheck directive is refused"*) ;;
+            *)
+              echo "::error::actionlint returned no refusal for a script carrying a ShellCheck directive, so the stand-in never ran."
+              exit 1
+              ;;
+          esac
+          echo "command=$command" >> "$GITHUB_OUTPUT"
+          echo "actionlint=$actionlint" >> "$GITHUB_OUTPUT"
+      # -shellcheck names the stand-in the step above proved, so actionlint cannot pick another
+      # ShellCheck off PATH, and the actionlint that runs is the one the step above ran.
       - name: actionlint
         env:
-          SHELLCHECK: ${{ steps.shellcheck.outputs.path }}
-        run: mise exec -- actionlint -pyflakes= -shellcheck="$SHELLCHECK"
+          ACTIONLINT: ${{ steps.shellcheck.outputs.actionlint }}
+          SHELLCHECK: ${{ steps.shellcheck.outputs.command }}
+        run: '"$ACTIONLINT" -pyflakes= -shellcheck="$SHELLCHECK"'
+      # A secrets-inherit waiver in .github/zizmor.yml binds to a file or a line, not to the
+      # workflow a job calls, so pointing a waived job at another repository keeps the waiver and
+      # hands that repository every secret. zizmor runs here with no config and --no-ignores, which
+      # drops inline ignore comments too, so it reports every job that passes secrets: inherit,
+      # waived or not, and each one must call a reusable workflow of zachthedev/.github. That
+      # repository's own run also accepts its ./.github/workflows/ calls. zizmor exits 10 to 14
+      # when it reports findings; any other nonzero exit is an error.
+      - name: Held secrets-inherit callees
+        run: |
+          zizmor=$(mise which zizmor)
+          status=0
+          report=$("$zizmor" --no-progress --offline --no-config --no-ignores --strict-collection --format json --collect=all .github) || status=$?
+          if [ "$status" -ne 0 ] && { [ "$status" -lt 10 ] || [ "$status" -gt 14 ]; }; then
+            echo "::error::zizmor could not audit .github (exit $status)."
+            exit 1
+          fi
+          own=""
+          if [ "${GITHUB_REPOSITORY,,}" = zachthedev/.github ]; then
+            own=./.github/workflows/
+          fi
+          callers=$(printf '%s' "$report" | jq -r '.[] | select(.ident == "secrets-inherit") | .locations[] | select(.symbolic.kind == "Primary") | [(.symbolic.key.Local.verbatim_path // "unknown" | gsub("\\\\"; "/")), (.concrete.location.start_point.row + 1 | tostring), .concrete.feature] | @tsv')
+          refused=0
+          while IFS=$'\t' read -r path line callee; do
+            [ -n "$path" ] || continue
+            callee=${callee#[\"\']}
+            callee=${callee%[\"\']}
+            lowered=${callee,,}
+            case "$lowered" in
+              zachthedev/.github/.github/workflows/*) continue ;;
+            esac
+            if [ -n "$own" ] && [ "${lowered#"$own"}" != "$lowered" ]; then
+              continue
+            fi
+            echo "::error::$(printf '%q' "$path") line $line passes secrets: inherit to $(printf '%q' "$callee"). Only a reusable workflow of zachthedev/.github takes a caller's secrets."
+            refused=1
+          done <<< "$callers"
+          exit "$refused"
       # Online, so the audits that ask GitHub run: a pinned commit outside its action's
-      # repository, a stale action ref. The job token is enough for them and is read-only.
-      # --strict-collection fails on a file zizmor cannot parse. Without it a broken workflow
-      # is dropped and reported as clean. The config is named, so ZIZMOR_CONFIG in the
-      # environment cannot swap it. The input is the workflows directory, the same input the
-      # gate reads, so the two report the same files.
+      # repository, a known-vulnerable action, a version comment naming the wrong tag. The job
+      # token is enough for them and is read-only, and any failed call aborts the run. Every
+      # gate runs zizmor offline in CI, so this step is where those audits run.
+      # --strict-collection fails on a file zizmor cannot parse. Without it a broken workflow is
+      # dropped and reported as clean. The config is named, so ZIZMOR_CONFIG in the environment
+      # cannot swap it. The input is .github, the gate's own input, which holds the workflows,
+      # dependabot.yml and any composite action under .github/actions. --collect=all turns
+      # zizmor's ignore handling off, so no .gitignore, exclude file or global excludes file can
+      # hide one of them.
       - name: zizmor
         env:
           GH_TOKEN: ${{ github.token }}
-        run: mise exec -- zizmor --no-progress --strict-collection --config .github/zizmor.yml .github/workflows
+        run: |
+          zizmor=$(mise which zizmor)
+          "$zizmor" --no-progress --strict-collection --config .github/zizmor.yml --collect=all .github

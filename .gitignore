@@ -6,6 +6,11 @@ REPOS.md
 .claude/worktrees/
 .claude/settings.local.json
 
+# lefthook's personal configs, which it merges over lefthook.yml on one machine alone. The gate
+# refuses a tracked one.
+/lefthook-local*
+/.lefthook-local*
+
 # Below: github/gitignore/Node.gitignore at f5de2c2bb2c117f9ae643d6baa7acc23c580b7aa, unchanged.
 # The block can be edited in place. A note here says what changed, so a refresh knows what to carry.
 # Logs
