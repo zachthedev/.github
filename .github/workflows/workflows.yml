@@ -98,12 +98,14 @@ jobs:
       # zizmor honors an inline ignore comment, which waives any audit on its line outside
       # .github/zizmor.yml, the one file the caller's gate compares whole. So every zizmor waiver
       # lives in that file, and a tracked file under .github carrying such a comment is refused,
-      # matched without regard to case or spacing. git grep exits 1 on no match. A ShellCheck
+      # matched without regard to case or spacing. git grep reads every file as text (-a), since
+      # a tracked .gitattributes line marking a workflow -diff or binary would otherwise make it
+      # skip that file or print only that it matches. git grep exits 1 on no match. A ShellCheck
       # directive is refused where ShellCheck reads it, by the stand-in below.
       - name: Refused zizmor waivers
         run: |
           status=0
-          waivers=$(git grep -I -n -i -E 'zizmor:[[:space:]]*ignore\[' -- .github) || status=$?
+          waivers=$(git grep -a -n -i -E 'zizmor:[[:space:]]*ignore\[' -- .github) || status=$?
           if [ "$status" -gt 1 ]; then
             echo "::error::git grep could not read the tracked files under .github."
             exit 1
@@ -410,7 +412,13 @@ jobs:
       # drops inline ignore comments too, so it reports every job that passes secrets: inherit,
       # waived or not, and each one must call a reusable workflow of zachthedev/.github. That
       # repository's own run also accepts its ./.github/workflows/ calls. zizmor exits 10 to 14
-      # when it reports findings; any other nonzero exit is an error.
+      # when it reports findings; any other nonzero exit is an error. A finding with no primary
+      # location names no callee, so any such finding fails the step. Each entry of
+      # rules.secrets-inherit.ignore in .github/zizmor.yml, a file or a file:line:column, must
+      # name a file holding such a job; a waiver naming none means the waiver or the audit went
+      # stale. zizmor leaves an ignored finding out of its report and names no waiver that matched
+      # nothing, so the list is read from the file itself, by the image's yq. A jq or yq failure
+      # stops the step.
       - name: Held secrets-inherit callees
         run: |
           zizmor=$(mise which zizmor)
@@ -424,8 +432,32 @@ jobs:
           if [ "${GITHUB_REPOSITORY,,}" = zachthedev/.github ]; then
             own=./.github/workflows/
           fi
+          unread=$(printf '%s' "$report" | jq '[.[] | select(.ident == "secrets-inherit") | select([.locations[] | select(.symbolic.kind == "Primary")] | length == 0)] | length')
+          if [ "$unread" -ne 0 ]; then
+            echo "::error::zizmor reported $unread secrets-inherit findings with no primary location, so this step cannot read their callee."
+            exit 1
+          fi
           callers=$(printf '%s' "$report" | jq -r '.[] | select(.ident == "secrets-inherit") | .locations[] | select(.symbolic.kind == "Primary") | [(.symbolic.key.Local.verbatim_path // "unknown" | gsub("\\\\"; "/")), (.concrete.location.start_point.row + 1 | tostring), .concrete.feature] | @tsv')
+          if ! waivers=$(yq -o=json '.rules."secrets-inherit".ignore // []' .github/zizmor.yml); then
+            echo "::error::yq could not read .github/zizmor.yml, so its secrets-inherit waivers are unknown."
+            exit 1
+          fi
+          waived=$(printf '%s' "$waivers" | jq -r 'if type == "array" and all(.[]; type == "string" and (test("[[:cntrl:]]") | not)) then .[] else error("rules.secrets-inherit.ignore in .github/zizmor.yml is not a list of file names") end')
           refused=0
+          while IFS= read -r entry; do
+            [ -n "$entry" ] || continue
+            named=${entry%%:*}
+            held=0
+            while IFS=$'\t' read -r path _; do
+              if [ -n "$path" ] && [ "${path##*/}" = "$named" ]; then
+                held=1
+              fi
+            done <<< "$callers"
+            if [ "$held" -eq 0 ]; then
+              echo "::error::.github/zizmor.yml waives secrets-inherit in $(printf '%q' "$entry"), and zizmor reported no job there passing secrets: inherit, so the waiver or the audit is stale. Remove the entry."
+              refused=1
+            fi
+          done <<< "$waived"
           while IFS=$'\t' read -r path line callee; do
             [ -n "$path" ] || continue
             callee=${callee#[\"\']}
