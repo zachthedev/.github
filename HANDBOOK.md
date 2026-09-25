@@ -154,10 +154,14 @@ command. A row that a section owns names that section.
   runs, reads or changes in a session. It reaches everything about the tree by a relative link. A session rule
   is written with its reason. A tree rule is one imperative line with a link to
   `CONTRIBUTING.md#what-never-happens` and no reason.
-- Its Read first section is the same base list in every repository, in order: `README.md`, `CONTRIBUTING.md`,
-  `SECURITY.md`, then each kind document present, `docs/install.md`, `docs/deploy.md` and `docs/usage.md`. A
-  repository may extend the list.
+- Its Read first section is the same base list in every repository, in order: `README.md`, `CONTRIBUTING.md` and
+  `SECURITY.md`, then whichever of `docs/install.md`, `docs/deploy.md` and `docs/usage.md` the repository has, in
+  that order. A repository may add to the list after those.
 - `AGENTS.md` never references this handbook. Agents do not read it, and it is the owner's alignment tool.
+- No contributor document, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `AGENTS.md` or a file under `docs/`,
+  describes a path only the owner can take, such as `gh pr merge --admin`. That merge works only while the owner
+  is the sole approver, and contributors will approve the owner's pull requests later. This handbook is the
+  owner's alignment tool, not a contributor document, so its owner-process text stays.
 - `CLAUDE.md` is one line, `@AGENTS.md`. Claude Code expands the import, so the same file is read once in every
   session, on every platform.
 - `docs/` is flat, apart from `docs/images/` for the images a document shows. A kind adds the files its Files
@@ -926,6 +930,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Conventional commits, enforced by the `commit-msg` hook (Hooks) and again by the `commits` job. Types come
   from the specification. Scopes live in `.github/commit-scopes.json`, an array of `{scope, covers}` objects,
   which `commitlint.config.js` reads and `CONTRIBUTING.md` points at.
+- A scope never repeats the type. `docs(docs)`, `ci(ci)` and `test(tests)` take the bare type, `docs:`, `ci:` and
+  `test:`. A scope stays only where it adds information.
 - A header lands at most 72 characters, because github.com cuts a subject at 73. The `commits` job lints what
   lands: a pull request's title, or a one-commit pull request's subject, with ` (#N)` appended (Workflows). An
   author therefore writes 64 to 67 characters, fewer as the pull request number grows. The `commit-msg` hook checks

@@ -417,9 +417,6 @@ A local run that fails or disagrees with CI:
 - No mise config or lock file is committed beside `mise.toml` and `mise.lock`. mise merges every config file it
   finds, each with its own lockfile, so another one sends an install to any url with any checksum. The gate
   refuses one.
-- Nothing merges past a red gate. The required checks and the code-scanning rule sit in the
-  `default-branch checks` ruleset, which has no bypass actor, so an `--admin` merge waives the approval and
-  nothing else. A check that cannot report, such as one stuck in a platform outage, is cleared by disabling that
-  ruleset, merging, and enabling it again. Each of those is a settings change the audit log records. A preset
-  reaches every repository on its next Renovate run, and a workflow reaches every caller that bumps to it, so
-  the gate is the one check between a change and every repository.
+- Nothing merges past a red gate. The required checks and the code-scanning rule sit in a ruleset with no bypass
+  actor. A preset reaches every repository on its next Renovate run, and a workflow reaches every caller that
+  bumps to it, so the gate is the one check between a change and every repository.
