@@ -143,10 +143,19 @@ command. A row that a section owns names that section.
   that need a real service. What never happens holds the tree rules `AGENTS.md` links.
 - Safety says what a contributor does to stay safe locally. A pull request's diff is read before anything runs
   on its branch, because the branch supplies the install, the hooks and the gate. The section names what reaches
-  the tools from the contributor's own environment: `BUN_OPTIONS` and the `BUN_INSPECT` names stay unset, and
-  `bunx` ignores `--no-env-file`, so a personal env file reaches the JS tools. It says hooks are not a control.
-- Troubleshooting covers a local run that fails or differs from CI: a stale install, the other copy `bunx` may
-  run, env files and a proxy that catches loopback.
+  the tools from the contributor's own environment, and says hooks are not a control:
+  - `BUN_OPTIONS` stays unset. Safety names the direct Bun starts it reaches in that kind, never a row the gate
+    withholds it from. A tool started through `bun x` does not read it. A tool that starts Bun children of its
+    own, such as wrangler or vitest, passes it and `BUN_INSPECT_PRELOAD` on to them, and Safety names each such
+    tool the kind runs.
+  - The `BUN_INSPECT` names stay unset. `BUN_INSPECT_PRELOAD` runs a module in every direct Bun start, and a tool
+    started through `bun x` does not run it.
+  - A top-level `bunfig.toml` preload runs under `bun x` too.
+  - `bun x` ignores `--no-env-file`, so a personal env file reaches the JS tools.
+- Troubleshooting covers a local run that fails or differs from CI: a stale install, the install after every
+  pull and every branch switch, a frozen install that leaves a package `bun.lock` dropped in place, the other copy
+  `bun x` may run, a partial or copied install that runs a parent directory's binary, env files and a proxy that
+  catches loopback.
 - A cross-reference stands wherever an agent that skims would otherwise miss an item. Setup points at the Safety
   items it touches, and The gate points at Troubleshooting for a local and CI mismatch.
 - `AGENTS.md` lives at the repository root under the vendor-neutral name, so every vendor's agent reads one
@@ -175,6 +184,10 @@ command. A row that a section owns names that section.
   and skills into every repository.
 - The shared `.claude/settings.json` allows `git status` alone. A permission rule is a text match that quoting
   evades, so a deny on an argument never makes a broader allow safe. An allow goes instead.
+- Its denies on `--output` hold, since git rejects each abbreviation of the flag. A deny on `--no-index` stops
+  the flag alone. `git diff -- ../outside.txt a.txt` reads a file outside the repository with no `--no-index` in
+  the command, because git takes a path outside the work tree as that mode. The permission prompt on every `git`
+  command but `git status` is the control.
 
 ## Adapters
 
@@ -1325,7 +1338,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Security fixes come from Dependabot alerts (Dependabot). Renovate fixes a direct dependency in every ecosystem
   and an indirect Go module, because `go.mod` names it. A transitive Cargo or NuGet advisory is Dependabot's: its
   security update opens the pull request in `rust-crates`, `rust-app` and `csharp-installer`. Renovate opens
-  nothing for a transitive Bun advisory, and no other bot does either. The daily `bun audit` reports it, and it is
+  nothing for a transitive Bun advisory, and no other bot does either. The daily `bun run audit` reports it, and it is
   fixed by a direct bump or by hand from the alert with `bun audit fix`.
   Renovate's `security:gomodIndirectSecurityUpdates` preset is never used. It disables the modules behind
   `tool` directives.
@@ -1335,7 +1348,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - The cooldown is never lowered, excluded around or bypassed without auditing the version. A hand pin ahead of
     the cooldown records its audit in the commit body. Another repository inherits by reading that record, never
     by copying the pin.
-  - A bare `bunx <package>` honors only the user-level cooldown, so nothing the repository controls gates it.
+  - The base preset's `zachthedev/**` rule is the one standing exemption. A new tag of the set's own repositories
+    is the author's own work, so it waits for nothing.
+  - A bare `bun x <package>` honors only the user-level cooldown, so nothing the repository controls gates it.
   - Lock file maintenance runs the package manager directly and takes no Renovate cooldown. The ecosystem's own
     file carries one where it exists, with the reason in the file. The updater and CI containers carry no other
     configuration. Bun: `bunfig.toml`. Cargo: `.cargo/config.toml` with `[registry] global-min-publish-age`,
@@ -1373,9 +1388,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A tool-tree advisory with no fixed version is held by pinning the tool back, or by disabling `govulncheck tool`
   with a dated reason at its drift site until a fix ships. `CONTRIBUTING.md` says so.
 - Live whole-tree readers run as reports, never as checks: `bun audit` daily, `cargo deny check advisories`
-  daily, `dotnet package list --vulnerable` daily. They run from `audit.yml`, on its own clock. A repository
-  with an audit script or waivers runs that script in the daily job, not bare `bun audit`. GitHub's
-  database lacks RustSec entries that OSV carries, and the daily report covers those. `audit.yml` also carries a
+  daily, `dotnet package list --vulnerable` daily. They run from `audit.yml`, on its own clock. GitHub's
+  database lacks RustSec entries that OSV carries, and the daily report covers those.
+- Every repository with a `bun.lock`, whatever its stack, carries `"audit": "bun audit --audit-level=high"` in
+  `package.json`, and `audit.yml`'s daily job runs `bun run audit`. High is the set's level, and the script is
+  the one home of `--ignore` waivers. The dependency graph reads a Bun repository's direct `package.json`
+  dependencies alone, so the daily run is what reads its transitive ones. `audit.yml` also carries a
   daily job that calls the reusable `workflows` workflow, so zizmor's online audits of the pinned actions run
   without a pull request. A red run is the report.
 - The advisory check sees direct npm packages only under Bun, no NuGet package under central package
@@ -1560,7 +1578,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - A crate whose `Cargo.toml` says `publish = false` also carries `publish = false` in its `release-plz.toml`
     entry, or the workspace sets it. release-plz's `release` refuses such a crate while its entry leaves `publish`
     at the default, and `release = false` does not cover it. `update` and `release-pr` never check it, so the first
-    real release run is where it fails.
+    real release run is where it fails. A `git_only` workspace is exempt: release-plz publishes nothing under
+    `git_only` and skips that check for every package.
   - `release-update` computes the release. It runs in no environment, with a job token that reads and
     `MISE_ENV=semver`, and runs `release-plz update` with the semver check. The check builds rustdoc for each
     changed library and its published baseline, which runs every dependency's build script, so the job holds no
