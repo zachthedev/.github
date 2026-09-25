@@ -208,10 +208,14 @@ jobs:
       # or its cache. Bun runs the file itself, so no shebang picks a node. --no-env-file keeps Bun
       # from loading a .env from the checkout into commitlint's environment. --config names the
       # caller's one config, so no name commitlint searches before it can stand in for it.
+      # COMMITLINT_DEPENDABOT_PULL_REQUEST is true on a pull request Dependabot opened alone, and
+      # the set's commitlint.config.js skips a Dependabot-shaped commit only then, since anyone can
+      # type Dependabot's header and trailer.
       - name: Pull request commits
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          COMMITLINT_DEPENDABOT_PULL_REQUEST: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
         run: bun --no-env-file ./node_modules/@commitlint/cli/cli.js --config commitlint.config.js --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
       # GitHub's default squash message lands a one-commit pull request under that commit's subject
       # and a longer one under the title, each with the pull request number appended. That string
