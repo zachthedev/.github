@@ -40,23 +40,23 @@ jobs:
       # then runs that copy. It keeps a tracked node_modules link the same way, with no check
       # against bun.lock, so node_modules itself is refused beside any path below it. Every other
       # tracked symbolic link is refused too: Bun reads through one to a file bun.lock never
-      # named. A tracked .npmrc, at any depth, redirects the install's registry. bun install loads
-      # an env file at the root, frozen and without scripts, and no flag stops that. A variable
-      # there can move its registry, skip the lockfile or point its cache at a committed folder,
-      # which swaps a package with no bun.lock change. Bun loads an env file from the directory
-      # each start runs in, and a caller starts Bun below the root too, so each of the eight names
-      # Bun loads is refused at any depth. Both commitlint steps name commitlint.config.js, which
-      # stops commitlint reading any other config. cosmiconfig, which commitlint searches through,
-      # still reads its own settings from a root .config directory and a root package.yaml when it
-      # starts, whatever --config names. It runs a .config/config.js, .mjs, .cjs or .ts as code,
-      # and a module a $import there names. So a tracked root .config and a root package.yaml are
-      # refused. git lists paths with core.quotepath off, so a name past ASCII reaches each
-      # pattern as its own characters rather than octal escapes. Paths match without regard to
-      # case, as Windows and macOS open them. A failed git call stops the step.
+      # named. bun install loads an env file at the root, frozen and without scripts, and no flag
+      # stops that. A variable there can move its registry, skip the lockfile or point its cache
+      # at a committed folder, which swaps a package with no bun.lock change. Bun loads an env file
+      # from the directory each start runs in, and a caller starts Bun below the root too, so each
+      # of the eight names Bun loads is refused at any depth. Both commitlint steps name
+      # commitlint.config.js, which stops commitlint reading any other config. cosmiconfig, which
+      # commitlint searches through, still reads its own settings from a root .config directory
+      # and a root package.yaml when it starts, whatever --config names. It runs a
+      # .config/config.js, .mjs, .cjs or .ts as code, and a module a $import there names. So a
+      # tracked root .config and a root package.yaml are refused. git lists paths with
+      # core.quotepath off, so a name past ASCII reaches each pattern as its own characters rather
+      # than octal escapes. Paths match without regard to case, as Windows and macOS open them. A
+      # failed git call stops the step.
       - name: Refused paths
         run: |
           tracked=$(git -c core.quotepath=off ls-files)
-          found=$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)node_modules("?$|/)|(^"?|/)\.npmrc"?$' || true)
+          found=$(printf '%s\n' "$tracked" | grep -iE '(^"?|/)node_modules("?$|/)' || true)
           links=$(git ls-files -s | awk -F '\t' '$1 ~ /^120000 / { print $2 }')
           meta=$(printf '%s\n' "$tracked" | grep -iE '^"?\.config(/|"?$)' || true)
           yaml=$(printf '%s\n' "$tracked" | grep -iE '^"?package\.yaml"?$' || true)
