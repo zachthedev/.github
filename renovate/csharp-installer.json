@@ -22,6 +22,11 @@
       "matchManagers": ["nuget"],
       "matchDepTypes": ["dotnet-sdk"],
       "semanticCommitType": "fix"
+    },
+    {
+      "description": "A shorter name in a major bump's title, which the action's name pushes past 72 characters once the squash appends the pull request number. A grouped update takes its group name as its topic, so only a major reads this.",
+      "matchDepNames": ["advanced-security/spdx-dependency-submission-action"],
+      "commitMessageTopic": "spdx submission action"
     }
   ]
 }

@@ -95,6 +95,11 @@
       "matchDepNames": ["trufflesecurity/trufflehog"],
       "groupName": "trufflehog",
       "separateMajorMinor": false
+    },
+    {
+      "description": "A shorter name in a major bump's title, which the package name pushes past 72 characters once the squash appends the pull request number. A grouped update takes its group name as its topic, so only a major reads this.",
+      "matchDepNames": ["@eslint-community/eslint-plugin-eslint-comments"],
+      "commitMessageTopic": "eslint-comments plugin"
     }
   ]
 }
