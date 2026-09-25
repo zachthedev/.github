@@ -1107,6 +1107,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 
 - An inline waiver in code names the exact rule it waives and gives a reason. Each stack's own linter enforces
   that, and the gate refuses only the forms no tool checks.
+- A reason holds a letter or a digit once its default-ignorable code points are removed. The strip comes first,
+  because the Hangul filler characters count as letters. The linters the set runs accept a reason of invisible
+  characters alone, such as a soft hyphen or a Braille blank, so each stack's gate holds the rule itself.
+- U+13441 and U+13442, two Egyptian hieroglyph blanks, are letters that print blank in some fonts, and they pass.
+  That is an accepted residual, so no comment or document claims that every accepted reason prints.
 - A waiver in workflow YAML lives in `.github/zizmor.yml` (Gate), and a workflow `run:` block carries no ShellCheck
   directive (Gate).
 
@@ -1119,6 +1124,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   suppress the named rule alone. The gate refuses `//nolint:gosec`.
 - golangci-lint drops gosec's errors about a malformed `#nosec`, so a bad one shows only the finding it failed to
   waive. A stale `#nosec` goes unreported. The owner accepted both costs for a rule-exact waiver.
+- The gate refuses a nolint or `#nosec` reason that holds no letter or number once its default-ignorable code
+  points are removed (above). nolintlint's `require-explanation` and gosec's justification check accept one.
 - go-test-coverage runs with `force-annotation-comment: true`, so a `coverage-ignore` comment carries a reason.
 - The gate refuses the forms golangci-lint honors and nolintlint misses:
   - a nolint comment with extra leading slashes, such as `///nolint`;
@@ -1137,6 +1144,16 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - typescript-eslint's `ban-ts-comment`, in `strictTypeChecked`, bans `@ts-ignore` and `@ts-nocheck` and requires a
   description on `@ts-expect-error`. It reports every directive shape tsc honors. `@ts-expect-error` cannot name a
   TypeScript error code that anything checks, so its description is the reason.
+- The gate's own ESLint rule, `gate/visible-reason` in `scripts/eslint-plugin.ts`, reads every comment ESLint
+  parses: each ESLint directive label, and each `@ts-expect-error` or `@ts-ignore`. It refuses a reason with no
+  letter or digit once default-ignorable code points are removed (above). It reads the comments ESLint's parser
+  returns, never the file's text, so a string that holds comment text neither hides a directive nor fakes one.
+- ESLint applies a directive to the reports at its own position. A directive that names `gate/visible-reason`
+  therefore hides the rule's report on itself, and a block disable naming it hides every report up to its enable.
+  The lint row refuses every report of the rule that ESLint lists under `suppressedMessages`, where no directive
+  can remove one.
+- A byte that is not UTF-8 before a directive reads alike under tsc, ESLint and Prettier, so a directive and its
+  refusal see the same text. Bun's runtime decodes such a byte differently, a named residual with no refusal.
 - The gate refuses the text of Prettier's ignore comment, in any case and in prose too, in every file the format
   row checks. A path the committed `.prettierignore` names is not checked.
 
@@ -1157,7 +1174,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   host's cfg keeps, and a `#[cfg_attr(not(windows), allow(...))]` passed both it and a text match on Windows.
 - The gate also refuses:
   - a root `Cargo.toml` that does not set both lints to `deny`;
-  - an empty or whitespace `reason`;
+  - a `reason` with no alphanumeric character outside `Default_Ignorable_Code_Point`, read after its escapes
+    decode, so `reason = "\u{3164}"` is refused (above);
   - an `expect` naming a lint group, such as `warnings`, `unused` or `clippy::pedantic`, since a group is not a rule
     and clippy accepts one;
   - `rustfmt::skip` in every form;
@@ -1203,16 +1221,23 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   included, never line by line.
 - The build row adds two checks. A SARIF error-log audit refuses any in-source suppression with an empty
   justification or of SA1404, however it is spelled. An analyzer canary requires SA1404 to run in every compile.
-- Known limits: SA1404 accepts any non-empty reason. The null-forgiving `!` waives a nullable warning with no name
-  and no reason, and nothing refuses it. A project-file switch such as `NoWarn` or `RunAnalyzers` is caught by the
-  canary or by review.
+- The gate refuses a `Justification` with no letter or digit once its default-ignorable code points are removed
+  (above). SA1404 accepts a Braille blank alone.
+- The SARIF audit and the canary cover the solution's compiles. `cake.cs` is a file-based program and writes no
+  error log, so neither reads it. Review of `Directory.Packages.props` and `cake.packages.lock.json` holds an
+  analyzer exclusion conditioned on `FileBasedProgram`, and review holds the one `GlobalPackageReference` line
+  for StyleCop. Nothing checks that every project takes the same StyleCop version.
+- Known limits: SA1404 accepts any non-empty reason, and the gate's letter-or-digit rule is the whole check beyond
+  it. The null-forgiving `!` waives a nullable warning with no name and no reason, and nothing refuses it. A
+  project-file switch such as `NoWarn` or `RunAnalyzers` is caught by the canary or by review.
 - `[ExcludeFromCodeCoverage]` becomes a refusal on the day a coverage threshold lands.
 
 ### Shell
 
 - ShellCheck has no setting that requires a code or a reason. In a tracked `.sh` script, any line holding a
   `# shellcheck` directive is therefore exactly `# shellcheck disable=SCnnnn[,SCnnnn] # reason` as its whole
-  comment, and the gate holds it to that form. A partial match would miss a directive with several keys.
+  comment, and the gate holds it to that form. A partial match would miss a directive with several keys. The
+  reason holds a letter or a digit once its default-ignorable code points are removed (above).
 - A repository that tracks shell scripts runs a ShellCheck row over them, with `--norc`, `SHELLCHECK_OPTS`
   cleared, a printed count and a failure on zero.
 
