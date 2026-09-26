@@ -96,6 +96,12 @@ jobs:
           # timestamp-required pin forever. Ten pages of 100 stay inside the
           # window and cover every recent tag.
           RENOVATE_DOCKER_MAX_PAGES: '10'
+          # Renovate reads a root renovate.json, .jsonc or .json5 ahead of
+          # .github/renovate.json, and the names this lists go ahead of its own
+          # list. So .github/renovate.json, the one config every repository of
+          # the set keeps, wins wherever it exists, and a root file added beside
+          # it is never read.
+          RENOVATE_CONFIG_FILE_NAMES: '[".github/renovate.json"]'
           # A schedule run carries no inputs, so an empty value means the
           # defaults. The dispatch's none maps to an empty value, which
           # Renovate reads as no dry run.
