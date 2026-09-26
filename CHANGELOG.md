@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/zachthedev/.github/compare/v0.2.0...v0.3.0) (2026-09-26)
+
+
+### Features
+
+* close the shared jobs' JSON, env file and waiver gaps ([#9](https://github.com/zachthedev/.github/issues/9)) ([a8265fb](https://github.com/zachthedev/.github/commit/a8265fb049f9baaeedbefb143077948acd4d2e11))
+
+
+### Bug Fixes
+
+* **deps:** bump renovate ([#7](https://github.com/zachthedev/.github/issues/7)) ([d50f808](https://github.com/zachthedev/.github/commit/d50f8082a537bbb0f4a277a78aff0b38690bf6e2))
+
 ## [0.2.0](https://github.com/zachthedev/.github/compare/v0.1.0...v0.2.0) (2026-09-25)
 
 
