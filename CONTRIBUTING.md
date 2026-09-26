@@ -432,11 +432,12 @@ Dependabot prefixes its ignore matches from `.github/dependabot.yml` through it.
 installs the hooks. Naming it replaces Bun's built-in allow list, which would otherwise build a native addon
 Renovate lists as optional and never needs here.
 
-Two TypeScript compilers are installed on purpose. The `typecheck` row runs the native TypeScript 7 compiler from
-the `@typescript/native` alias. `typescript` stays on 6.x for typescript-eslint, which reads types through the 6.x
-compiler API and declares a peer range below 6.1.0. A rule in `.github/renovate.json` holds it below 6.1.0. Both
-ship a `tsc`, and `bun install` links the name to the package whose name sorts first, the alias. Once
-typescript-eslint supports TypeScript 7, `typescript` moves to 7.x, and the alias and the rule go.
+Two TypeScript compilers are installed on purpose. The `typecheck` row runs the native compiler from the
+`@typescript/native` alias. `typescript` stays inside typescript-eslint's peer range, because typescript-eslint
+reads types through the JavaScript compiler API, which the native compiler lacks. A rule in `.github/renovate.json`
+holds `typescript` inside that range. Both ship a `tsc`, and `bun install` links the name to the package whose name
+sorts first, the alias. Once typescript-eslint supports the native compiler, `typescript` moves to the native
+compiler's major, and the alias and the rule go.
 
 The advisory legs:
 

@@ -995,8 +995,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - zizmor's online audits run in the shared `workflows` job alone, on every pull request and daily from
   `audit.yml`. That job is the one CI job whose steps name the job token: its zizmor step and its lockfile asset
   check under Tools. It installs taplo, ShellCheck, actionlint and zizmor alone, each routed by mise's registry,
-  so its install names no token. The one exception elsewhere is a caller job's `mise install --locked` step for a
-  tool mise's registry does not route, below.
+  so its install names no token. Two exceptions stand elsewhere:
+  - a caller job's `mise install --locked` step for a tool mise's registry does not route, below;
+  - a job that only downloads a release asset with `gh release download`, checks out with
+    `persist-credentials: false` and runs no repository code, as the `loader` job in enshrouded-mods' `cd.yml`
+    does.
 - In CI the gate runs zizmor with `--offline`, and the gate step holds no token. Locally the gate runs zizmor
   online when `gh auth token` answers, handing the token to zizmor's process alone, and passes `--offline`
   otherwise, never as a silent default. That token comes from gh's credential store, so an empty `GH_CONFIG_DIR`
@@ -1011,8 +1014,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every `jdx/mise-action` step takes an empty `github_token`, so the action exports no token to later steps.
 - A locked install reads a registry tool's attestations from mise's versions host. A tool mise's registry does not
   route queries the GitHub API on every install.
-- A job installing such a tool runs the gate's checks of `mise.toml` and `mise.lock` first. Then a step that runs
-  nothing but `mise install --locked` sets `MISE_GITHUB_TOKEN` to the job token, under the job's
+- A job installing such a tool runs the gate's checks of `mise.toml` and `mise.lock` first, in an earlier step of
+  the same job or in a preceding job it `needs:`. The preceding job is the stronger form, since the job that holds
+  the token then runs no repository code. Then a step that runs nothing but `mise install --locked` sets
+  `MISE_GITHUB_TOKEN` to the job token, under the job's
   `contents: read`, and that step alone names it. The token already sits in the job, and the unauthenticated
   limit of 60 requests an hour per runner address fails installs at random. The gate step itself stays tokenless.
 - A step order inside one job is no boundary, since the token sits in the runner's memory. Installing before the
@@ -1731,9 +1736,10 @@ bears on, the defect, and the condition that removes it.
   flag, and logs it as a warning. The shared job sets `CODEQL_ACTION_DISABLE_CSHARP_BUILDLESS` to `false`, which
   overrides the flag for C#. Java keeps the fallback, so a Java repository reads its first run's log, and the
   conclusion alone is not trusted. Removed once the fallback fails the run.
-- typescript-eslint (Gate): reads types through the TypeScript 6 compiler API. A Bun repository therefore keeps
-  `typescript` on 6.x beside the native TypeScript 7 compiler, installed under an alias, and a Renovate rule
-  holds the major. Removed once typescript-eslint supports TypeScript 7.
+- typescript-eslint (Gate): reads types through the JavaScript compiler API, which the native compiler lacks. A Bun
+  repository therefore keeps `typescript` on the last major that carries that API, beside the native compiler
+  installed under an alias, and a Renovate rule holds that major. Removed once typescript-eslint supports the
+  native compiler.
 - GitHub dependency graph (Advisories): reads `.csproj` alone and never `Directory.Packages.props`, so under
   central package management a NuGet bump produces an empty diff for `dependency-review-action`. The submitted
   snapshot under Advisories is what makes that leg real. Removed once the graph reads
