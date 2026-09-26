@@ -107,6 +107,8 @@ command. A row that a section owns names that section.
 | `.taplo.toml`                              | shape     | Formatting; excludes `node_modules/**`, `.claude/worktrees/**` and the stack's build output                                                                              |
 | `package.json`, `bun.lock`, `bunfig.toml`  | shape     | commitlint, `yaml`, Prettier and lefthook pinned, `packageManager` set, the cooldown under Updates. Go pins lefthook in `go.mod`                                         |
 | `eslint.config.ts`                         | shape     | `bun-service` and `bun-tooling` alone, Gate                                                                                                                              |
+| `tsconfig.json`                            | shape     | `bun-service` and `bun-tooling` alone, the root TypeScript project at a path `scripts/expected.ts` lists, Gate                                                           |
+| `scripts/tsconfig.json`                    | shape     | `bun-service` and `bun-tooling` alone, the gate's own project, so the root one never reaches the gate's imports, Gate                                                    |
 | `commitlint.config.js`                     | identical | Commits                                                                                                                                                                  |
 | `.github/commit-scopes.json`               | own       | Commits                                                                                                                                                                  |
 | `lefthook.yml`                             | shape     | Hooks                                                                                                                                                                    |
@@ -510,6 +512,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   worker `execPath`, so vitest's workers die. `bun x` runs both.
 - The `prepare` script is the one exception, in every repository of the set. It starts lefthook's installer by
   path, `bun ./node_modules/lefthook/bin/index.js install`, so it is a direct Bun start (Files).
+- A script file a `package.json` script runs, such as a service's deploy script, starts its JS tools the same way,
+  or records at the drift site why it does not.
 - A gate row starts the tool under the Bun running the gate.
 - `bun x --bun --no-install` does not fail on a missing package: it falls back to `PATH`, a parent
   `node_modules/.bin` or its own cache under the temporary directory. A gate row therefore first requires
@@ -695,10 +699,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `--config` never reaches it.
 - Every row that walks the tree prints what it checked, the files or their count, and fails on zero. A row that
   checked nothing reads green otherwise: taplo and Prettier each exit 0 on empty input.
-  - A test row fails on zero, on every test skipped, and on a filtered run. Where the runner reports a filter as a
-    skip, as vitest, nextest and Microsoft.Testing.Platform do, the row fails on any skip beyond an allowance the
-    gate declares, 0 by default. A platform-only skip is declared the same way, and so is a Rust `#[ignore]`,
-    which nextest counts as a skip. Every stack's gate declares its allowance, the Rust gates included.
+  - A test row fails on zero, on every test skipped, and on a filtered run. A row whose runner reports skips, bun
+    test, vitest, nextest and Microsoft.Testing.Platform among them, also fails on any skip beyond an allowance the
+    gate declares, 0 by default. vitest, nextest and Microsoft.Testing.Platform report a filter as a skip, so the
+    allowance is what catches a filter there. A platform-only skip is declared the same way, per platform, and so
+    is a Rust `#[ignore]`, which nextest counts as a skip.
   - Under Microsoft.Testing.Platform, a runner config that marks every test explicit exits 0 with every test
     skipped. A runner config that can skip or filter tests falls under the tool config search above, in every
     stack.
@@ -835,6 +840,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A test or script that spawns git drops every inherited `GIT_*` variable for that process and names the
   repository with `-C <root>`. git exports `GIT_DIR` and `GIT_INDEX_FILE` to a hook, so a gate the hook runs
   otherwise writes into the hook's own repository.
+- A script file counts as a script there. A `package.json` script line that runs git inherits the environment. No
+  hook runs such a line, so no hook's `GIT_DIR` reaches it, and it stays a named residual.
 - The gate's own `git` child starts with an empty environment plus `GIT_CONFIG_NOSYSTEM` and
   `GIT_CONFIG_GLOBAL=/dev/null`, and `SystemRoot` on Windows where the stack's start of git needs it, as Go's does.
   Listing tracked files needs no inherited name.
