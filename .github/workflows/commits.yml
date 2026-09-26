@@ -124,13 +124,18 @@ jobs:
       # anything that is not plain JSON: a trailing comma, a comment, a byte order mark, NaN, a
       # depth it cannot read. A package.json patchedDependencies key is applied even by a frozen
       # install without scripts, so the key is refused in every tracked package.json, whatever it
-      # patches. cosmiconfig reads a cosmiconfig key in the root package.json whatever --config
-      # names, and runs a module a $import there names, so the key is refused. Bun applies a
-      # project config to commitlint's own imports, so a paths entry or a baseUrl there, or in a
-      # file its extends names, runs checkout code in place of a package commitlint loads. An
-      # extends naming a package, an absolute path, a missing file or a file outside the checkout
-      # is refused, since the step cannot read it before the install. This is a step of its own
-      # because actionlint stalls on Windows handing ShellCheck a script past 4 KB.
+      # patches. Bun resolves a bare import of a package's own name, from a file inside it, to that
+      # package.json's exports ahead of node_modules, so a root package.json named yaml or
+      # @commitlint/config-conventional with exports runs checkout code inside both commitlint
+      # steps, with bun.lock untouched. So an exports key is refused in every tracked package.json.
+      # imports stays, since its # names cannot shadow a bare one. cosmiconfig reads a cosmiconfig
+      # key in the root package.json whatever --config names, and runs a module a $import there
+      # names, so the key is refused. Bun applies a project config to commitlint's own imports, so
+      # a paths entry or a baseUrl there, or in a file its extends names, runs checkout code in
+      # place of a package commitlint loads. An extends naming a package, an absolute path, a
+      # missing file or a file outside the checkout is refused, since the step cannot read it
+      # before the install. This is a step of its own because actionlint stalls on Windows handing
+      # ShellCheck a script past 4 KB.
       - name: Refused JSON keys
         run: |
           python3 - <<'PY'
@@ -167,6 +172,8 @@ jobs:
                   continue
               if "patchedDependencies" in held:
                   found.append(f"{name!r} carries patchedDependencies, and bun install applies each patch it names even frozen and without scripts. Remove the key")
+              if "exports" in held:
+                  found.append(f"{name!r} carries exports, which a bare import of the package's own name resolves to ahead of node_modules. Remove the key")
               if name.lower() == "package.json" and "cosmiconfig" in held:
                   found.append(f"{name!r} carries a cosmiconfig key, whose $import runs a module inside commitlint whatever --config names. Remove the key")
           seen = set()
