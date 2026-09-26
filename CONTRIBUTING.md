@@ -132,8 +132,11 @@ Generated files, and the command that writes each:
   `@ts-ignore`. It refuses a reason that holds no letter or digit once default-ignorable code points are removed.
   The eslint-comments plugin and ban-ts-comment accept a reason of a soft hyphen, a word joiner or a Braille blank
   alone, and the rule refuses each. A directive that names the rule itself hides the rule's report on that
-  directive, so the `lint` row also refuses every report of the rule ESLint lists as suppressed. Nothing checks a
-  reason on Prettier's ignore comment, so the `format` row refuses the comment itself.
+  directive, so the `lint` row also refuses every report of the rule ESLint lists as suppressed. A configuration
+  comment can turn a rule off for a whole file, so the row lints the tree a second time with
+  `--no-inline-config` and refuses every report there from `gate/visible-reason`, ban-ts-comment or an
+  eslint-comments rule. Nothing checks a reason on Prettier's ignore comment, so the `format` row refuses the
+  comment itself.
 - An import carries `with { type: 'json' }` or no attribute, and a dynamic import takes no options. ESLint refuses
   any other attribute, since Bun runs a file of any extension as code under one naming a loader, and no row reads
   a `.txt` as code.
@@ -151,7 +154,8 @@ Generated files, and the command that writes each:
 No test needs a real service. The gate's own tests under `scripts/` start a stand-in, itself a Bun process, in
 place of every program the gate starts, and their `PATH` holds the stand-ins alone. So no case starts your gh, git
 or mise or reaches the network. The suite covers `scripts/rows.ts`, which holds what the rows conclude from their
-tools' output, and `scripts/check.test.ts` lints each waiver form the `lint` row refuses as suppressed. The rest
+tools' output, and `scripts/check.test.ts` lints each waiver form the `lint` row refuses, the configuration
+comment included. The rest
 of what `scripts/check.ts` wires together is proven by a break round.
 
 ## The gate
@@ -305,6 +309,9 @@ gate. Beyond the gate's own refusals, the shared jobs refuse:
 - a tracked `node_modules`, or a tracked path under one, and every tracked symbolic link;
 - a `bunfig.toml` holding any key but `[install] minimumReleaseAge`;
 - `paths` or `baseUrl` in a tracked `tsconfig.json` or `jsconfig.json` or in a file its `extends` chain reads;
+- an `exports` key in a tracked `package.json`, since a bare import of the package's own name resolves to it ahead
+  of `node_modules`;
+- a `secrets-inherit` waiver in `.github/zizmor.yml` holding a colon, since this audit's waivers name a whole file;
 - a root file named like a program the gate, its hooks or an install start (`bun`, `bunx`, `gh`, `git`, `mise` or
   `node`), and a root entry named `'`, which actionlint would read in place of the ShellCheck stand-in.
 

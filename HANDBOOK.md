@@ -583,9 +583,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   before any check, as a preload runs before the hook's tool.
 - The shared `commits` and `workflows` jobs are the one CI copy of the refusals that block a merge: a tracked env
   file at any depth, a tracked `node_modules`, a `patchedDependencies` key, a `bunfig.toml` key, tsconfig `paths`
-  and `baseUrl`, a duplicated JSON key, a `package.json` or project config that does not parse, a root
-  `package.yaml`, a root `package.json` `cosmiconfig` key, a root file named like a program, an inline zizmor
-  waiver, the `secrets: inherit` callee hold and a stale `secrets-inherit` waiver. A pull request cannot change
+  and `baseUrl`, a `package.json` `exports` key, a duplicated JSON key, a `package.json` or project config that
+  does not parse, a root `package.yaml`, a root `package.json` `cosmiconfig` key, a root file named like a
+  program, an inline zizmor waiver, the `secrets: inherit` callee hold, and a stale or positional
+  `secrets-inherit` waiver. A pull request cannot change
   what either job runs at the commit its `ci.yml` pins. It can change `ci.yml`'s call, and code-owner review of
   `.github/workflows/` holds that. `zachthedev/.github`'s own `ci.yml` calls both jobs by `./`, so a pull request
   there runs its own copy of each, and the same review holds that. A gate need not repeat them once its
@@ -638,6 +639,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `CODEOWNERS`. Bun applies the root one to a tool's own imports, so a `paths` entry for a package commitlint
   imports ran repository code in the commit hook. A project aliases through `package.json` `imports`, whose `#`
   names cannot redirect a bare package name.
+- An `exports` key in any tracked `package.json` is refused before a merge (the one CI copy, above). Bun resolves a
+  bare import of a package's own name, from a file inside it, to that package's `exports` ahead of `node_modules`.
+  A root `package.json` renamed after a package commitlint loads, with `exports`, therefore runs checkout code
+  inside commitlint, with `bun.lock` unchanged.
 - A Go gate, and any other over no TypeScript, refuses a `tsconfig.json` or `jsconfig.json` tracked at any depth
   or on disk at the root, since none of its tools reads a nested one.
 - Every tracked `tsconfig.json` and `jsconfig.json` is plain JSON with no comments, because every gate and the
@@ -759,6 +764,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A waiver in `.github/zizmor.yml` names `file:line`, as an `artipacked` waiver does, so an edit that moves the
   finding turns the gate red and the waiver is read again. `secrets-inherit` alone takes the file form,
   because the callee hold is its control (Secrets).
+- The shared `workflows` job refuses a `secrets-inherit` entry holding a colon. zizmor binds a `file:line:column`
+  entry to that position alone, where a later shift can land another call, and a position that matches nothing
+  waives nothing while its file part would read as held.
 - zizmor's config cannot waive a composite action's finding. A composite action under `.github/actions`
   therefore carries no waiver, and its finding is fixed.
 - Both also refuse every ShellCheck directive in a workflow `run:` script. ShellCheck has no waiver file, so a
@@ -856,10 +864,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   word. A broader fold costs a false refusal at worst.
 - The stack's own runner drives the gate: Bun scripts in `package.json`, `xtask` for Rust, Cake for C#, go-task
   for Go. A `Makefile` is a violation.
-- In a Bun repository every file under `scripts/` that the Bun kickstart carries, but `check.ts`, `expected.ts`
-  and `tsconfig.json`, is byte-identical across the set, the tests and their stand-ins included. A file the
-  kickstart does not carry, such as a `check.test.ts` for the repository's own `check.ts`, is the repository's
-  own. The repository's own list, its project config paths, lives in `scripts/expected.ts`.
+- In a Bun repository every file under `scripts/` that the Bun kickstart carries, but `check.ts`, `expected.ts`,
+  `tsconfig.json` and `markers.ts`, is byte-identical across the set, the tests and their stand-ins included.
+  `markers.ts` writes the template's `MARKERS.md` (Kickstarts), so it is the template's own file, and no other
+  repository carries it. A file the kickstart does not carry, such as a `check.test.ts` for the repository's own
+  `check.ts`, is the repository's own. The repository's own list, its project config paths, lives in
+  `scripts/expected.ts`.
 - A Rust repository's gate modules are shared by copy the same way, never through a shared crate.
 - `cargo xtask` is `cargo run --package xtask`, and the outer cargo resolves the workspace before any row runs.
   The alias in `.cargo/config.toml` therefore carries `--locked`: `run --locked --package xtask --quiet --`.
@@ -957,7 +967,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   refuses a key repeated in one object at any depth, and a file that does not parse: a trailing comma, a comment,
   a byte order mark, `NaN`, or a nesting deeper than Python reads.
 - The same step refuses a `package.json` that is not an object or that carries `patchedDependencies`, because a
-  frozen install without scripts still applies a patch. It refuses a root `package.json` `cosmiconfig` key (Gate).
+  frozen install without scripts still applies a patch. It refuses an `exports` key in any tracked `package.json`
+  and a root `package.json` `cosmiconfig` key (Gate).
 - It refuses `paths` and `baseUrl` in a project config and in every file its `extends` chain names, because the
   job runs commitlint under Bun (Gate). It also refuses an `extends` naming a package, an absolute path, a missing
   file or a file outside the checkout, since the step cannot read any of those.
@@ -1072,7 +1083,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   opened, when the header starts with one of those, then a colon and a space, and a line after the header starts
   with the `Signed-off-by: dependabot[bot] <` trailer. The `commits` job tells it the pull request's author through
   `COMMITLINT_DEPENDABOT_PULL_REQUEST`, set to `true` on a Dependabot pull request alone. A forged trailer on any
-  other pull request, or in the commit hook, is linted.
+  other pull request is linted. The commit hook lints one too, unless the environment sets the variable, which an
+  env file `bun x` loads can do. CI sets the variable itself and refuses a tracked env file (Gate).
 - A header or title that merely carries the text is still linted. A repository with no `dependabot.yml` skips
   nothing, and a file that does not parse fails the lint. A `dependabot.yml` past 64 KiB fails before it is
   parsed, since the `yaml` package checks for duplicate keys in quadratic time. The pull request title and the
@@ -1210,6 +1222,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   therefore hides the rule's report on itself, and a block disable naming it hides every report up to its enable.
   The lint row refuses every report of the rule that ESLint lists under `suppressedMessages`, where no directive
   can remove one.
+- A configuration comment, such as one setting `gate/visible-reason` to `off`, turns a rule off for its whole file,
+  so the rule reports nothing and nothing lands in `suppressedMessages`. The lint row therefore runs ESLint a
+  second time with `--no-inline-config`, which reads no comment as configuration. It refuses every report there
+  from a rule that reads comments: `gate/visible-reason`, `ban-ts-comment` and the eslint-comments rules.
 - A byte that is not UTF-8 before a directive reads alike under tsc, ESLint and Prettier, so a directive and its
   refusal see the same text. Bun's runtime decodes such a byte differently, a named residual with no refusal.
 - The gate refuses the text of Prettier's ignore comment, in any case and in prose too, in every file the format
@@ -1306,6 +1322,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - `.github/renovate.json` extends one kind preset from `zachthedev/.github//renovate/` on its default branch,
   and adds only what is true of that repository alone. The `.github` repository validates every preset change
   before it merges. That is the check on a change that reaches every repository on the next run.
+- Renovate reads a root `renovate.json`, `renovate.jsonc` or `renovate.json5` ahead of `.github/renovate.json`.
+  The shared `deps` job therefore sets `RENOVATE_CONFIG_FILE_NAMES` to `.github/renovate.json`, and Renovate puts
+  the names it lists ahead of its own. `.github/renovate.json` then wins wherever it exists, and a root file added
+  beside it is never read. A pull request that deletes `.github/renovate.json` and adds a root file is review's to
+  refuse.
 - The base preset holds the standard, and no preset or repository file restates a Renovate default:
   - `config:recommended` with digest pinning and abandonment flags
   - new pull requests in the Monday window, every other run rebasing open branches
