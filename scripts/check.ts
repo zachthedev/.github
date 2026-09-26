@@ -355,31 +355,75 @@ export function suppressedReasonFindings(results: readonly LintResult[]): string
   );
 }
 
-// The json formatter names every file ESLint linted, so the row counts them
-// and prints each problem itself. It also refuses every report of the
-// visible-reason rule a directive turned off, which ESLint lists apart from
-// the problems and counts in no exit code. --config names the one config, so
-// ESLint runs no eslint.config.* nearer a file than the root.
-async function lint(): Promise<string> {
-  const finished = await run([
-    ...jsTool('eslint'),
-    '--config',
-    ESLINT_CONFIG,
-    '.',
-    '--max-warnings=0',
-    '--format',
-    'json',
-  ]);
+/** The rule that holds a TypeScript waiver comment to a description. */
+const BAN_TS_COMMENT = '@typescript-eslint/ban-ts-comment';
+
+/** The prefix of every rule of the plugin that checks ESLint's own directive comments. */
+const ESLINT_COMMENTS = '@eslint-community/eslint-comments/';
+
+/** Whether `ruleId` names a rule that reads comments: the visible-reason rule, ban-ts-comment, or an eslint-comments rule. */
+function isCommentRule(ruleId: string | null | undefined): boolean {
+  return ruleId === VISIBLE_REASON || ruleId === BAN_TS_COMMENT || (ruleId ?? '').startsWith(ESLINT_COMMENTS);
+}
+
+/**
+ * Every report of a rule that reads comments, from a pass that ignored every
+ * directive and configuration comment, as findings naming the file, line and
+ * column.
+ *
+ * @remarks
+ * A configuration comment setting a rule to off turns it off for the whole
+ * file, and the rule then reports nothing, so nothing lands in
+ * `suppressedMessages` either. Under `--no-inline-config` ESLint reads no
+ * comment as configuration, so each such rule runs over every file, and each
+ * of its reports is one the first pass let a comment hide.
+ */
+export function unwaivedCommentFindings(results: readonly LintResult[]): string[] {
+  return results.flatMap((result) =>
+    result.messages
+      .filter((message) => isCommentRule(message.ruleId))
+      .map(
+        (message) =>
+          `${quote(result.filePath)}:${String(message.line ?? 0)}:${String(message.column ?? 0)}  ${message.ruleId ?? ''} reports this with every configuration comment ignored, and no comment may turn that rule off: ${message.message ?? ''}`,
+      ),
+  );
+}
+
+/**
+ * ESLint over the tree with the one config, and `options` after it, as its
+ * finished process and its json results.
+ *
+ * @throws When ESLint prints no json, or json that is not a list of file results
+ */
+async function eslintResults(
+  label: string,
+  options: readonly string[],
+): Promise<{ readonly finished: Finished; readonly results: readonly LintResult[] }> {
+  const finished = await run([...jsTool('eslint'), '--config', ESLINT_CONFIG, ...options, '.', '--format', 'json']);
   let results: unknown;
   try {
     results = JSON.parse(plain(finished.stdout));
   } catch {
     // No json means ESLint stopped before it linted anything, a config error among them.
-    throw new Error(`eslint ${describe(finished)}`);
+    throw new Error(`${label} ${describe(finished)}`);
   }
   if (!Array.isArray(results) || !results.every((result) => isLintResult(result))) {
-    throw new Error(`eslint printed json that is not a list of file results: ${describe(finished)}`);
+    throw new Error(`${label} printed json that is not a list of file results: ${describe(finished)}`);
   }
+  return { finished, results };
+}
+
+// The json formatter names every file ESLint linted, so the row counts them
+// and prints each problem itself. It also refuses every report of the
+// visible-reason rule a directive turned off, which ESLint lists apart from
+// the problems and counts in no exit code. A second pass runs with
+// --no-inline-config, which reads no comment as configuration, and the row
+// refuses every report there of a rule that reads comments. That pass exits 1
+// wherever a directive waives another rule, so its exit code decides nothing
+// but a crash. --config names the one config, so ESLint runs no
+// eslint.config.* nearer a file than the root.
+async function lint(): Promise<string> {
+  const { finished, results } = await eslintResults('eslint', ['--max-warnings=0']);
   const problems = results.flatMap((result) =>
     result.messages.map(
       (message) =>
@@ -397,6 +441,19 @@ async function lint(): Promise<string> {
   }
   if (suppressed.length > 0) {
     throw new Error(suppressed.join('\n'));
+  }
+  const second = await eslintResults('eslint --no-inline-config', ['--no-inline-config']);
+  if (second.finished.exitCode !== 0 && second.finished.exitCode !== 1) {
+    throw new Error(`eslint --no-inline-config ${describe(second.finished)}`);
+  }
+  if (second.results.length !== results.length) {
+    throw new Error(
+      `eslint --no-inline-config linted ${files(second.results.length)} and the first pass ${files(results.length)}, so the two passes read different trees`,
+    );
+  }
+  const unwaived = unwaivedCommentFindings(second.results);
+  if (unwaived.length > 0) {
+    throw new Error(unwaived.join('\n'));
   }
   return files(results.length);
 }
@@ -772,7 +829,7 @@ export const rows: readonly Row[] = [
   {
     name: 'lint',
     checks:
-      'eslint over the tree with eslint.config.ts alone and no warnings allowed, counting the files it linted, and no gate/visible-reason report a directive turned off',
+      'eslint over the tree with eslint.config.ts alone and no warnings allowed, counting the files it linted, and no gate/visible-reason report a directive turned off, then eslint again with --no-inline-config and no report from a rule that reads comments',
     check: lint,
     runsCode: true,
   },
