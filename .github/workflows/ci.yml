@@ -12,8 +12,11 @@ on:
 
 permissions: {}
 
+# A pull request's group is its ref, so a new push cancels the run it replaces. A push to main
+# groups by commit: GitHub keeps one pending run per group and cancels the older pending one,
+# so a ref group would leave the middle push of a burst with no gate result.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Every mise command in the workflow reads mise.toml and mise.lock alone, under the pins every
@@ -37,6 +40,9 @@ jobs:
       # One platform failing still reports the others.
       fail-fast: false
       matrix:
+        # The gate is the command a contributor runs on Windows, macOS and Linux, and each
+        # platform-conditioned expectation in it, such as the .exe entry the tool presence check
+        # reads on Windows or the tests one platform skips, is proven only by its own leg.
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
@@ -71,12 +77,12 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: package.json
-      # --ignore-scripts, so no package's lifecycle script and no prepare script runs in CI.
-      # The gate starts every package from its path under node_modules and needs none of them.
+      # --ignore-scripts: no package's install script runs before the gate. The gate needs none,
+      # and no hook runs here.
       - run: bun install --frozen-lockfile --ignore-scripts
-      # Bun runs the file directly rather than through the package script, whose runner puts
-      # node_modules/.bin first on PATH, ahead of the programs the gate starts. --no-env-file
-      # keeps Bun from loading a .env into the gate before its preflight can refuse one.
+      # The gate by its file, not through bun run, so no node_modules/.bin sits ahead of PATH,
+      # where a tracked node_modules/.bin/bun would run in place of the gate. --no-env-file, as
+      # every start of the gate has, so no env file on disk sets a variable in it.
       - run: bun --no-env-file scripts/check.ts
 
   # Each calling job grants what its called job declares. A called job can only lower what its

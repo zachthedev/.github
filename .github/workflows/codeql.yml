@@ -23,7 +23,7 @@ name: codeql
 # one every Bun repository copies. Every other repository carries the caller in the kickstart.
 #
 # codeql-action falls back from build-mode none to autobuild for C# and Java on a server-side
-# flag, and logs it. A C# caller reads its first run's log before it trusts the conclusion.
+# flag, and logs it. The init step below turns the C# flag off. No caller analyzes Java.
 #
 # A caller's uses: job grants permissions: security-events: write, contents: read, actions: read.
 # A called job can only lower what its caller passes, and a caller passing less is refused before
@@ -62,10 +62,17 @@ jobs:
     runs-on: ${{ matrix.runs-on || 'ubuntu-latest' }}
     timeout-minutes: 30
     # Job level, so it holds when the job is called. A caller's workflow-level group is its
-    # own, and a shared group with cancel-in-progress would cancel the caller.
+    # own, and a shared group with cancel-in-progress would cancel the caller. A pull request's
+    # group is its ref, so a new push cancels the run it replaces. A push groups by commit:
+    # GitHub keeps one pending run per group and cancels the older pending one, so a ref group
+    # would leave the middle push of a burst with no analysis.
     concurrency:
-      group: codeql-${{ matrix.language }}-${{ github.ref }}
+      group: codeql-${{ matrix.language }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    # The Go extractor skips _test.go files unless this is true, so a Go caller's tests would go
+    # unanalyzed where every other language's are read. No other extractor reads it.
+    env:
+      CODEQL_EXTRACTOR_GO_OPTION_EXTRACT_TESTS: 'true'
     permissions:
       # Uploading the results to code scanning.
       security-events: write
@@ -92,7 +99,14 @@ jobs:
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: ${{ inputs.global-json-file }}
+      # While GitHub's disable_csharp_buildless flag is on, codeql-action turns a C# build-mode
+      # none into autobuild and logs "Scanning C# code without a build is temporarily unavailable.
+      # Falling back to 'autobuild' build mode." The caller chose none and this job runs no build,
+      # so the variable set to false turns the flag off, which codeql-action reads before it asks
+      # GitHub. To take the fallback again, delete the variable.
       - uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        env:
+          CODEQL_ACTION_DISABLE_CSHARP_BUILDLESS: 'false'
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode || 'none' }}

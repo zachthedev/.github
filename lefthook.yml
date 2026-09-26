@@ -1,35 +1,32 @@
 # Git hooks, installed by `lefthook install`, which the package.json prepare
 # script runs on every `bun install`.
 #
-# Every job starts its tool by its path under node_modules, so the version that
-# runs is the one bun.lock pins, nothing is fetched at commit time, and a
-# missing package fails the job. bunx --no-install would fall back to PATH, a
-# parent node_modules/.bin or its cache. Bun runs the file itself, so no
-# shebang picks a node, and --no-env-file keeps it from loading a .env into the
-# tool's environment. The loop ahead of each Bun unsets BUN_OPTIONS,
-# BUN_INSPECT, BUN_INSPECT_CONNECT_TO and BUN_INSPECT_PRELOAD in every
-# spelling, since Bun on Windows reads each in any case and they hand it an
-# --env-file or a preload ahead of its own arguments. BUN_INSPECT_PRELOAD
-# cannot be emptied instead: Bun exits 1 on an empty value. When node_modules
-# is gone, lefthook itself is missing: the installed hook script exits 0 and
-# the commit or push goes through. CI's commits job and gate are the control
-# for that case.
+# Every JavaScript tool starts as `bun x --bun --no-install`, the one spelling
+# the set uses in hooks, package.json scripts and gate rows. It runs the copy
+# node_modules/.bin holds, under Bun rather than a `node` on PATH, and fetches
+# nothing. With no copy there, it runs one from a parent directory, PATH or
+# Bun's own cache, so the install runs after every pull, every branch switch
+# and in every worktree (CONTRIBUTING.md#setup). `bun x` ignores
+# --no-env-file, so a personal env file reaches the tool. A hook runs in your
+# own environment and clears nothing from it: hooks are not a control, and
+# CI's gate and commits job decide the merge (CONTRIBUTING.md#safety). When
+# node_modules is gone, lefthook itself is missing and the commit goes
+# through.
 
 commit-msg:
   jobs:
     # {1} is the message file git hands the hook. The type list comes from the
     # Conventional Commits specification and the scopes from
-    # .github/commit-scopes.json, both by way of commitlint.config.js.
-    # --config names that one config, so no name commitlint searches before it
-    # can stand in for it.
+    # .github/commit-scopes.json, both by way of commitlint.config.js, which
+    # --config names, so commitlint searches for no other config.
     - name: commitlint
-      run: for name in $(env | cut -d= -f1 | grep -ixE 'bun_options|bun_inspect|bun_inspect_connect_to|bun_inspect_preload'); do unset "$name"; done; bun --no-env-file ./node_modules/@commitlint/cli/cli.js --config commitlint.config.js --edit {1}
+      run: bun x --bun --no-install commitlint --config commitlint.config.js --edit {1}
 
 pre-push:
   jobs:
-    # The gate, the same script the ci workflow's gate job runs. It runs over
-    # the working tree, so uncommitted edits count toward the result. Bun runs
-    # the file directly rather than through the package script, whose runner
-    # puts node_modules/.bin first on PATH.
+    # The whole gate, the same script the ci workflow's gate job runs. It runs
+    # over the working tree, so uncommitted edits count toward the result. It
+    # runs by its file, not through bun run, so no node_modules/.bin sits ahead
+    # of PATH, and --no-env-file keeps an env file out of the gate.
     - name: check
-      run: for name in $(env | cut -d= -f1 | grep -ixE 'bun_options|bun_inspect|bun_inspect_connect_to|bun_inspect_preload'); do unset "$name"; done; bun --no-env-file scripts/check.ts
+      run: bun --no-env-file scripts/check.ts

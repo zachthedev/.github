@@ -22,9 +22,10 @@ Read these before changing anything, in order. They bind an agent as they bind a
 
 - Never run `bun add` or `bun install` with `--minimum-release-age` below the value in `bunfig.toml`, and never
   pass `--ignore-scripts` to work around a blocked install script in your own install. Installing an unread pull
-  request branch passes `--ignore-scripts` on purpose ([Safety](CONTRIBUTING.md#safety)). The cooldown is the
-  window in which a malicious release is pulled, and a version installed under a lowered one lands in `bun.lock`
-  for every later install, where no cooldown reads it again.
+  request branch or a new worktree passes `--ignore-scripts` on purpose ([Safety](CONTRIBUTING.md#safety),
+  [Setup](CONTRIBUTING.md#setup)). The cooldown is the window in which a malicious release is pulled, and a
+  version installed under a lowered one lands in `bun.lock` for every later install, where no cooldown reads it
+  again.
 - Never hand-edit `CHANGELOG.md`, the version in `package.json` or `.release-please-manifest.json`
   ([why](CONTRIBUTING.md#what-never-happens)).
 - Never run `gh auth token` where its output is visible. gh answers from the system credential store, so the

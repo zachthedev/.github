@@ -38,7 +38,7 @@ version: migrating later costs more than changing now.
 | Branch rules | none     | two default-branch rulesets: squash pull requests, then the checks and code scanning no merge bypasses     |
 | Actions      | none     | read-only default token, Actions cannot approve pull requests, SHA pinning required                        |
 | Environments | none     | a scope per credential, a tier per deployment, an approval per reviewed publish, each with a policy        |
-| Secrets      | none     | an identifier is a variable, only a value that grants access is a secret, held where it is used            |
+| Secrets      | none     | a public identifier is a variable, a private identifier or a credential is a secret, held where used       |
 | Apps         | none     | release pull requests, tags and dependency updates run as GitHub Apps, never as a user                     |
 | Tags         | none     | one ruleset over every tag restricting creation, update and deletion, the releaser app its bypass          |
 | Dependabot   | none     | alerts on everywhere, security updates on in `rust-crates`, `rust-app` and `csharp-installer` alone        |
@@ -107,6 +107,8 @@ command. A row that a section owns names that section.
 | `.taplo.toml`                              | shape     | Formatting; excludes `node_modules/**`, `.claude/worktrees/**` and the stack's build output                                                                              |
 | `package.json`, `bun.lock`, `bunfig.toml`  | shape     | commitlint, `yaml`, Prettier and lefthook pinned, `packageManager` set, the cooldown under Updates. Go pins lefthook in `go.mod`                                         |
 | `eslint.config.ts`                         | shape     | `bun-service` and `bun-tooling` alone, Gate                                                                                                                              |
+| `tsconfig.json`                            | shape     | `bun-service` and `bun-tooling` alone, the root TypeScript project at a path `scripts/expected.ts` lists, Gate                                                           |
+| `scripts/tsconfig.json`                    | shape     | `bun-service` and `bun-tooling` alone, the gate's own project, so the root one never reaches the gate's imports, Gate                                                    |
 | `commitlint.config.js`                     | identical | Commits                                                                                                                                                                  |
 | `.github/commit-scopes.json`               | own       | Commits                                                                                                                                                                  |
 | `lefthook.yml`                             | shape     | Hooks                                                                                                                                                                    |
@@ -143,10 +145,19 @@ command. A row that a section owns names that section.
   that need a real service. What never happens holds the tree rules `AGENTS.md` links.
 - Safety says what a contributor does to stay safe locally. A pull request's diff is read before anything runs
   on its branch, because the branch supplies the install, the hooks and the gate. The section names what reaches
-  the tools from the contributor's own environment: `BUN_OPTIONS` and the `BUN_INSPECT` names stay unset, and
-  `bunx` ignores `--no-env-file`, so a personal env file reaches the JS tools. It says hooks are not a control.
-- Troubleshooting covers a local run that fails or differs from CI: a stale install, the other copy `bunx` may
-  run, env files and a proxy that catches loopback.
+  the tools from the contributor's own environment, and says hooks are not a control:
+  - `BUN_OPTIONS` stays unset. Safety names the direct Bun starts it reaches in that kind, never a row the gate
+    withholds it from. A tool started through `bun x` does not read it. A tool that starts Bun children of its
+    own, such as wrangler or vitest, passes it and `BUN_INSPECT_PRELOAD` on to them, and Safety names each such
+    tool the kind runs.
+  - The `BUN_INSPECT` names stay unset. `BUN_INSPECT_PRELOAD` runs a module in every direct Bun start, and a tool
+    started through `bun x` does not run it.
+  - A top-level `bunfig.toml` preload runs under `bun x` too.
+  - `bun x` ignores `--no-env-file`, so a personal env file reaches the JS tools.
+- Troubleshooting covers a local run that fails or differs from CI: a stale install, the install after every
+  pull and every branch switch, a frozen install that leaves a package `bun.lock` dropped in place, the other copy
+  `bun x` may run, a partial or copied install that runs a parent directory's binary, env files and a proxy that
+  catches loopback.
 - A cross-reference stands wherever an agent that skims would otherwise miss an item. Setup points at the Safety
   items it touches, and The gate points at Troubleshooting for a local and CI mismatch.
 - `AGENTS.md` lives at the repository root under the vendor-neutral name, so every vendor's agent reads one
@@ -175,6 +186,10 @@ command. A row that a section owns names that section.
   and skills into every repository.
 - The shared `.claude/settings.json` allows `git status` alone. A permission rule is a text match that quoting
   evades, so a deny on an argument never makes a broader allow safe. An allow goes instead.
+- Its denies on `--output` hold, since git rejects each abbreviation of the flag. A deny on `--no-index` stops
+  the flag alone. `git diff -- ../outside.txt a.txt` reads a file outside the repository with no `--no-index` in
+  the command, because git takes a path outside the work tree as that mode. The permission prompt on every `git`
+  command but `git status` is the control.
 
 ## Adapters
 
@@ -370,7 +385,8 @@ An environment has one of three purposes, and its name says which.
 - A credential scope serves a job that deploys nothing. It is named for the workflow that consumes it, in
   kebab-case (`deps` for `deps.yml`), or for a capability several workflows share (`release-pr`,
   `archive-write`). It sets `deployment: false`. It takes a reviewer only where a human approves. A scheduled
-  run takes none.
+  run takes none, unless its job reaches the environment only when an earlier job finds work, as `archive-write`'s
+  does. The approval is then asked for only when there is something to approve.
 - A publish approval holds a human approval and nothing else, and is named for the act: `release`. A Rust
   repository's `release` also holds the releaser pair, because its release job creates the tags (Releases).
 
@@ -378,10 +394,22 @@ Every environment carries a custom deployment branch policy naming the refs its 
 environment with a reviewer sets `prevent_self_review: false`, because a sole reviewer otherwise deadlocks. The
 API reports the value only on a `required_reviewers` rule.
 
+The `release` environment sets `can_admins_bypass: false` in every repository, so an admin deploys to it only
+through its reviewer's approval, as anyone else does. `release-pr` and `deps` keep the default, `true`.
+
 ### Secrets
 
-- An identifier is a variable: an account id, a database or namespace id, a domain, a fingerprint, an app client
-  id. Only a value that grants access is a secret. Variables print unmasked in run logs.
+Every value a workflow reads falls in one of three classes, and its class decides where it lives.
+
+| Class              | What it is                                              | Examples                                                                               | Held as    |
+| ------------------ | ------------------------------------------------------- | -------------------------------------------------------------------------------------- | ---------- |
+| Public identifier  | a value already public, or one a committed file carries | an app client id, a Worker's `account_id` in `wrangler.jsonc`                          | a variable |
+| Private identifier | a value that is not public and grants nothing alone     | a cloud access key id, a token id, an account id or a domain no committed file carries | a secret   |
+| Credential         | a value that grants access                              | a private key, an API token, a secret access key                                       | a secret   |
+
+- A variable prints unmasked in a public repository's run logs, and a secret is masked. Holding a private
+  identifier as a secret costs nothing and keeps it out of those logs.
+- An account id a committed file carries is public already, so it stays in that file.
 - A credential belongs to the environment that uses it. A repository-level secret is the exception, and the
   workflow that consumes it says why in a comment beside the read.
 - A `uses:` job takes the called workflow's job-level environment. The caller runs in no environment, so it
@@ -393,7 +421,9 @@ API reports the value only on a `required_reviewers` rule.
   `secrets-inherit` is the `uses:` line or the `secrets:` line, not the lines between. The shared `workflows`
   job therefore fails unless each job passing `secrets: inherit` calls `zachthedev/.github/.github/workflows/`,
   as the one CI copy (Gate). It also fails when a file the waiver names holds no such call, so a waiver never
-  outlives its job.
+  outlives its job. zizmor reports nothing for a waiver that matches no finding, so the job reads the waiver list
+  from `.github/zizmor.yml` itself, with the runner image's `yq`, and fails on any error reading it.
+- A `secrets-inherit` finding with no primary location fails the hold, since the job cannot read its callee.
 - That hold reads a zizmor pass run with `--no-config --no-ignores`. `--no-config` alone still honors an inline
   `# zizmor: ignore[secrets-inherit]`, which hides the job, and `--no-ignores` drops config ignores and inline
   comments alike. The hold then stands on its own, beside the inline refusal (Gate).
@@ -475,12 +505,37 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - No gate row resolves a tool from the machine's `PATH`. The programs the gate expects on `PATH` are the
   prerequisites Setup in `CONTRIBUTING.md` names.
 - No gate, hook or shared job starts a tool on a `node` from `PATH`. Every hook, `package.json` script and gate
-  row starts a JS tool as `bunx --bun --no-install <tool>`. A bare `bunx` starts a bin whose shebang names `node`,
-  such as Prettier's or commitlint's, under the `node` on `PATH` when one exists, and GitHub's runners carry Node.
-- `bunx --bun --no-install` does not fail on a missing package: it falls back to `PATH`, a parent
-  `node_modules/.bin` or its own cache under the temporary directory. CI installs frozen before any start, so
-  the fallback reaches a local run alone, where a stale or missing install can make it disagree with CI.
-  `CONTRIBUTING.md` says so under Troubleshooting (Files).
+  row starts a JS tool as `bun x --bun --no-install <tool>`, the one spelling. Without `--bun`, bunx starts a bin
+  whose shebang names `node`, such as Prettier's or commitlint's, under the `node` on `PATH` when one exists, and
+  GitHub's runners carry Node.
+- The spelling is `bun x`, never `bunx`. On Windows `bunx.exe` fails wrangler outright and becomes vitest's
+  worker `execPath`, so vitest's workers die. `bun x` runs both.
+- The `prepare` script is the one exception, in every repository of the set. It starts lefthook's installer by
+  path, `bun ./node_modules/lefthook/bin/index.js install`, so it is a direct Bun start (Files).
+- A script file a `package.json` script runs, such as a service's deploy script, starts its JS tools the same way,
+  or records at the drift site why it does not.
+- A gate row starts the tool under the Bun running the gate.
+- `bun x --bun --no-install` does not fail on a missing package: it falls back to `PATH`, a parent
+  `node_modules/.bin` or its own cache under the temporary directory. A gate row therefore first requires
+  `node_modules/.bin/<tool>`, the `.exe` on Windows, to resolve through every link to a regular file. Otherwise
+  the row fails with the set message, which names the tool:
+
+  ```text
+  <tool> is not installed in this checkout: run bun install --frozen-lockfile, or bun install --frozen-lockfile --ignore-scripts in a worktree (CONTRIBUTING.md#setup).
+  ```
+
+- The check covers the tool's command, `node_modules/.bin/<tool>`, and never a package the tool loads. A package
+  the checkout lacks resolves from a parent directory's `node_modules`. The native TypeScript compiler finds its
+  platform binary through `import.meta.resolve`, so a partial or copied install can run a parent directory's
+  copy, and esbuild and workerd load their platform packages the same way.
+- On Windows the `.bin` entry is a regular shim file that outlives its package. A start then fails with bunx's own
+  error, never the set message.
+- A hook or a `package.json` script checks nothing before its start, since neither is a control (Hooks). With the
+  checkout's copy missing, its `bun x` can run a parent directory's copy and report green, where a gate row
+  refuses first. A stale install also passes the row's check and runs another version.
+- CI installs frozen before any start, so each of these reaches a local run alone, where it can make that run
+  disagree with CI. A clean frozen install is the fix, and `CONTRIBUTING.md` says so under Troubleshooting
+  (Files).
 - A gate resolves every program it spawns to an absolute path from `PATH` alone, and spawns that path. It drops
   empty and relative `PATH` entries and any entry inside the repository. Inside compares canonical paths or file
   identity, never an entry's spelling. It checks a found program the same way at its final path, through every
@@ -527,9 +582,14 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   an unread branch runs that branch's `commitlint.config.js` from the commit hook
   before any check, as a preload runs before the hook's tool.
 - The shared `commits` and `workflows` jobs are the one CI copy of the refusals that block a merge: a tracked env
-  file, a tracked `node_modules`, a `patchedDependencies` key, a `bunfig.toml` key, tsconfig `paths` and
-  `baseUrl`, a duplicated JSON key, a root file named like a program, an inline zizmor waiver and the
-  `secrets: inherit` callee hold. A pull request cannot edit them. A gate need not repeat them once its
+  file at any depth, a tracked `node_modules`, a `patchedDependencies` key, a `bunfig.toml` key, tsconfig `paths`
+  and `baseUrl`, a `package.json` `exports` key, a duplicated JSON key, a `package.json` or project config that
+  does not parse, a root `package.yaml`, a root `package.json` `cosmiconfig` key, a root file named like a
+  program, an inline zizmor waiver, the `secrets: inherit` callee hold, and a stale or positional
+  `secrets-inherit` waiver. A pull request cannot change
+  what either job runs at the commit its `ci.yml` pins. It can change `ci.yml`'s call, and code-owner review of
+  `.github/workflows/` holds that. `zachthedev/.github`'s own `ci.yml` calls both jobs by `./`, so a pull request
+  there runs its own copy of each, and the same review holds that. A gate need not repeat them once its
   repository pins the `.github` release that carries them. The gate keeps what no shared job reads and what keeps
   a local run in step with CI: the mise assertions, the `scripts/` shield, the tsconfig location rule, every
   on-disk config-name refusal, the stand-in, the `shell:` hold, and the Go module and Rust toolchain checks.
@@ -540,13 +600,14 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   from an ignore file, it reads the committed file.
 - `eslint.config.ts` and `commitlint.config.js` are code the rows and the commit hook run. The `commits` job runs
   a pull request's `commitlint.config.js` in CI, contained by the same read-only, tokenless shape as the gate job.
-- A tracked env file Bun loads on its own, `.env` and its variants, is refused before a merge (the one CI copy,
-  above), because Bun loads it into the gate's environment (Known defects). The names match without regard to
+- A tracked env file Bun loads on its own, `.env` and its variants, is refused at any depth before a merge (the
+  one CI copy, above). Bun loads one from the directory each start runs in, so the root one reaches the gate's
+  environment (Known defects) and a nested one reaches any start below it. The names match without regard to
   case. A template such as `.env.example` passes.
 - Every `bun test`, `bun -e` and `bun <file>` start in a gate row, the gate's own entry, a hook or a check script
   passes `--no-env-file`, so Bun loads no `.env` into it. Bun otherwise loads `.env`, `.env.local` and
   `.env.development` into each tool it runs, and an env value can turn a row red, as `PRETTIER_EXPERIMENTAL_CLI`
-  does. `bunx` ignores the flag in every position, so a JS tool it starts loads an untracked env file on a
+  does. `bun x` ignores the flag in every position, so a JS tool it starts loads an untracked env file on a
   contributor's machine (Safety in `CONTRIBUTING.md`). A dev or deploy script keeps env
   loading. `bunfig.toml` stays the cooldown alone (Updates), so it never sets `env = false`.
 - A `bunfig.toml` holding any key but `[install] minimumReleaseAge` is refused before a merge (the one CI copy,
@@ -578,6 +639,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `CODEOWNERS`. Bun applies the root one to a tool's own imports, so a `paths` entry for a package commitlint
   imports ran repository code in the commit hook. A project aliases through `package.json` `imports`, whose `#`
   names cannot redirect a bare package name.
+- An `exports` key in any tracked `package.json` is refused before a merge (the one CI copy, above). Bun resolves a
+  bare import of a package's own name, from a file inside it, to that package's `exports` ahead of `node_modules`.
+  A root `package.json` renamed after a package commitlint loads, with `exports`, therefore runs checkout code
+  inside commitlint, with `bun.lock` unchanged.
 - A Go gate, and any other over no TypeScript, refuses a `tsconfig.json` or `jsconfig.json` tracked at any depth
   or on disk at the root, since none of its tools reads a nested one.
 - Every tracked `tsconfig.json` and `jsconfig.json` is plain JSON with no comments, because every gate and the
@@ -585,27 +650,31 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A duplicated key, at any depth, in any JSON file read to decide a refusal is refused (the one CI copy, above).
   Bun's own reader keeps the first copy, while `JSON.parse` and Go's `encoding/json` keep the last. A duplicate
   therefore lets a check pass one value while Bun uses the other.
+- The shared `commits` job reads that JSON with a parser that refuses a repeated key, and it fails closed on
+  anything it cannot parse. jq keeps the last copy and passes over a file nested past its depth limit, so no
+  refusal reads a tracked JSON file through jq.
 - A config that changes a gate row's result is refused when it is present on disk, committed or not, so a local
   gate agrees with CI. A personal file, a `lefthook-local` or `.lefthook-local` file in any form or an env file,
   is refused only when committed, and `.gitignore` names it.
 - A Go gate refuses a tracked Go file no build compiles.
 - A reviewer, not the gate, refuses a tracked file no row checks: anything under `dist/`, `coverage/`,
   `.claude/worktrees/` or a `.git`, `.sl`, `.svn`, `.hg` or `.jj` directory, a JavaScript or declaration file
-  beyond the ones a tool needs, such as `commitlint.config.js`, a path below a personal file's name,
-  `.claude/settings.local.json`, and in Go a package under an `_` directory or below a second `go.mod`. Each sits
-  in the diff and runs no code, so `CODEOWNERS` review holds it.
+  beyond the ones a tool needs, such as `commitlint.config.js`, a path below a personal file's name, and
+  `.claude/settings.local.json`. Each sits in the diff and runs no code, so `CODEOWNERS` review holds it.
+- In Go a reviewer also refuses a package under an `_` directory, below a second `go.mod`, or under a `testdata`
+  directory that a build imports. `./...` skips each, so no row checks one, and review of the diff holds it.
 - The gate refuses a root `.config` directory outright, in any letter case. mise, the dotnet tool manifest,
   cosmiconfig's meta config and lefthook all read it.
-- The root `.config` is refused before any commitlint step, the shared `commits` job included, because
-  cosmiconfig builds its meta config there even under `--config`. A `package.json` `cosmiconfig` key changes
-  nothing under `--config`, so it passes.
+- cosmiconfig reads its own settings from a root `package.json` `cosmiconfig` key, a root `package.yaml` and the
+  root `.config`, whatever `--config` names, and a `$import` there runs a module inside commitlint. Each is
+  refused before any commitlint step, the shared `commits` job included.
 - Every gate tool that searches for its own config runs with the one config named explicitly. The tools are
   Prettier, commitlint, golangci-lint, ESLint, taplo and zizmor, CSharpier in C#, and rustfmt, clippy and
   cargo-deny in Rust.
 - A config the tool finds first replaces the shared one: a committed `.golangci.json` beside `.golangci.yml`
   replaced the lint config and hid a `govet` finding while the row named no config.
 - The gate refuses the other names a tool reads only where the tool has no named-config form: cargo's config, the
-  toolchain file, the actionlint config, lefthook's configs, the env files, cosmiconfig's root `.config`,
+  toolchain file, the actionlint config, lefthook's configs, the env files, cosmiconfig's own root sources,
   mise's configs, and the project configs typescript-eslint reads (above). Refusals match at every depth the tool
   reads, without regard to case.
 - A tool whose row names its config drops the refusal of its other names, but only where a measurement shows the
@@ -615,8 +684,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     every Prettier run passes `--no-editorconfig` (Formatting), or the gate refuses a nested one. What the named
     `.prettierrc` may hold is under Formatting.
   - commitlint: `--config commitlint.config.js` stops `.commitlintrc*`, the other `commitlint.config.*` names,
-    `package.yaml` and the `package.json` key. cosmiconfig still builds its meta config from the root `.config`,
-    which stays refused.
+    and the `commitlint` key in `package.json` or `package.yaml`. cosmiconfig's own `cosmiconfig` key is a
+    different key, read whatever `--config` names, so it stays refused with the root `package.yaml` and `.config`
+    (above).
   - ESLint `--config eslint.config.ts`, taplo `--config .taplo.toml`, zizmor `--config .github/zizmor.yml` and
     golangci-lint `--config .golangci.yml`: each stops the tool's other config names, measured with the row's own
     flags, with no exception.
@@ -634,32 +704,45 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `--config` never reaches it.
 - Every row that walks the tree prints what it checked, the files or their count, and fails on zero. A row that
   checked nothing reads green otherwise: taplo and Prettier each exit 0 on empty input.
-  - A test row fails on zero, on every test skipped, and on a filtered run. Where the runner reports a filter as a
-    skip, as vitest and Microsoft.Testing.Platform do, the row fails on any skip beyond an allowance the gate
-    declares, 0 by default. A platform-only skip is declared the same way.
+  - A test row fails on zero, on every test skipped, and on a filtered run. A row whose runner reports skips, bun
+    test, vitest, nextest and Microsoft.Testing.Platform among them, also fails on any skip beyond an allowance the
+    gate declares, 0 by default. vitest, nextest and Microsoft.Testing.Platform report a filter as a skip, so the
+    allowance is what catches a filter there. A platform-only skip is declared the same way, per platform, and so
+    is a Rust `#[ignore]`, which nextest counts as a skip.
   - Under Microsoft.Testing.Platform, a runner config that marks every test explicit exits 0 with every test
     skipped. A runner config that can skip or filter tests falls under the tool config search above, in every
     stack.
-  - The Rust doctests row is that rule's Rust form. It counts examples from every `test result:` line, and fails on
-    zero, on any example filtered out, on every example ignored, and on a `Doc-tests` header with no result block.
-    `cargo test --doc` exits 0 on each, and it has no stable machine format.
+  - The Rust doctests row is that rule's Rust form. It sums examples over every `test result:` line, and fails on
+    zero, on any example filtered out, on every example ignored, and when result lines are fewer than `Doc-tests`
+    headers. A `compile_fail` or `standalone_crate` example prints a second result line under its header, so the
+    row never asks for one line per header. `cargo test --doc` exits 0 on each case the row fails, and it has no
+    stable machine format.
   - The doctests row's one allowance is a declared zero: a constant beside the step table, which itself fails once
     the row counts an example, so it leaves in the pull request that adds the first one. A `rust-app` with no
     library target declares zero, and the row skips the cargo call, since `cargo test --doc` exits 101 there.
-  - The doctests row withholds `RUSTDOCFLAGS`, `CARGO_BUILD_RUSTDOCFLAGS` and `CARGO_ENCODED_RUSTDOCFLAGS`. Each
-    can pass `--test-args` that filters or lists every example while the row stays green. The count catches the
-    same filter set through `build.rustdocflags`.
+  - The doctests row withholds `RUSTDOCFLAGS`, `CARGO_BUILD_RUSTDOCFLAGS`, `CARGO_ENCODED_RUSTDOCFLAGS` and every
+    `CARGO_TARGET_<triple>_RUSTDOCFLAGS`, the last matched by its prefix and suffix in any letter case. Each can
+    pass `--test-args` that filters or lists every example while the row stays green. The count catches the same
+    filter set through `build.rustdocflags`.
+  - A Rust gate hands every child whose output a row reads `CARGO_TERM_QUIET=false`, so cargo prints its
+    `Doc-tests` headers whatever quiet setting a user config holds.
   - A Bun test row runs with `CI=true`, so a file holding `test.only` fails the row, where it would otherwise run
     that test alone and leave the rest out of the count. The row reads bun test's summary from stderr alone, the
     last block, since a test's own output goes to stdout and can print a line shaped like a summary.
   - A row that parses tool output strips ANSI CSI sequences before it matches, and the gate hands every child
     `NO_COLOR=1`. A summary colored on the runner alone turned a gate red there.
-  - A row's printed sentence escapes control characters in anything it quotes.
-- Rows that only read files run first, then rows that run repository code, and the preflight or tree rules run
+  - A message JSON-quotes the input it interpolates, such as a path or a value read from a file. A carriage
+    return or a newline in that input then stays inside one line, where it cannot start an Actions workflow
+    command.
+- Rows that build nothing run first, then rows that run repository code, and the preflight or tree rules run
   again after each code row, because repository code can write any file a later row reads. A code row is any row
   that loads repository code: ESLint's config, a test runner, clippy, which builds build scripts and proc macros,
   and `wrangler types`, which runs `wrangler.jsonc`'s `build.command`. The Rust order is the example: fmt, taplo,
   deny, machete, prettier, actionlint, zizmor, tsc, then tools, clippy, tests, doctests, doc.
+  - A row that builds nothing can still run tree code. A `.prettierrc` plugin, which review holds (Formatting),
+    runs in the format row, and so does a `bunfig.toml` preload on a local run of an unread branch.
+  - The re-run repeats the named refusals and compares no tracked file with the index. A code row that rewrites a
+    config a later row reads therefore passes the re-run, unless a refusal names that config.
   - The actionlint row hands actionlint the workflow files by name. With no file argument actionlint also needs a
     `.git`, so it fails in an archive copy of the tree.
   - The actionlint and zizmor rows fail unless every file they handed over appears in the tool's own per-file
@@ -667,17 +750,23 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - The toml row fails unless taplo's own list of found files matches the files the row handed it (Formatting).
   - A row that reads taplo's or zizmor's per-file output sets `RUST_LOG=info` itself. Both print those lines at
     that level, so a contributor's stricter `RUST_LOG` hides them.
-  - Rows hand files as plain paths after `--`, never with a `./` prefix. A `./` path slips past taplo's excludes
-    and actionlint's config globs, and `--` keeps a file named like a flag a path.
+  - The taplo, actionlint and Prettier rows hand files as plain paths after `--`, never with a `./` prefix. A `./`
+    path slips past taplo's excludes and actionlint's config globs, and `--` keeps a file named like a flag a path.
+  - A `bun test` row names its paths with `./`, as `bun test ./scripts/`, because bun test reads a bare argument
+    as a name filter.
 - An ignore file a row reads, such as `.prettierignore` or the excludes in `.taplo.toml`, a lint config that
   carries exclusions, rules or the linter list, and `.github/zizmor.yml` each narrow what a row checks, so each
   is gate config under `CODEOWNERS` (above).
 - The shared `workflows` job refuses a `zizmor: ignore[` comment in a tracked file under `.github` (the one CI
   copy, above), so every waiver lives in `.github/zizmor.yml`. An inline comment waives any audit on its line,
-  `unpinned-uses` included.
+  `unpinned-uses` included. The job searches every file as text, with `git grep -a`, so a `.gitattributes` line
+  marking a file `-diff` or `binary` cannot hide a comment from it.
 - A waiver in `.github/zizmor.yml` names `file:line`, as an `artipacked` waiver does, so an edit that moves the
   finding turns the gate red and the waiver is read again. `secrets-inherit` alone takes the file form,
   because the callee hold is its control (Secrets).
+- The shared `workflows` job refuses a `secrets-inherit` entry holding a colon. zizmor binds a `file:line:column`
+  entry to that position alone, where a later shift can land another call, and a position that matches nothing
+  waives nothing while its file part would read as held.
 - zizmor's config cannot waive a composite action's finding. A composite action under `.github/actions`
   therefore carries no waiver, and its finding is fixed.
 - Both also refuse every ShellCheck directive in a workflow `run:` script. ShellCheck has no waiver file, so a
@@ -722,7 +811,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A gate can still bound a pipe a leftover process holds after its tool exits, and fail the row: a Go gate through
   `exec.Cmd.WaitDelay`, a Bun gate through a short drain in its run helper.
 - Where a runtime loads an env file before the gate starts, such as Task's `dotenv`, CI and the `pre-push` hook
-  run the tracked-file refusal as their own step, before that runtime starts.
+  run the gate's tree rules as a step of their own, before that runtime starts and before `bun install` reads
+  `package.json`. The duplicate-key check and the other tree rules then run ahead of both. A tracked root `.env`
+  itself is the shared `commits` job's to refuse.
 - In a Go repository the gate job and the `pre-push` hook set `GOWORK=off` and `GOFLAGS=-mod=readonly`, and the
   gate refuses a tracked `go.work`, `go.work.sum` and `vendor/`. Each can put checkout code in place of a module
   the gate's own `go run` builds, as a tracked `go.work` did.
@@ -741,6 +832,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - The gate refuses a root `cake.config`.
   - The gate refuses a `testconfig.json`, `*.testconfig.json`, `xunit.runner.json` or `*.xunit.runner.json` at any
     depth. The tests row reads the total, succeeded and skipped counts from the summary, never the exit code.
+  - In a worktree under the main checkout with no `dotnet-tools.json` of its own, `dotnet tool run` reads the main
+    checkout's manifest, so a row there can run another tool version than CI does. Troubleshooting in
+    `CONTRIBUTING.md` says so.
 - In a Rust repository:
   - cargo started at the root reads the root `.cargo/config` and `.cargo/config.toml`, the extensionless one
     winning, and every one above the checkout, never a crate's. The gate refuses `.cargo/config`, so
@@ -748,9 +842,14 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
     checkout or in `CARGO_HOME` is a named residual, the one such read in a Rust gate.
   - The gate refuses a `rust-toolchain` or `rust-toolchain.toml` anywhere but the root `rust-toolchain.toml`.
   - The doctests row follows the test-row rule above.
+  - The machete row passes `--with-metadata`. Without it cargo-machete reads the plain `[dependencies]` table
+    alone, so an unused target-specific dependency passes. The metadata read would rewrite a stale `Cargo.lock`,
+    and the `--locked` xtask alias refuses a stale lock before any row runs, so the row rewrites nothing.
 - A test or script that spawns git drops every inherited `GIT_*` variable for that process and names the
   repository with `-C <root>`. git exports `GIT_DIR` and `GIT_INDEX_FILE` to a hook, so a gate the hook runs
   otherwise writes into the hook's own repository.
+- A script file counts as a script there. A `package.json` script line that runs git inherits the environment. No
+  hook runs such a line, so no hook's `GIT_DIR` reaches it, and it stays a named residual.
 - The gate's own `git` child starts with an empty environment plus `GIT_CONFIG_NOSYSTEM` and
   `GIT_CONFIG_GLOBAL=/dev/null`, and `SystemRoot` on Windows where the stack's start of git needs it, as Go's does.
   Listing tracked files needs no inherited name.
@@ -765,9 +864,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   word. A broader fold costs a false refusal at worst.
 - The stack's own runner drives the gate: Bun scripts in `package.json`, `xtask` for Rust, Cake for C#, go-task
   for Go. A `Makefile` is a violation.
-- In a Bun repository every file under `scripts/` but `check.ts`, `expected.ts` and `tsconfig.json` is
-  byte-identical across the set, the tests and their stand-ins included. The repository's own list, its project
-  config paths, lives in `scripts/expected.ts`.
+- In a Bun repository every file under `scripts/` that the Bun kickstart carries, but `check.ts`, `expected.ts`,
+  `tsconfig.json` and `markers.ts`, is byte-identical across the set, the tests and their stand-ins included.
+  `markers.ts` writes the template's `MARKERS.md` (Kickstarts), so it is the template's own file, and no other
+  repository carries it. A file the kickstart does not carry, such as a `check.test.ts` for the repository's own
+  `check.ts`, is the repository's own. The repository's own list, its project config paths, lives in
+  `scripts/expected.ts`.
 - A Rust repository's gate modules are shared by copy the same way, never through a shared crate.
 - `cargo xtask` is `cargo run --package xtask`, and the outer cargo resolves the workspace before any row runs.
   The alias in `.cargo/config.toml` therefore carries `--locked`: `run --locked --package xtask --quiet --`.
@@ -777,6 +879,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `build.rustdocflags`, `build.rustflags`, `build.rustc-wrapper` and `target.*.runner`. A named config that cargo
   reads only through `--config`, such as a repository's own local file under `.cargo/`, is outside the rule.
 - The Bun linter is ESLint with typescript-eslint, configured in `eslint.config.ts` (Known defects).
+- `typescript` and `@typescript/native`, the alias the native compiler installs under, both ship a `tsc`.
+  `bun install` links `node_modules/.bin/tsc` to the claiming package whose name sorts first. The typecheck row
+  therefore holds `tsc --version` to the major `package.json` pins for `@typescript/native` before it checks
+  anything.
 - `check` is the whole gate. A `check:quick` without the slow rows, such as the tests, is allowed for the
   `pre-push` hook, per stack: `task check:quick`, `cargo xtask check --quick`, a Cake target.
 - One gate task lists the gate's rows, and `bun run` with no arguments counts. Documentation names that task
@@ -792,6 +898,14 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   default branch, the publish chained with `needs:` on the release job's outputs in the same run, and the deploy
   for a service. GitHub raises no `release` event for a draft, so nothing listens for one. `codeql.yml`,
   `deps.yml` and `audit.yml` stand alone, because each runs on its own clock.
+- A repository whose working tree holds real credentials, in gitignored files, adds a `Secret scan` job to
+  `ci.yml` and requires it by name in `default-branch checks`. GitHub's push protection covers provider patterns
+  alone. The scanner adds detectors of its own and checks a found credential live. `zachthedev/.github` and the
+  kickstarts hold no credential in any working tree, so they carry no such job.
+- Every CI job that does not need Windows or macOS runs on Linux. A job that stays on another OS carries a
+  comment naming the mechanism that pins it there, such as a linker, an SDK component, WinUI, WiX or the gate's
+  three-OS legs, never the target platform alone. Every shared job runs on Linux, and the shared `codeql` job
+  takes a caller's runner per language.
 - A workflow cannot call itself, so a file that is both reusable and self-run carries both trigger sets in one
   file. That holds for `codeql.yml` and `deps.yml` in `zachthedev/.github` alone. In every other repository
   `deps.yml` is the caller.
@@ -819,6 +933,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   and it goes.
 - The `commits` workflow runs commitlint over the pull request range and over the subject the squash writes,
   with ` (#N)` appended. For a one-commit pull request that is the commit's own subject (Merge settings).
+- The range lint's log stops at 64 KiB on a runner, so the range lint runs without `--verbose` and prints the
+  problems and the summary alone. Its exit code covers every commit either way.
 - The subject lint runs through a generated wrapper that turns every commitlint ignore off, the caller's and
   commitlint's defaults alike, so a header an ignore skips in the range is still checked where it lands. The range
   lint and the commit hook keep the caller's ignores. A `Revert "..."` or merge subject fails the subject lint.
@@ -826,27 +942,36 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   opens passes once it is retitled.
 - The wrapper is written to `RUNNER_TEMP`, outside the checkout, so no tracked path takes part. It resolves each
   `extends` of the caller's config from the caller's config file and hands commitlint absolute paths. Outside any
-  `node_modules`, Bun answers a bare name from its install cache or the registry, whatever `bun.lock` pins.
-- Before its install, the workflow refuses a root `.config` (Gate). Both commitlint steps name
-  `commitlint.config.js`, which stops commitlint's other config names and package keys.
+  `node_modules`, Bun answers a bare name from its install cache or the registry, whatever `bun.lock` pins. Both
+  commitlint starts therefore pass `--no-install`, so such a name fails in place of a fetch past `bun.lock`.
+- Before its install, the workflow refuses a root `.config` and a root `package.yaml`, in any case, and its JSON
+  step refuses a root `package.json` `cosmiconfig` key (Gate). Both commitlint steps name `commitlint.config.js`,
+  which stops commitlint's other config names and its own package keys.
 - Before its install, the `commits` workflow refuses a tracked `node_modules` and any tracked path below one, at
   any depth and without regard to case, and every tracked symbolic link. `bun install` keeps a tracked package
   directory at the locked version and a tracked `node_modules` link as it finds it, with no check against
   `bun.lock`, and Bun then runs that copy. Through any other link Bun reads a file `bun.lock` never named. The
   job runs beside every caller's gate, whatever the caller's stack, so it holds the refusal itself.
-- The same step refuses a `patchedDependencies` key in any tracked `package.json` (Gate), because a frozen install
-  without scripts still applies a patch.
-- It refuses a tracked env file at the root, any of the eight names Bun loads, without regard to case.
+- That step lists the tracked paths with `core.quotepath` off. git otherwise escapes a byte past ASCII as octal,
+  and a case-folding match never sees a variant spelled with one.
+- It refuses a tracked env file at any depth, any of the eight names Bun loads, without regard to case.
   `bun install` loads one even frozen and without scripts, and no flag stops that. A tracked `.env` pointing
-  `BUN_INSTALL_CACHE_DIR` at a committed folder installed a changed package with `bun.lock` unchanged.
+  `BUN_INSTALL_CACHE_DIR` at a committed folder installed a changed package with `bun.lock` unchanged. Bun loads
+  one from the directory each start runs in, so a nested one reaches a start below the root.
 - A step of its own, before the install, refuses a tracked `bunfig.toml`, in any case, holding any key but
   `[install] minimumReleaseAge`, because a preload in it runs inside commitlint and `[install.cache] dir` redirects
   the install's cache. A link or a file that does not parse is refused too. Every `bun` start in the job passes
   `--no-env-file` (Gate).
-- A step of its own, also before the install, refuses `paths` and `baseUrl` in any tracked `tsconfig.json` or
-  `jsconfig.json` and in every file its `extends` names, because the job runs commitlint under Bun (Gate).
-  It also refuses an `extends` naming a package, a file outside the checkout or a file the checkout lacks, since
-  the step cannot read any of those.
+- A step of its own, `Refused JSON keys`, also before the install, reads every tracked `package.json`,
+  `tsconfig.json` and `jsconfig.json`, at any depth and in any case, with Python's `json` module (Gate). It
+  refuses a key repeated in one object at any depth, and a file that does not parse: a trailing comma, a comment,
+  a byte order mark, `NaN`, or a nesting deeper than Python reads.
+- The same step refuses a `package.json` that is not an object or that carries `patchedDependencies`, because a
+  frozen install without scripts still applies a patch. It refuses an `exports` key in any tracked `package.json`
+  and a root `package.json` `cosmiconfig` key (Gate).
+- It refuses `paths` and `baseUrl` in a project config and in every file its `extends` chain names, because the
+  job runs commitlint under Bun (Gate). It also refuses an `extends` naming a package, an absolute path, a missing
+  file or a file outside the checkout, since the step cannot read any of those.
 - The `workflows` workflow runs actionlint and zizmor. The gate proves ShellCheck ran by writing a canary
   workflow with an unquoted variable and requiring the finding back. actionlint exits 0 with ShellCheck absent,
   and no flag changes that.
@@ -870,8 +995,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - zizmor's online audits run in the shared `workflows` job alone, on every pull request and daily from
   `audit.yml`. That job is the one CI job whose steps name the job token: its zizmor step and its lockfile asset
   check under Tools. It installs taplo, ShellCheck, actionlint and zizmor alone, each routed by mise's registry,
-  so its install names no token. The one exception elsewhere is a caller job's `mise install --locked` step for a
-  tool mise's registry does not route, below.
+  so its install names no token. Two exceptions stand elsewhere:
+  - a caller job's `mise install --locked` step for a tool mise's registry does not route, below;
+  - a job that only downloads a release asset with `gh release download`, checks out with
+    `persist-credentials: false` and runs no repository code, as the `loader` job in enshrouded-mods' `cd.yml`
+    does.
 - In CI the gate runs zizmor with `--offline`, and the gate step holds no token. Locally the gate runs zizmor
   online when `gh auth token` answers, handing the token to zizmor's process alone, and passes `--offline`
   otherwise, never as a silent default. That token comes from gh's credential store, so an empty `GH_CONFIG_DIR`
@@ -886,8 +1014,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every `jdx/mise-action` step takes an empty `github_token`, so the action exports no token to later steps.
 - A locked install reads a registry tool's attestations from mise's versions host. A tool mise's registry does not
   route queries the GitHub API on every install.
-- A job installing such a tool runs the gate's checks of `mise.toml` and `mise.lock` first. Then a step that runs
-  nothing but `mise install --locked` sets `MISE_GITHUB_TOKEN` to the job token, under the job's
+- A job installing such a tool runs the gate's checks of `mise.toml` and `mise.lock` first, in an earlier step of
+  the same job or in a preceding job it `needs:`. The preceding job is the stronger form, since the job that holds
+  the token then runs no repository code. Then a step that runs nothing but `mise install --locked` sets
+  `MISE_GITHUB_TOKEN` to the job token, under the job's
   `contents: read`, and that step alone names it. The token already sits in the job, and the unauthenticated
   limit of 60 requests an hour per runner address fails installs at random. The gate step itself stays tokenless.
 - A step order inside one job is no boundary, since the token sits in the runner's memory. Installing before the
@@ -913,8 +1043,19 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   Without it, a server-side flag picks the bundle at run time, and no pin or cooldown sees the change.
 - The build mode is `none` wherever the extractor supports it and `autobuild` for Go, whose extractor refuses
   `none`. A Go caller passes `build-mode: autobuild` in its language's entry.
+- Under `none` the C# extractor runs a package restore of its own, which reads no lock file. It can fail, and it
+  can fetch versions the lock does not pin, so it never stands in for the gate's locked restore.
+- codeql-action falls back from `none` to `autobuild` for C# while a GitHub feature flag is on, and the shared job
+  has no build step for that fallback. The shared job's init step therefore sets
+  `CODEQL_ACTION_DISABLE_CSHARP_BUILDLESS` to `false`, which overrides the flag (Known defects).
+- A Go analysis reads `_test.go` files too. The Go extractor skips them by default, so the shared job sets
+  `CODEQL_EXTRACTOR_GO_OPTION_EXTRACT_TESTS`, and a repository's tests are analyzed as its JavaScript tests
+  already are. A high alert in a test file then blocks a pull request like any other.
 - The triggers are a push to the default branch, every pull request and a weekly schedule, with no path filter.
   A filtered run leaves a required check pending and the `code_scanning` rule without a result.
+- A pull request's analysis groups by its ref, and a newer push cancels the older run. A push to the default
+  branch groups by its commit, since GitHub keeps one pending run per group and cancels the older one. A burst of
+  pushes then keeps every analysis.
 - The category is `/language:<language>` and never changes. Renaming `codeql.yml`, its job id or the category
   leaves a stale configuration on the default branch. The `CodeQL` check then concludes `neutral` on every pull
   request, which passes, until that configuration is deleted on the tool status page.
@@ -937,15 +1078,22 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   author therefore writes 64 to 67 characters, fewer as the pull request number grows. The `commit-msg` hook checks
   72 as written.
 - Renovate's headers are shortened by the presets' `commitMessageAction` and `commitMessageTopic`, never by
-  exempting the bot. A Renovate or Dependabot pull request whose landed header runs past 72 fails, so it is closed
-  and its bump is taken by hand.
+  exempting the bot. A dependency whose name runs a major bump's header past 72 gets a short `commitMessageTopic`
+  in its preset, as the base preset gives `@eslint-community/eslint-plugin-eslint-comments`. A Renovate or
+  Dependabot pull request whose landed header still runs past 72 fails, so it is closed and its bump is taken by
+  hand.
 - The shared `commitlint.config.js` ignores a message signed off by `dependabot[bot]`, because its body carries
   release notes past the line limit. It reads `.github/dependabot.yml` through the `yaml` package and takes each
-  `updates[].commit-message.prefix` and `prefix-development`. It skips a commit only when the header starts with one
-  of those, then a colon and a space, and a line after the header starts with the
-  `Signed-off-by: dependabot[bot] <` trailer. A header or title that merely carries the text is still linted. A
-  repository with no `dependabot.yml` skips nothing, and a file that does not parse fails the lint. The pull request
-  title and the landed-subject lint still check a Dependabot header.
+  `updates[].commit-message.prefix` and `prefix-development`. It skips a commit only on a pull request Dependabot
+  opened, when the header starts with one of those, then a colon and a space, and a line after the header starts
+  with the `Signed-off-by: dependabot[bot] <` trailer. The `commits` job tells it the pull request's author through
+  `COMMITLINT_DEPENDABOT_PULL_REQUEST`, set to `true` on a Dependabot pull request alone. A forged trailer on any
+  other pull request is linted. The commit hook lints one too, unless the environment sets the variable, which an
+  env file `bun x` loads can do. CI sets the variable itself and refuses a tracked env file (Gate).
+- A header or title that merely carries the text is still linted. A repository with no `dependabot.yml` skips
+  nothing, and a file that does not parse fails the lint. A `dependabot.yml` past 64 KiB fails before it is
+  parsed, since the `yaml` package checks for duplicate keys in quadratic time. The pull request title and the
+  landed-subject lint still check a Dependabot header.
 - A commit's type names its effect on the people who use what the repository ships.
 - `feat`, `fix`, `perf` and `revert` are user-facing. Every other type is hidden from the changelog (Releases).
 - A gate, hook or tooling change is `chore`, and a change to the repository's own workflows is `ci`, because
@@ -978,23 +1126,24 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   the gate.
 - A Go repository pins lefthook as a `go.mod` tool directive, because lefthook is a Go program and the stack
   leans on its native abilities. Its `package.json` carries commitlint, `yaml` and Prettier alone.
-- A hook job starts its tool as a gate row does (Gate). A hook runs in the contributor's own environment and
-  clears no inherited variable, because a hook is not a control: CI's gate and `commits` job decide the merge.
+- A hook job starts its tool in the one spelling, `bun x --bun --no-install <tool>` (Gate), with no presence
+  check. A hook runs in the contributor's own environment and clears no inherited variable, because a hook is not
+  a control: CI's gate and `commits` job decide the merge.
 - The hook script `lefthook install` writes fails open where lefthook itself resolves from `node_modules`: Bun,
   and any kind installing lefthook through `package.json`. With no lefthook binary found, it prints
   `Can't find lefthook in PATH` and exits 0, and the commit or push goes through unchecked.
 - That script hard-codes the installing checkout's `node_modules` path. A linked worktree with no `node_modules`
   of its own therefore runs the installing checkout's lefthook.
 - A fresh clone has no hook until its install runs `lefthook install`.
-- Every lefthook repository refuses a tracked `lefthook-local`, `.lefthook-local` or `.config/lefthook-local`
-  file, any extension, and gitignores all three. lefthook merges one over `lefthook.yml`, so a tracked one can
-  turn `piped` off and replace a hook's jobs.
+- Every lefthook repository refuses a tracked `lefthook-local` or `.lefthook-local` file, any extension, and
+  gitignores both. A `.config/lefthook-local` file falls under the root `.config` refusal (Gate). lefthook merges
+  any of them over `lefthook.yml`, so a tracked one can turn `piped` off and replace a hook's jobs.
 - lefthook merges a branch's `.config/lefthook-local.*` too, and a local job with a guard job's name replaces it
   before any job runs. A hook job that guards against something therefore catches an accident, never a hostile
   branch. Reading the diff before running anything on a pull request branch covers `commit-msg` as well (Gate).
 - A Go repository's hook runs lefthook through `go tool`, which refuses when lefthook cannot run.
-- lefthook skips `pre-push` on the first push of a new branch to an empty remote. A first push therefore rests on
-  the gate run before it.
+- lefthook runs `pre-push` on every push, the first push of a branch to an empty remote included, because the
+  push hook's job names no glob. A first push runs the gate like any other.
 - CI's `commits` job and gate are the control, and `CONTRIBUTING.md` says so.
 - No `.githooks/`.
 
@@ -1033,6 +1182,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 
 - An inline waiver in code names the exact rule it waives and gives a reason. Each stack's own linter enforces
   that, and the gate refuses only the forms no tool checks.
+- A reason holds a letter or a digit once its default-ignorable code points are removed. The strip comes first,
+  because the Hangul filler characters count as letters. The linters the set runs accept a reason of invisible
+  characters alone, such as a soft hyphen or a Braille blank, so each stack's gate holds the rule itself.
+- U+13441 and U+13442, two Egyptian hieroglyph blanks, are letters that print blank in some fonts, and they pass.
+  That is an accepted residual, so no comment or document claims that every accepted reason prints.
 - A waiver in workflow YAML lives in `.github/zizmor.yml` (Gate), and a workflow `run:` block carries no ShellCheck
   directive (Gate).
 
@@ -1045,6 +1199,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   suppress the named rule alone. The gate refuses `//nolint:gosec`.
 - golangci-lint drops gosec's errors about a malformed `#nosec`, so a bad one shows only the finding it failed to
   waive. A stale `#nosec` goes unreported. The owner accepted both costs for a rule-exact waiver.
+- The gate refuses a nolint or `#nosec` reason that holds no letter or number once its default-ignorable code
+  points are removed (above). nolintlint's `require-explanation` and gosec's justification check accept one.
 - go-test-coverage runs with `force-annotation-comment: true`, so a `coverage-ignore` comment carries a reason.
 - The gate refuses the forms golangci-lint honors and nolintlint misses:
   - a nolint comment with extra leading slashes, such as `///nolint`;
@@ -1063,6 +1219,20 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - typescript-eslint's `ban-ts-comment`, in `strictTypeChecked`, bans `@ts-ignore` and `@ts-nocheck` and requires a
   description on `@ts-expect-error`. It reports every directive shape tsc honors. `@ts-expect-error` cannot name a
   TypeScript error code that anything checks, so its description is the reason.
+- The gate's own ESLint rule, `gate/visible-reason` in `scripts/eslint-plugin.ts`, reads every comment ESLint
+  parses: each ESLint directive label, and each `@ts-expect-error` or `@ts-ignore`. It refuses a reason with no
+  letter or digit once default-ignorable code points are removed (above). It reads the comments ESLint's parser
+  returns, never the file's text, so a string that holds comment text neither hides a directive nor fakes one.
+- ESLint applies a directive to the reports at its own position. A directive that names `gate/visible-reason`
+  therefore hides the rule's report on itself, and a block disable naming it hides every report up to its enable.
+  The lint row refuses every report of the rule that ESLint lists under `suppressedMessages`, where no directive
+  can remove one.
+- A configuration comment, such as one setting `gate/visible-reason` to `off`, turns a rule off for its whole file,
+  so the rule reports nothing and nothing lands in `suppressedMessages`. The lint row therefore runs ESLint a
+  second time with `--no-inline-config`, which reads no comment as configuration. It refuses every report there
+  from a rule that reads comments: `gate/visible-reason`, `ban-ts-comment` and the eslint-comments rules.
+- A byte that is not UTF-8 before a directive reads alike under tsc, ESLint and Prettier, so a directive and its
+  refusal see the same text. Bun's runtime decodes such a byte differently, a named residual with no refusal.
 - The gate refuses the text of Prettier's ignore comment, in any case and in prose too, in every file the format
   row checks. A path the committed `.prettierignore` names is not checked.
 
@@ -1083,7 +1253,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   host's cfg keeps, and a `#[cfg_attr(not(windows), allow(...))]` passed both it and a text match on Windows.
 - The gate also refuses:
   - a root `Cargo.toml` that does not set both lints to `deny`;
-  - an empty or whitespace `reason`;
+  - a `reason` with no alphanumeric character outside `Default_Ignorable_Code_Point`, read after its escapes
+    decode, so `reason = "\u{3164}"` is refused (above);
   - an `expect` naming a lint group, such as `warnings`, `unused` or `clippy::pedantic`, since a group is not a rule
     and clippy accepts one;
   - `rustfmt::skip` in every form;
@@ -1129,16 +1300,23 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   included, never line by line.
 - The build row adds two checks. A SARIF error-log audit refuses any in-source suppression with an empty
   justification or of SA1404, however it is spelled. An analyzer canary requires SA1404 to run in every compile.
-- Known limits: SA1404 accepts any non-empty reason. The null-forgiving `!` waives a nullable warning with no name
-  and no reason, and nothing refuses it. A project-file switch such as `NoWarn` or `RunAnalyzers` is caught by the
-  canary or by review.
+- The gate refuses a `Justification` with no letter or digit once its default-ignorable code points are removed
+  (above). SA1404 accepts a Braille blank alone.
+- The SARIF audit and the canary cover the solution's compiles. `cake.cs` is a file-based program and writes no
+  error log, so neither reads it. Review of `Directory.Packages.props` and `cake.packages.lock.json` holds an
+  analyzer exclusion conditioned on `FileBasedProgram`, and review holds the one `GlobalPackageReference` line
+  for StyleCop. Nothing checks that every project takes the same StyleCop version.
+- Known limits: SA1404 accepts any non-empty reason, and the gate's letter-or-digit rule is the whole check beyond
+  it. The null-forgiving `!` waives a nullable warning with no name and no reason, and nothing refuses it. A
+  project-file switch such as `NoWarn` or `RunAnalyzers` is caught by the canary or by review.
 - `[ExcludeFromCodeCoverage]` becomes a refusal on the day a coverage threshold lands.
 
 ### Shell
 
 - ShellCheck has no setting that requires a code or a reason. In a tracked `.sh` script, any line holding a
   `# shellcheck` directive is therefore exactly `# shellcheck disable=SCnnnn[,SCnnnn] # reason` as its whole
-  comment, and the gate holds it to that form. A partial match would miss a directive with several keys.
+  comment, and the gate holds it to that form. A partial match would miss a directive with several keys. The
+  reason holds a letter or a digit once its default-ignorable code points are removed (above).
 - A repository that tracks shell scripts runs a ShellCheck row over them, with `--norc`, `SHELLCHECK_OPTS`
   cleared, a printed count and a failure on zero.
 
@@ -1149,6 +1327,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - `.github/renovate.json` extends one kind preset from `zachthedev/.github//renovate/` on its default branch,
   and adds only what is true of that repository alone. The `.github` repository validates every preset change
   before it merges. That is the check on a change that reaches every repository on the next run.
+- Renovate reads a root `renovate.json`, `renovate.jsonc` or `renovate.json5` ahead of `.github/renovate.json`.
+  The shared `deps` job therefore sets `RENOVATE_CONFIG_FILE_NAMES` to `.github/renovate.json`, and Renovate puts
+  the names it lists ahead of its own. `.github/renovate.json` then wins wherever it exists, and a root file added
+  beside it is never read. A pull request that deletes `.github/renovate.json` and adds a root file is review's to
+  refuse.
 - The base preset holds the standard, and no preset or repository file restates a Renovate default:
   - `config:recommended` with digest pinning and abandonment flags
   - new pull requests in the Monday window, every other run rebasing open branches
@@ -1178,12 +1361,17 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   does not wait for that release: it takes the alert path below, and its fix is `fix(deps)`.
 - A `zachthedev/**` bump's SHA is on `.github`'s `main`. The reviewer checks it with
   `gh api repos/zachthedev/.github/compare/main...<sha>`, reading `behind` or `identical`.
+- Renovate's pull request bumping the `zachthedev/.github` workflows is how a repository takes a new release. It
+  is rebased onto the default branch first. Once its fresh CI is green, the owner approves it as code owner, and
+  it merges without `--admin`. The copies the release names, such as `deps.yml`'s text or `commitlint.config.js`,
+  land as a commit of their own after it, since a copied file can depend on the pinned job. The pull request is
+  closed and the bump taken by hand only when it goes red on its own.
 - The Monday window's own pull requests keep a quiet repository active, so its scheduled workflows stay
   enabled (Known defects).
 - Security fixes come from Dependabot alerts (Dependabot). Renovate fixes a direct dependency in every ecosystem
   and an indirect Go module, because `go.mod` names it. A transitive Cargo or NuGet advisory is Dependabot's: its
   security update opens the pull request in `rust-crates`, `rust-app` and `csharp-installer`. Renovate opens
-  nothing for a transitive Bun advisory, and no other bot does either. The daily `bun audit` reports it, and it is
+  nothing for a transitive Bun advisory, and no other bot does either. The daily `bun run audit` reports it, and it is
   fixed by a direct bump or by hand from the alert with `bun audit fix`.
   Renovate's `security:gomodIndirectSecurityUpdates` preset is never used. It disables the modules behind
   `tool` directives.
@@ -1193,7 +1381,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - The cooldown is never lowered, excluded around or bypassed without auditing the version. A hand pin ahead of
     the cooldown records its audit in the commit body. Another repository inherits by reading that record, never
     by copying the pin.
-  - A bare `bunx <package>` honors only the user-level cooldown, so nothing the repository controls gates it.
+  - The base preset's `zachthedev/**` rule is the one standing exemption. A new tag of the set's own repositories
+    is the author's own work, so it waits for nothing.
+  - A bare `bun x <package>` honors only the user-level cooldown, so nothing the repository controls gates it.
   - Lock file maintenance runs the package manager directly and takes no Renovate cooldown. The ecosystem's own
     file carries one where it exists, with the reason in the file. The updater and CI containers carry no other
     configuration. Bun: `bunfig.toml`. Cargo: `.cargo/config.toml` with `[registry] global-min-publish-age`,
@@ -1231,9 +1421,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - A tool-tree advisory with no fixed version is held by pinning the tool back, or by disabling `govulncheck tool`
   with a dated reason at its drift site until a fix ships. `CONTRIBUTING.md` says so.
 - Live whole-tree readers run as reports, never as checks: `bun audit` daily, `cargo deny check advisories`
-  daily, `dotnet package list --vulnerable` daily. They run from `audit.yml`, on its own clock. A repository
-  with an audit script or waivers runs that script in the daily job, not bare `bun audit`. GitHub's
-  database lacks RustSec entries that OSV carries, and the daily report covers those. `audit.yml` also carries a
+  daily, `dotnet package list --vulnerable` daily. They run from `audit.yml`, on its own clock. GitHub's
+  database lacks RustSec entries that OSV carries, and the daily report covers those.
+- Every repository with a `bun.lock`, whatever its stack, carries `"audit": "bun audit --audit-level=high"` in
+  `package.json`, and `audit.yml`'s daily job runs `bun run audit`. High is the set's level, and the script is
+  the one home of `--ignore` waivers. The dependency graph reads a Bun repository's direct `package.json`
+  dependencies alone, so the daily run is what reads its transitive ones. `audit.yml` also carries a
   daily job that calls the reusable `workflows` workflow, so zizmor's online audits of the pinned actions run
   without a pull request. A red run is the report.
 - The advisory check sees direct npm packages only under Bun, no NuGet package under central package
@@ -1365,6 +1558,17 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   artifacts flips the draft alone, under the `release` reviewer. A service chains its deploy on that job.
 - release-please pairs the draft with forced tag creation, because GitHub creates no tag for a draft, and sets
   `bump-minor-pre-major` (Versioning). release-plz creates the tag itself.
+- GitHub keeps one running and one pending run per concurrency group, and a newer run cancels the pending one.
+  A release merge's run that waits behind a running release run is therefore dropped when another push follows
+  it, in the shared `release-pr` job's group or in a caller's own group (Known defects). The next run's
+  release-please still tags the merge commit, `publish.yml` refuses that tag since it names another commit than
+  the run's `GITHUB_SHA`, and the draft stays a draft. The recovery by kind:
+  - `bun-tooling` attaches nothing, so the draft is flipped by hand.
+  - `bun-service` flips the draft by hand, then deploys the tag as its `docs/deploy.md` says.
+  - `go-cli` dispatches `cd.yml` on the tag's ref, which rebuilds and publishes at the tag's commit.
+  - `csharp-installer` cuts the next version (Tags), since a build at a later commit cannot pass `publish.yml`.
+  - `rust-crates` and `rust-app` need none. The release job takes no group and runs on the release merge's own
+    push, so the drop never reaches it.
 - The changelog carries user-facing changes alone (Commits). Under release-please, `changelog-sections` shows
   `feat`, `fix`, `perf` and `revert` and hides the rest, `build` included. Under release-plz,
   `[changelog] commit_parsers` shows the same four and skips the rest, with `protect_breaking_commits` on.
@@ -1407,7 +1611,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   - A crate whose `Cargo.toml` says `publish = false` also carries `publish = false` in its `release-plz.toml`
     entry, or the workspace sets it. release-plz's `release` refuses such a crate while its entry leaves `publish`
     at the default, and `release = false` does not cover it. `update` and `release-pr` never check it, so the first
-    real release run is where it fails.
+    real release run is where it fails. A `git_only` workspace is exempt: release-plz publishes nothing under
+    `git_only` and skips that check for every package.
   - `release-update` computes the release. It runs in no environment, with a job token that reads and
     `MISE_ENV=semver`, and runs `release-plz update` with the semver check. The check builds rustdoc for each
     changed library and its published baseline, which runs every dependency's build script, so the job holds no
@@ -1485,6 +1690,13 @@ A reviewer holds this row, except where a bullet names a check.
   read with the stack's library for that format, never by line or regex.
 - No count in prose of something that grows or shrinks. Name the thing and where its list lives.
 - A version appears only in the file that pins it. Prose names the pin file.
+  - Prose and code comments never restate a pinned version.
+  - A user-facing minimum of software the repository does not pin stays.
+  - A restatement stays where a test binds it to its pin, as the next bullet allows. The test fails whenever the
+    pin moves without the text.
+  - A demo or fixture value that equals a real pin moves to another value, so a search for a pinned version finds
+    the pin file alone.
+  - A `# vX.Y.Z` comment that a bot rewrites with its pin is outside the rule.
 - A duplication is removed, not bound. Where a command prints the list, the document names the command and holds
   no copy. Where no command prints it and a reader needs the restated form, a test binds the document to its
   source. The repository says so.
@@ -1521,11 +1733,13 @@ bears on, the defect, and the condition that removes it.
 - gofmt (Gate): `gofmt -l` exits 0 with an unformatted file present. golangci-lint's formatter is the check.
   gofmt documents that exit code, so the entry stays.
 - codeql-action (CodeQL): falls back from `build-mode: none` to `autobuild` for C# and Java on a server-side
-  flag, and logs it as a warning. A C# repository reads its first run's log, and the conclusion alone is not
-  trusted. Removed once the fallback fails the run.
-- typescript-eslint (Gate): reads types through the TypeScript 6 compiler API. A Bun repository therefore keeps
-  `typescript` on 6.x beside the native TypeScript 7 compiler, installed under an alias, and a Renovate rule
-  holds the major. Removed once typescript-eslint supports TypeScript 7.
+  flag, and logs it as a warning. The shared job sets `CODEQL_ACTION_DISABLE_CSHARP_BUILDLESS` to `false`, which
+  overrides the flag for C#. Java keeps the fallback, so a Java repository reads its first run's log, and the
+  conclusion alone is not trusted. Removed once the fallback fails the run.
+- typescript-eslint (Gate): reads types through the JavaScript compiler API, which the native compiler lacks. A Bun
+  repository therefore keeps `typescript` on the last major that carries that API, beside the native compiler
+  installed under an alias, and a Renovate rule holds that major. Removed once typescript-eslint supports the
+  native compiler.
 - GitHub dependency graph (Advisories): reads `.csproj` alone and never `Directory.Packages.props`, so under
   central package management a NuGet bump produces an empty diff for `dependency-review-action`. The submitted
   snapshot under Advisories is what makes that leg real. Removed once the graph reads
@@ -1580,6 +1794,10 @@ bears on, the defect, and the condition that removes it.
 - actionlint (Workflows): on Windows it stalls when it hands ShellCheck a `run:` script past about 4 KB. Every
   run script therefore stays under 4 KB, and a longer check becomes a step of its own. Removed once actionlint
   hands a long script over on Windows.
+- actionlint (Releases): refuses the `queue` key under `concurrency`, which GitHub accepts. `queue: max` keeps up
+  to 100 pending runs in a group, so no release merge's run is dropped. Upstream rhysd/actionlint#654. Removed
+  once actionlint accepts the key, when the shared `release-pr` group and every caller's release group take
+  `queue: max`.
 - actionlint (Workflows): refuses GitHub's recommended `$/` syntax for a same-repository reusable workflow
   call. A same-repository caller writes `./`, and `.github/zizmor.yml` disables the `self-repository` audit
   with that reason. Upstream rhysd/actionlint#711. Removed once actionlint accepts `$/`.
