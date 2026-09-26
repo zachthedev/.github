@@ -1685,6 +1685,13 @@ A reviewer holds this row, except where a bullet names a check.
   read with the stack's library for that format, never by line or regex.
 - No count in prose of something that grows or shrinks. Name the thing and where its list lives.
 - A version appears only in the file that pins it. Prose names the pin file.
+  - Prose and code comments never restate a pinned version.
+  - A user-facing minimum of software the repository does not pin stays.
+  - A restatement stays where a test binds it to its pin, as the next bullet allows. The test fails whenever the
+    pin moves without the text.
+  - A demo or fixture value that equals a real pin moves to another value, so a search for a pinned version finds
+    the pin file alone.
+  - A `# vX.Y.Z` comment that a bot rewrites with its pin is outside the rule.
 - A duplication is removed, not bound. Where a command prints the list, the document names the command and holds
   no copy. Where no command prints it and a reader needs the restated form, a test binds the document to its
   source. The repository says so.
