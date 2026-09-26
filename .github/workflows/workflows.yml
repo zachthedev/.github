@@ -414,11 +414,13 @@ jobs:
       # repository's own run also accepts its ./.github/workflows/ calls. zizmor exits 10 to 14
       # when it reports findings; any other nonzero exit is an error. A finding with no primary
       # location names no callee, so any such finding fails the step. Each entry of
-      # rules.secrets-inherit.ignore in .github/zizmor.yml, a file or a file:line:column, must
-      # name a file holding such a job; a waiver naming none means the waiver or the audit went
-      # stale. zizmor leaves an ignored finding out of its report and names no waiver that matched
-      # nothing, so the list is read from the file itself, by the image's yq. A jq or yq failure
-      # stops the step.
+      # rules.secrets-inherit.ignore in .github/zizmor.yml names a whole file, and an entry holding
+      # a colon is refused: zizmor binds a file:line:column entry to that position alone, where a
+      # later shift can land another call, and a position that matches nothing waives nothing
+      # while this step would read its file part as held. Each file must hold such a job; a waiver
+      # naming none means the waiver or the audit went stale. zizmor leaves an ignored finding out
+      # of its report and names no waiver that matched nothing, so the list is read from the file
+      # itself, by the image's yq. A jq or yq failure stops the step.
       - name: Held secrets-inherit callees
         run: |
           zizmor=$(mise which zizmor)
@@ -446,10 +448,14 @@ jobs:
           refused=0
           while IFS= read -r entry; do
             [ -n "$entry" ] || continue
-            named=${entry%%:*}
+            if [ "${entry#*:}" != "$entry" ]; then
+              echo "::error::.github/zizmor.yml waives secrets-inherit at $(printf '%q' "$entry"), a position, and this audit's waivers name a whole file. Name the file alone."
+              refused=1
+              continue
+            fi
             held=0
             while IFS=$'\t' read -r path _; do
-              if [ -n "$path" ] && [ "${path##*/}" = "$named" ]; then
+              if [ -n "$path" ] && [ "${path##*/}" = "$entry" ]; then
                 held=1
               fi
             done <<< "$callers"
