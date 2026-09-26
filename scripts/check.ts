@@ -77,7 +77,7 @@ const BUN = process.execPath;
 /**
  * The flag every Bun the gate starts directly gets first, so no env file on
  * disk sets a variable inside the row: the test runs and the ShellCheck
- * stand-in. Bun 1.4.2 honors it over all eight names it loads, in every mode.
+ * stand-in. Bun honors it over all eight names it loads, in every mode.
  * bunx ignores it, so no JavaScript tool gets it.
  */
 const NO_ENV_FILE = '--no-env-file';
