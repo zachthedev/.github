@@ -7,6 +7,13 @@ name: commits
 # it from git. The subject a squash writes is linted too: the only commit's subject for a
 # one-commit pull request, the title otherwise, with the pull request number appended.
 #
+# The tree refusals run on every event the caller calls the job for: a pull request, a push to
+# the default branch, and the caller's daily audit run. So a tree two pull requests produce
+# together, which neither pull request's run read, meets them at the push, and a push that
+# started no run, one whose message holds [skip ci] or one made with the workflow token, meets
+# them within a day. setup-bun, the install and both commitlint steps run on a pull request
+# alone, since only a pull request carries a range and a title.
+#
 # A caller's uses: job grants permissions: contents: read. A called job can only lower what its
 # caller passes, and a caller passing none is refused before any step runs.
 on:
@@ -16,24 +23,18 @@ permissions: {}
 
 jobs:
   commits:
-    # A push carries no pull request range or title, so the job runs on a pull request alone.
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
     steps:
-      # The whole history, so base..head is present. A shallow clone leaves commitlint nothing to
-      # read. The job pushes nothing, so the token does not stay in the checkout.
+      # The whole history, so a pull request's base..head is present. A shallow clone leaves
+      # commitlint nothing to read. The job pushes nothing, so the token does not stay in the
+      # checkout.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      # packageManager in the caller's package.json is the one Bun pin. The action verifies no
-      # download, so that pin plus the cooldown is the control.
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: package.json
       # This job runs beside the caller's gate, whatever its stack, so before the install it refuses
       # what would hand commitlint a copy the lockfile does not name. bun install keeps a tracked
       # package directory at the locked version in place of the one it would fetch, and commitlint
@@ -219,9 +220,17 @@ jobs:
             echo "::error::The tree tracks no .github/renovate.json file. The deps job names it ahead of Renovate's own list, and without it Renovate reads a root renovate.json, a .renovaterc or a package.json renovate key in its place. Restore the file."
             exit 1
           fi
+      # packageManager in the caller's package.json is the one Bun pin. The action verifies no
+      # download, so that pin plus the cooldown is the control. It runs after every tree
+      # refusal, on a pull request alone, as the install and both commitlint steps do.
+      - if: github.event_name == 'pull_request'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
       # --ignore-scripts, so no lifecycle script and no prepare script from the caller's tree
       # runs here. commitlint needs none of them.
-      - run: bun install --frozen-lockfile --ignore-scripts
+      - if: github.event_name == 'pull_request'
+        run: bun install --frozen-lockfile --ignore-scripts
       # --from and --to are commitlint's own range: it walks base..head in git. commitlint starts
       # by its path under node_modules, which the install above wrote from bun.lock, so a missing
       # copy fails the step. bunx --no-install would fall back to PATH, a parent node_modules/.bin
@@ -236,6 +245,7 @@ jobs:
       # request Dependabot opened alone, and the set's commitlint.config.js skips a
       # Dependabot-shaped commit only then, since anyone can type Dependabot's header and trailer.
       - name: Pull request commits
+        if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -254,6 +264,7 @@ jobs:
       # the caller's config file and hands commitlint absolute paths. --no-install, as in the step
       # above, turns any other bare import there into an error rather than a fetch.
       - name: Squash subject
+        if: github.event_name == 'pull_request'
         env:
           TITLE: ${{ github.event.pull_request.title }}
           NUMBER: ${{ github.event.pull_request.number }}
