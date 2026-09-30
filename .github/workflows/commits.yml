@@ -35,6 +35,43 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # setup-bun installs the Bun that package.json's packageManager names, reading whatever
+      # follows bun@ there. A range such as ^1.4.0 or 1, or a name such as latest or canary,
+      # resolves against Bun's tags when the job runs, past any cooldown, and a packageManager that
+      # is missing, names no Bun or sits in a package.json that does not parse installs the newest
+      # release. So packageManager reads bun@X.Y.Z exactly, in package.json read the way the action
+      # reads it. A root .node-version, which a caller's actions/setup-node step reads, holds one
+      # X.Y.Z line and at most one newline: setup-node keeps the image's node on an empty one,
+      # resolves a range or a name such as lts/* when the job runs, and follows a JSON one to
+      # another file. The step runs before setup-bun, on every event.
+      - name: Held runtime pins
+        run: |
+          python3 - <<'PY'
+          import json, os, re, sys
+          EXACT = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+          found = []
+          try:
+              with open("package.json", encoding="utf-8") as file:
+                  manifest = json.load(file)
+          except (OSError, UnicodeDecodeError, ValueError) as error:
+              found.append(f"package.json does not read as JSON ({error})")
+          else:
+              pin = manifest.get("packageManager") if isinstance(manifest, dict) else None
+              if not isinstance(pin, str) or not re.fullmatch("bun@" + EXACT, pin):
+                  found.append(f"package.json gives packageManager as {pin!r}, not bun@X.Y.Z")
+          if os.path.lexists(".node-version"):
+              try:
+                  with open(".node-version", "rb") as file:
+                      held = file.read(256)
+              except OSError as error:
+                  found.append(f".node-version does not read as a file ({error})")
+              else:
+                  if not re.fullmatch(EXACT.encode() + rb"\n?", held):
+                      found.append(f".node-version holds {held!r}, not one X.Y.Z line")
+          for finding in found:
+              print(f"::error::{finding}. A range, a name or an empty pin installs a release no cooldown held. Pin the exact version.")
+          sys.exit(1 if found else 0)
+          PY
       # This job runs beside the caller's gate, whatever its stack, so before the install it refuses
       # what would hand commitlint a copy the lockfile does not name. bun install keeps a tracked
       # package directory at the locked version in place of the one it would fetch, and commitlint
