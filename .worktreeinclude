@@ -1,4 +1,4 @@
-# The gitignored files a new worktree is seeded with. Each is a local record or
-# a local install that a worktree needs on day one and the repository never
-# carries.
-node_modules/
+# The gitignored files a new worktree is seeded with. Each is a local record
+# that a worktree needs on day one and the repository never carries, such as a
+# service's local settings. This repository has none. A worktree installs its
+# own node_modules/ (CONTRIBUTING.md#setup).
