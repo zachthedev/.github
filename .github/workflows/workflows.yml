@@ -96,7 +96,7 @@ jobs:
             exit 1
           fi
       # zizmor honors an inline ignore comment, which waives any audit on its line outside
-      # .github/zizmor.yml, the one file the caller's gate compares whole. So every zizmor waiver
+      # .github/zizmor.yml, where code-owner review reads every waiver. So every zizmor waiver
       # lives in that file, and a tracked file under .github carrying such a comment is refused,
       # matched without regard to case or spacing. git grep reads every file as text (-a), since
       # a tracked .gitattributes line marking a workflow -diff or binary would otherwise make it
@@ -436,6 +436,37 @@ jobs:
           ACTIONLINT: ${{ steps.shellcheck.outputs.actionlint }}
           SHELLCHECK: ${{ steps.shellcheck.outputs.command }}
         run: '"$ACTIONLINT" -pyflakes= -shellcheck="$SHELLCHECK"'
+      # zizmor keeps the last copy of an audit repeated under rules, so a later disable: true turns
+      # off an audit whose first copy a reviewer reads. So before any step reads
+      # .github/zizmor.yml, the image's yq reads it and the step refuses a key repeated in one
+      # mapping at any depth, keys compared as strings, an anchor on a key or a value, and a
+      # second document. An alias names an anchor in its own document, and yq fails on one that
+      # does not, so refusing every anchor refuses every alias. yq prints one line per document,
+      # and a file it cannot parse fails the step.
+      - name: Held zizmor config
+        run: |
+          counts='[([... | select(anchor != "")] | length),'
+          counts+=' ([.. | select(kind == "map") | select((keys | length) != (keys | unique | length))] | length)] | @tsv'
+          if ! read_back=$(yq "$counts" .github/zizmor.yml); then
+            echo "::error::yq could not read .github/zizmor.yml, so what zizmor reads from it is unknown."
+            exit 1
+          fi
+          documents=$(printf '%s\n' "$read_back" | wc -l)
+          if [ "$documents" -ne 1 ]; then
+            echo "::error::.github/zizmor.yml holds $documents documents. Keep one."
+            exit 1
+          fi
+          IFS=$'\t' read -r anchors repeated <<< "$read_back"
+          refused=0
+          if [ "$anchors" != 0 ]; then
+            echo "::error::.github/zizmor.yml holds $anchors anchors, and an alias to one stands for text written elsewhere. Write each key and value out where it applies."
+            refused=1
+          fi
+          if [ "$repeated" != 0 ]; then
+            echo "::error::.github/zizmor.yml repeats a key in $repeated mappings. zizmor keeps the last copy of a repeated audit, so a later copy can turn off an audit the first configures. Write each key once."
+            refused=1
+          fi
+          exit "$refused"
       # A secrets-inherit waiver in .github/zizmor.yml binds to a file or a line, not to the
       # workflow a job calls, so pointing a waived job at another repository keeps the waiver and
       # hands that repository every secret. zizmor runs here with no config and --no-ignores, which
