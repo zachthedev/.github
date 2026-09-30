@@ -325,12 +325,14 @@ jobs:
       # failed call, or a lockfile read that names no asset fails the step, and each finding names
       # its lockfile. mise.semver.lock is read in that exact spelling alone, since the Refused
       # files step refuses it in another case and as a link. A lockfile value reaches the log
-      # through printf %q, so a control character in it prints as an escape.
+      # through printf %q, so a control character in it prints as an escape. mise starts with
+      # GH_TOKEN taken out of its environment, so it never holds the job token, whichever names a
+      # later mise reads a token from.
       - name: Lockfile assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          taplo=$(mise which taplo)
+          taplo=$(env -u GH_TOKEN mise which taplo)
           : > "$RUNNER_TEMP/assets.tsv"
           for lock in mise.lock mise.semver.lock; do
             if [ "$lock" != mise.lock ] && [ ! -e "$lock" ]; then
@@ -589,10 +591,11 @@ jobs:
       # cannot swap it. The input is .github, the gate's own input, which holds the workflows,
       # dependabot.yml and any composite action under .github/actions. --collect=all turns
       # zizmor's ignore handling off, so no .gitignore, exclude file or global excludes file can
-      # hide one of them.
+      # hide one of them. mise starts with GH_TOKEN taken out of its environment, as in the lockfile
+      # asset check.
       - name: zizmor
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          zizmor=$(mise which zizmor)
+          zizmor=$(env -u GH_TOKEN mise which zizmor)
           "$zizmor" --no-progress --strict-collection --config .github/zizmor.yml --collect=all .github
