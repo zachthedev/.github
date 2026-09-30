@@ -118,6 +118,36 @@ jobs:
             done <<< "$waivers"
             exit 1
           fi
+      # zizmor reads .github alone, in every gate row and in this job, while uses: ./<path> runs an
+      # action from anywhere in the checkout. So a tracked action.yml or action.yaml, its name
+      # compared folded, is refused unless its path starts with .github/actions/ in that exact
+      # spelling. One under that directory whose name is spelled in another case is refused too:
+      # zizmor never reads it, and a case-insensitive runner opens it for uses:. A name folds
+      # through upper then lower case, so a dotless i matches as well. The runner also
+      # runs a local action from a directory holding a Dockerfile and no metadata file, and no
+      # tool here reads a Dockerfile wherever it sits, so review holds that case. git lists paths
+      # with core.quotepath off, so a name past ASCII reaches the check as its own characters. A
+      # failed git call stops the step.
+      - name: Refused actions
+        run: |
+          python3 - <<'PY'
+          import os, subprocess, sys
+          listed = subprocess.run(["git", "-c", "core.quotepath=off", "ls-files", "-z"], capture_output=True, check=True)
+          NAMES = ("action.yml", "action.yaml")
+          found = []
+          for path in map(os.fsdecode, filter(None, listed.stdout.split(b"\0"))):
+              name = path.rsplit("/", 1)[-1]
+              folded = name.upper().lower()
+              if folded not in NAMES:
+                  continue
+              if not path.startswith(".github/actions/"):
+                  found.append(f"{path!r} is an action outside .github/actions/, where zizmor reads none, while uses: ./<path> runs one from anywhere in the checkout. Move it under .github/actions/")
+              elif name not in NAMES:
+                  found.append(f"{path!r} names an action in another case than action.yml or action.yaml, which zizmor never reads, while a case-insensitive runner opens it for uses:. Rename it {folded}")
+          for finding in found:
+              print(f"::error::{finding}.")
+          sys.exit(1 if found else 0)
+          PY
       # actionlint reads .github/actionlint.yaml or .yml from the checkout, and a paths ignore there
       # drops any finding by pattern, ShellCheck's and the stand-in's refusal included. So a
       # tracked one is refused, matched without regard to case, as the caller's gate refuses it.
