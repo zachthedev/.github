@@ -130,6 +130,16 @@ jobs:
           # time, which the action pin and its cooldown never see.
           tools: linked
           queries: security-extended
+          # The job holds security-events: write, and its results decide the code-scanning check,
+          # so it restores no TRAP or dependency cache. Unset, TRAP caching is on for every hosted
+          # runner, and a server-side flag turns it off only while overlay analysis runs. Any job
+          # on the default branch can write a TRAP cache's key first. Dependency caching is off
+          # when unset in a workflow like this one, and is named off so a later action commit
+          # that turns it on by default changes nothing here. Whether a pull request restores an
+          # overlay database stays with GitHub's overlay flags. Planting one takes code already
+          # running on the default branch, landing between that branch's own scans.
+          trap-caching: false
+          dependency-caching: false
       # The category keeps one language's results from replacing another's.
       - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
