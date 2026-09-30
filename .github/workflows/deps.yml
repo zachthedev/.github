@@ -24,8 +24,8 @@ on:
         type: string
         default: ''
   # At least once a day. The preset opens new pull requests inside its Monday
-  # window alone, and this hour is inside it. Every other run keeps open
-  # branches current and raises security fixes, which ignore the schedule.
+  # window, and this hour is inside it. A security fix ignores the window, so
+  # any run can open one. Every other run keeps open branches current.
   schedule:
     - cron: '23 4 * * *'
   workflow_dispatch:
