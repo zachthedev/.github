@@ -8,10 +8,11 @@ name: codeql
 # <caller job> / Analyze (<language>).
 #
 # Build mode none wherever the extractor supports it. Go has no build mode none, so a Go caller
-# passes build-mode autobuild for its go entry. An extractor that needs a runtime the runner
-# image may not hold gets it from the official setup action behind an input, so a caller never
-# adds steps of its own. The one case is the C# extractor under build-mode none, which restores
-# through the .NET SDK global.json names. A caller whose code sits in a submodule passes
+# passes build-mode autobuild for its go entry. An extractor that needs a runtime gets it from
+# the official setup action, so a caller never adds steps of its own. The JavaScript and
+# TypeScript extractor runs under the Node.js pinned below. The C# extractor under build-mode
+# none restores through the .NET SDK global.json names, installed behind an input, since the
+# runner image may not hold it. A caller whose code sits in a submodule passes
 # submodules, which the checkout reads.
 #
 # Every analysis runs the security-extended suite on the CodeQL bundle the action commit ships,
@@ -88,6 +89,21 @@ jobs:
         # triggers alone, where the inputs context is empty.
         include: ${{ fromJSON(inputs.languages || '[{"language":"javascript-typescript"},{"language":"actions"}]') }}
     steps:
+      # The JavaScript and TypeScript extractor in the bundle this action commit links starts
+      # node from PATH, in a job that holds security-events: write, and the runner image's own
+      # node moves with the image. So a JavaScript or TypeScript analysis installs the version
+      # below ahead of it, as every job that runs a tool under Node.js does. The job runs in the
+      # caller's checkout, which holds no file of this repository, so the version lives here
+      # rather than in a .node-version, and Renovate bumps this node-version input under the
+      # cooldown. Before the checkout, so no repository file exists while the action runs. No
+      # cache is restored: cache stays unset, and package-manager-cache is off, since the action
+      # restores npm's cache on its own when a package.json names npm. The action verifies no
+      # download, so the pin plus the cooldown is the control.
+      - if: contains(fromJSON('["javascript-typescript", "javascript", "typescript"]'), matrix.language)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.21.0
+          package-manager-cache: false
       # This repository's own triggers carry no inputs, so submodules falls back to false there.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
