@@ -206,6 +206,19 @@ jobs:
               print(f"::error::{finding}.")
           sys.exit(1 if found else 0)
           PY
+      # The shared deps job names .github/renovate.json in RENOVATE_CONFIG_FILE_NAMES, and Renovate
+      # puts the names it lists ahead of its own, so that file wins wherever it exists. Without
+      # it, Renovate falls back to its own list and reads a root renovate.json, a .renovaterc or a
+      # package.json renovate key in its place. So a tree that does not track
+      # .github/renovate.json as a plain file, in that exact spelling, is refused. A failed git
+      # call lists nothing, which the step refuses too.
+      - name: Held Renovate config
+        run: |
+          held=$(git ls-files -s -- .github/renovate.json | awk -F '\t' '$1 ~ /^100(644|755) / { print $2 }')
+          if [ "$held" != .github/renovate.json ]; then
+            echo "::error::The tree tracks no .github/renovate.json file. The deps job names it ahead of Renovate's own list, and without it Renovate reads a root renovate.json, a .renovaterc or a package.json renovate key in its place. Restore the file."
+            exit 1
+          fi
       # --ignore-scripts, so no lifecycle script and no prepare script from the caller's tree
       # runs here. commitlint needs none of them.
       - run: bun install --frozen-lockfile --ignore-scripts
