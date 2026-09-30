@@ -284,33 +284,47 @@ jobs:
       - name: mise install
         run: mise install --locked taplo shellcheck actionlint zizmor
       # mise.lock names each artifact twice: the url mise downloads, and url_api, the same asset
-      # by id. GitHub records each asset's download address, and its sha256 for an asset uploaded
-      # since it began keeping digests. This step asks GitHub for every asset the lockfile names
-      # by id and requires the address to equal the lockfile's url and the digest, where GitHub
-      # keeps one, to equal its checksum. For a tool whose release carries no attestation,
-      # ShellCheck today, that digest is the second source for the checksum mise verifies. An
-      # asset with no digest, taplo's, is held to its address alone. Both spellings of a
-      # platform table are read, and a url_api outside the asset reference form, a failed call
-      # or a lockfile naming no asset at all fails the step. A lockfile value reaches the log
+      # by id. A Rust repository's mise.semver.lock, its named exception, does the same for the
+      # tools mise.semver.toml pins. GitHub records each asset's download address, and its sha256
+      # for an asset uploaded since it began keeping digests. This step asks GitHub for every
+      # asset either lockfile names by id and requires the address to equal the lockfile's url and
+      # the digest, where GitHub keeps one, to equal its checksum. mise lock copied that digest
+      # into the lockfile, so the step holds the lockfile to GitHub's record and adds no
+      # independent source. An asset with no digest, taplo's, is held to its address alone. Both
+      # spellings of a platform table are read. A url_api outside the asset reference form, a
+      # failed call, or a lockfile read that names no asset fails the step, and each finding names
+      # its lockfile. mise.semver.lock is read in that exact spelling alone, since the Refused
+      # files step refuses it in another case and as a link. A lockfile value reaches the log
       # through printf %q, so a control character in it prints as an escape.
       - name: Lockfile assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           taplo=$(mise which taplo)
-          "$taplo" get -f mise.lock -o json > "$RUNNER_TEMP/lock.json"
-          jq -r '
-            .tools // {} | to_entries[] | .key as $tool | .value[] |
-            ( (to_entries[] | select(.key | startswith("platforms.")) | {platform: (.key | ltrimstr("platforms.")), entry: .value}),
-              (.platforms // {} | to_entries[] | {platform: .key, entry: .value}) ) |
-            select(.entry.url_api != null) |
-            [$tool, .platform, .entry.url_api, (.entry.url // ""), (.entry.checksum // "")] | @tsv
-          ' "$RUNNER_TEMP/lock.json" > "$RUNNER_TEMP/assets.tsv"
+          : > "$RUNNER_TEMP/assets.tsv"
+          for lock in mise.lock mise.semver.lock; do
+            if [ "$lock" != mise.lock ] && [ ! -e "$lock" ]; then
+              continue
+            fi
+            "$taplo" get -f "$lock" -o json > "$RUNNER_TEMP/lock.json"
+            jq -r --arg lock "$lock" '
+              .tools // {} | to_entries[] | .key as $tool | .value[] |
+              ( (to_entries[] | select(.key | startswith("platforms.")) | {platform: (.key | ltrimstr("platforms.")), entry: .value}),
+                (.platforms // {} | to_entries[] | {platform: .key, entry: .value}) ) |
+              select(.entry.url_api != null) |
+              [$lock, $tool, .platform, .entry.url_api, (.entry.url // ""), (.entry.checksum // "")] | @tsv
+            ' "$RUNNER_TEMP/lock.json" > "$RUNNER_TEMP/named.tsv"
+            if [ ! -s "$RUNNER_TEMP/named.tsv" ]; then
+              echo "::error::$lock names no release asset by id, so this step would check nothing in it."
+              exit 1
+            fi
+            cat "$RUNNER_TEMP/named.tsv" >> "$RUNNER_TEMP/assets.tsv"
+          done
           reference='^https://api\.github\.com/(repos/[A-Za-z0-9-]+/[A-Za-z0-9_.-]+/releases/assets/[0-9]+)$'
           checked=0
           failed=0
-          while IFS=$'\t' read -r tool platform api url checksum; do
-            label="$(printf '%q %q' "$tool" "$platform")"
+          while IFS=$'\t' read -r lock tool platform api url checksum; do
+            label="$(printf '%q %q %q' "$lock" "$tool" "$platform")"
             if [[ ! "$api" =~ $reference ]] || [[ "$api" == */../* ]] || [[ "$api" == */./* ]]; then
               echo "::error::$label url_api is not a release asset reference: $(printf '%q' "$api")"
               failed=1
@@ -324,19 +338,15 @@ jobs:
             fi
             IFS=$'\t' read -r served digest <<< "$asset"
             if [ "$served" != "$url" ]; then
-              echo "::error::$label: GitHub serves asset $path at $served, and mise.lock records $(printf '%q' "$url")"
+              echo "::error::$label: GitHub serves asset $path at $served, and $lock records $(printf '%q' "$url")"
               failed=1
             fi
             if [ -n "$digest" ] && [ "$digest" != "$checksum" ]; then
-              echo "::error::$label: GitHub records $digest for asset $path, and mise.lock records $(printf '%q' "$checksum")"
+              echo "::error::$label: GitHub records $digest for asset $path, and $lock records $(printf '%q' "$checksum")"
               failed=1
             fi
             checked=$((checked + 1))
           done < "$RUNNER_TEMP/assets.tsv"
-          if [ "$checked" -eq 0 ] && [ "$failed" -eq 0 ]; then
-            echo "::error::mise.lock names no release asset by id, so this step checked nothing."
-            exit 1
-          fi
           echo "Checked $checked lockfile assets against GitHub."
           exit "$failed"
       # actionlint runs ShellCheck through a stand-in this step writes to RUNNER_TEMP from this
