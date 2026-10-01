@@ -35,7 +35,7 @@ on:
       languages:
         # Each object names a language and can name its runs-on and build-mode. The defaults
         # are ubuntu-latest and none. For example:
-        # [{"language": "csharp", "runs-on": "windows-latest"}, {"language": "actions"}]
+        # [{"language": "go", "build-mode": "autobuild"}, {"language": "actions"}]
         description: A JSON array with one object per CodeQL language. Each names language, runs-on and build-mode.
         type: string
         required: true
