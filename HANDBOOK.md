@@ -156,8 +156,9 @@ command. A row that a section owns names that section.
   - `bun x` ignores `--no-env-file`, so a personal env file reaches the JS tools.
 - Troubleshooting covers a local run that fails or differs from CI: a stale install, the install after every
   pull and every branch switch, a frozen install that leaves a package `bun.lock` dropped in place, the other copy
-  `bun x` may run, a partial or copied install that runs a parent directory's binary, env files and a proxy that
-  catches loopback.
+  `bun x` may run, a partial or copied install that runs a parent directory's binary, env files, a proxy that
+  catches loopback, and a case variant or an 8.3 short name that merges two tracked paths on a case-insensitive
+  checkout (Workflows).
 - A cross-reference stands wherever an agent that skims would otherwise miss an item. Setup points at the Safety
   items it touches, and The gate points at Troubleshooting for a local and CI mismatch.
 - `AGENTS.md` lives at the repository root under the vendor-neutral name, so every vendor's agent reads one
@@ -581,18 +582,30 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   one, and a root `tsconfig.json` with `paths` or `baseUrl` redirects that tool's imports. Committing on
   an unread branch runs that branch's `commitlint.config.js` from the commit hook
   before any check, as a preload runs before the hook's tool.
-- The shared `commits` and `workflows` jobs are the one CI copy of the refusals that block a merge: a tracked env
-  file at any depth, a tracked `node_modules`, a `patchedDependencies` key, a `bunfig.toml` key, tsconfig `paths`
-  and `baseUrl`, a `package.json` `exports` key, a duplicated JSON key, a `package.json` or project config that
-  does not parse, a root `package.yaml`, a root `package.json` `cosmiconfig` key, a root file named like a
-  program, an inline zizmor waiver, the `secrets: inherit` callee hold, and a stale or positional
-  `secrets-inherit` waiver. A pull request cannot change
-  what either job runs at the commit its `ci.yml` pins. It can change `ci.yml`'s call, and code-owner review of
-  `.github/workflows/` holds that. `zachthedev/.github`'s own `ci.yml` calls both jobs by `./`, so a pull request
-  there runs its own copy of each, and the same review holds that. A gate need not repeat them once its
-  repository pins the `.github` release that carries them. The gate keeps what no shared job reads and what keeps
-  a local run in step with CI: the mise assertions, the `scripts/` shield, the tsconfig location rule, every
-  on-disk config-name refusal, the stand-in, the `shell:` hold, and the Go module and Rust toolchain checks.
+- The shared `commits` and `workflows` jobs are the one CI copy of the refusals that block a merge. A gate need
+  not repeat one once its repository pins the `.github` release that carries it.
+  - The `commits` job refuses a tracked env file at any depth, a tracked `node_modules`, every tracked symbolic
+    link, a tracked root `.config`, a root `package.yaml`, a `bunfig.toml` key, a `patchedDependencies` key, a
+    `package.json` `exports` key, a root `package.json` `cosmiconfig` key, tsconfig `paths` and `baseUrl`, a
+    duplicated JSON key, and a `package.json` or project config that does not parse.
+  - It also refuses a tree without a tracked `.github/renovate.json` (Updates).
+  - The `workflows` job refuses a root file named like a program, an inline zizmor waiver, an action outside
+    `.github/actions/`, a repeated key, an anchor or a second document in `.github/zizmor.yml`, a stale or
+    positional `secrets-inherit` waiver, and a job passing `secrets: inherit` to another callee.
+- A pull request cannot change what either job runs at the commit its `ci.yml` pins. It can change `ci.yml`'s
+  call, and code-owner review of `.github/workflows/` holds that. `zachthedev/.github`'s own `ci.yml` calls both
+  jobs by `./`, so a pull request there runs its own copy of each, and the same review holds that. The gate keeps
+  what no shared job reads and what keeps a local run in step with CI: the mise assertions, the `scripts/` shield,
+  the tsconfig location rule, every on-disk config-name refusal, the stand-in, the `shell:` hold, and the Go module
+  and Rust toolchain checks.
+- The `commits` job's refusals run on every pull request, on every push to the default branch and daily from
+  `audit.yml`, as the `workflows` job's do. Its setup-bun step, its install and both commitlint steps run after
+  every refusal, on a pull request alone. Two pull requests that each pass can merge into a tree
+  neither run read, such as a `package.json` holding a key twice, and the push run reads it. A push whose commit
+  message holds a skip instruction such as `[skip ci]`, or one the workflow token makes, starts no push run. The
+  next daily run reads what it left. A direct push to the default branch meets the refusals the same way, after it
+  lands. A C# gate keeps its duplicate-key check over `global.json` and `dotnet-tools.json`, which the
+  `commits` job does not read.
 - `CODEOWNERS`, `* @zachthedev`, with `require_code_owner_review` on `default-branch`, makes the owner's review a
   merge condition for every change to gate code or to a config a row reads. The owner's own pull request merges
   through the admin bypass (Branch rules).
@@ -760,10 +773,16 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The shared `workflows` job refuses a `zizmor: ignore[` comment in a tracked file under `.github` (the one CI
   copy, above), so every waiver lives in `.github/zizmor.yml`. An inline comment waives any audit on its line,
   `unpinned-uses` included. The job searches every file as text, with `git grep -a`, so a `.gitattributes` line
-  marking a file `-diff` or `binary` cannot hide a comment from it.
+  marking a file `-diff` or `binary` cannot hide a comment from it. The search reads `.github` in its exact
+  spelling, the directory zizmor reads on the runner.
 - A waiver in `.github/zizmor.yml` names `file:line`, as an `artipacked` waiver does, so an edit that moves the
   finding turns the gate red and the waiver is read again. `secrets-inherit` alone takes the file form,
   because the callee hold is its control (Secrets).
+- The shared `workflows` job reads `.github/zizmor.yml` with the runner image's `yq` before any other step reads
+  it. It refuses a key repeated in one mapping at any depth, an anchor, a second document, and a file `yq` cannot
+  parse (the one CI copy, above). zizmor keeps the last copy of a repeated audit under `rules`, so a later
+  `disable: true` turns off an audit whose first copy a reviewer reads. An alias needs an anchor in its own
+  document, so the anchor refusal covers every alias.
 - The shared `workflows` job refuses a `secrets-inherit` entry holding a colon. zizmor binds a `file:line:column`
   entry to that position alone, where a later shift can land another call, and a position that matches nothing
   waives nothing while its file part would read as held.
@@ -931,8 +950,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   neither checks (a step order, a trigger set, a matrix, a permission) is held by construction. The reusable
   workflow or the one gate task that sequences it holds it. A test that parses `ci.yml` for its shape is glue,
   and it goes.
-- The `commits` workflow runs commitlint over the pull request range and over the subject the squash writes,
-  with ` (#N)` appended. For a one-commit pull request that is the commit's own subject (Merge settings).
+- On a pull request, the `commits` workflow runs commitlint over the pull request range and over the subject the
+  squash writes, with ` (#N)` appended. For a one-commit pull request that is the commit's own subject (Merge
+  settings). Its refusals run on a push and daily too (Gate).
 - The range lint's log stops at 64 KiB on a runner, so the range lint runs without `--verbose` and prints the
   problems and the summary alone. Its exit code covers every commit either way.
 - The subject lint runs through a generated wrapper that turns every commitlint ignore off, the caller's and
@@ -977,21 +997,40 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   and no flag changes that.
 - zizmor reads `--collect=all .github`, with `--strict-collection`, in every gate row and in the shared job. No
   ignore file hides a workflow from that input. It collects `dependabot.yml` and the composite actions under
-  `.github/actions`, and it never walks `node_modules`, a worktree or a submodule. A composite action outside
-  `.github` is named as a second file input, with the reason beside it.
+  `.github/actions`, and it never walks `node_modules`, a worktree or a submodule.
+- A local action lives under `.github/actions/` alone. zizmor reads `.github`, while `uses: ./<path>` runs an
+  action from anywhere in the checkout. The shared `workflows` job therefore refuses a tracked `action.yml` or
+  `action.yaml`, its name compared folded, whose path does not start with `.github/actions/` in that exact
+  spelling (the one CI copy, Gate). It also refuses one under that directory whose name is spelled in another
+  case, which zizmor never reads and a case-insensitive runner opens.
+- The runner also runs a local action from a directory holding a `Dockerfile` and no metadata file. No tool in the
+  set reads a Dockerfile wherever it sits, so review holds one. That is a named residual.
+- On a case-insensitive checkout, a case variant of a tracked path can merge two tracked paths into one file, and
+  on Windows so can an 8.3 short name such as `GITHUB~1`. The local gate then reads a file the diff does not show,
+  while the shared jobs on Linux read the real files. `CONTRIBUTING.md` names it under Troubleshooting, and no
+  gate refuses it.
 - The shared `workflows` job runs beside the caller's gate, not after it, so a red gate stops nothing there.
   Before any mise command reads the checkout, the job refuses another mise config, lock or rc file, a root file
   named like a program a gate starts, and a link at the root or under `.config`, `.mise` or `mise`. Its
-  `Refused keys` step then reads `mise.toml` and `mise.lock` with Python's `tomllib` and refuses any key outside
-  the gate's allow-lists (Tools), `[settings.aqua]` included, which holds `github_attestations` alone. A job
-  holding a token loads no `mise.toml` whose keys are unchecked.
-- The step also refuses a form the gate does not read: a `[tools]` entry that is neither a version nor a table,
+  `Refused keys` and `Refused lock keys` steps then read `mise.toml` and `mise.lock` with Python's `tomllib` and
+  refuse any key outside the gate's allow-lists (Tools), `[settings.aqua]` included, which holds
+  `github_attestations` alone. A job holding a token loads no `mise.toml` whose keys are unchecked.
+- The steps also refuse a form the gate does not read: a `[tools]` entry that is neither a version nor a table,
   the `[[tools.<name>]]` array of tables included, a `[tools]`, `[tool_config]` or `[settings]` that is not a
   table, and a `mise.lock` tool that is not a list of tables. mise reads an array-of-tables entry, a postinstall
-  included. The step checks the fields of a nested `platforms` table as it checks a quoted `"platforms.<name>"`
-  one.
+  included. The lock step checks the fields of a nested `platforms` table as it checks a quoted
+  `"platforms.<name>"` one.
   `jdx/mise-action` exports `MISE_TRUSTED_CONFIG_PATHS` for the workspace to every later step, and mise evaluates
   exec templates on any load of a trusted config.
+- The steps also hold every tool key in `mise.toml` and `mise.lock` to a registry name or `github:<owner>/<repo>`,
+  and every `mise.lock` backend to `aqua:` or `github:<owner>/<repo>`. mise runs options written in brackets after
+  a tool key or a backend, `postinstall` among them. A key such as `taplo[postinstall=...]` would run its command
+  in the job's own `mise install`.
+- Its `Held tool sources` step then holds each `mise.lock` and `mise.semver.lock` entry to one repository, before
+  `mise install`. A registry name's backend is the first one the pinned mise's registry names for it, and a
+  `github:<owner>/<repo>` key's backend is the key. Each platform's url is a release download from that
+  repository and its `url_api` an asset of it, both matched whole. Before a download, mise checks only the version
+  numbers in a url's release tag and file name, never its owner, repository or host.
 - zizmor's online audits run in the shared `workflows` job alone, on every pull request and daily from
   `audit.yml`. That job is the one CI job whose steps name the job token: its zizmor step and its lockfile asset
   check under Tools. It installs taplo, ShellCheck, actionlint and zizmor alone, each routed by mise's registry,
@@ -1012,6 +1051,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Inside a job, a step's environment is not a boundary: any step can read the job token from the runner. The
   job is the boundary, so the token goes to the job that installs no dependencies and runs no build or test.
 - Every `jdx/mise-action` step takes an empty `github_token`, so the action exports no token to later steps.
+- The two steps that name the job token hand it to `gh` and zizmor alone. Each starts mise, and the asset check
+  starts taplo, with the token taken out of the environment, so neither holds it, whichever names a later mise
+  reads a token from.
 - A locked install reads a registry tool's attestations from mise's versions host. A tool mise's registry does not
   route queries the GitHub API on every install.
 - A job installing such a tool runs the gate's checks of `mise.toml` and `mise.lock` first, in an earlier step of
@@ -1021,7 +1063,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `contents: read`, and that step alone names it. The token already sits in the job, and the unauthenticated
   limit of 60 requests an hour per runner address fails installs at random. The gate step itself stays tokenless.
 - A step order inside one job is no boundary, since the token sits in the runner's memory. Installing before the
-  checks would run an unchecked `mise.toml`'s hooks in the token step.
+  checks would run an unchecked `mise.toml`'s hooks in the token step. mise also sends `MISE_GITHUB_TOKEN` to the
+  host an `api_url` option names when its path has GitHub Enterprise's `/api/v3` shape, so the checks refuse that
+  option before the token step runs.
 - A scheduled workflow's header states the requirement its section names and claims nothing tighter (Known
   defects). `deps` runs at least once a day, and so does every `audit.yml` job, on that workflow's one cron.
   `codeql` runs weekly.
@@ -1327,11 +1371,13 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - `.github/renovate.json` extends one kind preset from `zachthedev/.github//renovate/` on its default branch,
   and adds only what is true of that repository alone. The `.github` repository validates every preset change
   before it merges. That is the check on a change that reaches every repository on the next run.
-- Renovate reads a root `renovate.json`, `renovate.jsonc` or `renovate.json5` ahead of `.github/renovate.json`.
-  The shared `deps` job therefore sets `RENOVATE_CONFIG_FILE_NAMES` to `.github/renovate.json`, and Renovate puts
-  the names it lists ahead of its own. `.github/renovate.json` then wins wherever it exists, and a root file added
-  beside it is never read. A pull request that deletes `.github/renovate.json` and adds a root file is review's to
-  refuse.
+- Renovate reads the first config file it finds in its own list: a root `renovate.json`, `renovate.jsonc` or
+  `renovate.json5` ahead of `.github/renovate.json`, and a `.renovaterc` in any of its forms or a `package.json`
+  `renovate` key after it. The shared `deps` job sets `RENOVATE_CONFIG_FILE_NAMES` to `.github/renovate.json`, and
+  Renovate puts the names it lists ahead of its own. `.github/renovate.json` then wins wherever it exists, and a
+  root file added beside it is never read. With the file missing, Renovate falls back to its own list. The shared
+  `commits` job therefore refuses a tree that does not track `.github/renovate.json` as a file, in that exact
+  spelling (the one CI copy, Gate).
 - The base preset holds the standard, and no preset or repository file restates a Renovate default:
   - `config:recommended` with digest pinning and abandonment flags
   - new pull requests in the Monday window, every other run rebasing open branches
@@ -1426,9 +1472,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every repository with a `bun.lock`, whatever its stack, carries `"audit": "bun audit --audit-level=high"` in
   `package.json`, and `audit.yml`'s daily job runs `bun run audit`. High is the set's level, and the script is
   the one home of `--ignore` waivers. The dependency graph reads a Bun repository's direct `package.json`
-  dependencies alone, so the daily run is what reads its transitive ones. `audit.yml` also carries a
-  daily job that calls the reusable `workflows` workflow, so zizmor's online audits of the pinned actions run
-  without a pull request. A red run is the report.
+  dependencies alone, so the daily run is what reads its transitive ones. `audit.yml` also carries daily jobs
+  that call the reusable `commits` and `workflows` workflows, so the shared refusals and zizmor's online audits of
+  the pinned actions run without a pull request. A red run is the report.
 - The advisory check sees direct npm packages only under Bun, no NuGet package under central package
   management, and full lockfiles under Cargo. `CONTRIBUTING.md` states which legs the check covers.
 - A C# repository submits a dependency snapshot on every pull request head and every push to the default branch
@@ -1499,6 +1545,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   hooks, `[env]` or tasks, and each of them runs code (Known defects), so the gate holds the file to an
   allow-list:
   - `[tool_config]` and `[settings]` are compared whole against the expected values;
+  - the `[tools]` keys are the tools the gate expects, spelled exactly. mise reads tool options written in
+    brackets after a tool's name, `postinstall` included, and an exact key carries none;
   - a tool entry in any pin file, and the lockfile's `options`, carries `version` and a `version_prefix` equal to
     the tool's tag prefix, and nothing else;
   - the lockfile's keys are allow-listed at the top, entry and platform levels, its `tools` table holds the
