@@ -991,8 +991,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   Cargo cache.
 - The rule covers a cache one job saves and another restores, through `actions/cache` or an action's own cache.
   The runner image's tool cache is outside it, since no job writes it.
-- The one exception is the overlay database codeql-action restores into a pull request's analysis while GitHub's
-  overlay flags are on. It stays with those flags, a named residual (CodeQL).
+- The one exception is the overlay database and its status file, which codeql-action restores into a pull
+  request's analysis while GitHub's overlay flags are on. Both stay with those flags, a named residual (CodeQL).
 - A linter, formatter or cargo plugin runs from the stack's own pin file where the stack has one. Otherwise it
   runs from mise, installed by mise's official action. A per-tool action is not used. Each one runs on Linux
   alone, records a lower integrity tier, or resolves its own version at run time. None gives a contributor the
@@ -1154,14 +1154,14 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   job runs in the caller's checkout and reads no file of its own repository. So the version sits on that input in
   place of a `.node-version`, and Renovate bumps it under the cooldown. Its tier is a version alone, named by that
   input.
-- The shared job restores no cache, since it holds `security-events: write` and its upload decides the
-  `code_scanning` rule (Workflows). Its init step sets `trap-caching: false`. Unset, TRAP caching is on for every
-  hosted runner, and a pull request's analysis restores a TRAP cache under a key any default-branch job can write
-  first. It also sets `dependency-caching: false`, the value an unset input resolves to, so a later action commit
-  cannot turn that cache on.
-- Nothing stops the overlay database a pull request's analysis restores while GitHub's overlay flags are on. That
-  is a named residual: planting one takes code already running on the default branch, landing between that
-  branch's own scans.
+- The shared job restores no TRAP or dependency cache, since it holds `security-events: write` and its upload
+  decides the `code_scanning` rule (Workflows). Its init step sets `trap-caching: false`. Unset, TRAP caching is on
+  for every hosted runner, and a pull request's analysis restores a TRAP cache under a key any default-branch job
+  can write first. It also sets `dependency-caching: false`, the value an unset input resolves to, so a later
+  action commit cannot turn that cache on.
+- Nothing stops the overlay database and its status file a pull request's analysis restores while GitHub's overlay
+  flags are on. That is a named residual: planting one takes code already running on the default branch, landing
+  between that branch's own scans.
 - The build mode is `none` wherever the extractor supports it and `autobuild` for Go, whose extractor refuses
   `none`. A Go caller passes `build-mode: autobuild` in its language's entry.
 - Under `none` the C# extractor runs a package restore of its own, which reads no lock file. It can fail, and it
