@@ -397,8 +397,9 @@ Every environment carries a custom deployment branch policy naming the refs its 
 environment with a reviewer sets `prevent_self_review: false`, because a sole reviewer otherwise deadlocks. The
 API reports the value only on a `required_reviewers` rule.
 
-The `release` environment sets `can_admins_bypass: false` in every repository, so an admin deploys to it only
-through its reviewer's approval, as anyone else does. `release-pr` and `deps` keep the default, `true`.
+Every environment in every repository sets `can_admins_bypass: false`, since an admin can otherwise start a
+deploy job that is waiting on the environment's rules. An admin therefore deploys to `release` only through its
+reviewer's approval, as anyone else does.
 
 ### Secrets
 
@@ -1865,8 +1866,8 @@ A reviewer holds this row, except where a bullet names a check.
   - A user-facing minimum of software the repository does not pin stays.
   - A restatement stays where a test binds it to its pin, as the next bullet allows. The test fails whenever the
     pin moves without the text.
-  - A demo or fixture value that equals a real pin moves to another value, so a search for a pinned version finds
-    the pin file alone.
+  - A demo or fixture value is written as a placeholder, never as a copy of a pin. It stays when a later bump
+    makes it equal a pin, and no sweep chases that collision.
   - A `# vX.Y.Z` comment that a bot rewrites with its pin is outside the rule.
 - A duplication is removed, not bound. Where a command prints the list, the document names the command and holds
   no copy. Where no command prints it and a reader needs the restated form, a test binds the document to its
@@ -1973,6 +1974,10 @@ bears on, the defect, and the condition that removes it.
 - actionlint (Workflows): on Windows it stalls when it hands ShellCheck a `run:` script past about 4 KB. Every
   run script therefore stays under 4 KB, and a longer check becomes a step of its own. Removed once actionlint
   hands a long script over on Windows.
+- Python on Windows (Workflows): a shared step's `python3` script, run locally with its output captured, writes
+  through the ANSI code page, cp1252 on a default install. A finding holding a character outside that code page
+  crashes `print`, and an exit-code probe reads the crash as a refusal. A local run of a shared step sets
+  `PYTHONUTF8=1`. Removed once Python on Windows runs in UTF-8 mode by default (PEP 686).
 - actionlint (Releases): refuses the `queue` key under `concurrency`, which GitHub accepts. `queue: max` keeps up
   to 100 pending runs in a group, so no release merge's run is dropped. Upstream rhysd/actionlint#654. Removed
   once actionlint accepts the key, when the shared `release-pr` group and every caller's release group take
