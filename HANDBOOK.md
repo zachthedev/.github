@@ -397,8 +397,9 @@ Every environment carries a custom deployment branch policy naming the refs its 
 environment with a reviewer sets `prevent_self_review: false`, because a sole reviewer otherwise deadlocks. The
 API reports the value only on a `required_reviewers` rule.
 
-The `release` environment sets `can_admins_bypass: false` in every repository, so an admin deploys to it only
-through its reviewer's approval, as anyone else does. `release-pr` and `deps` keep the default, `true`.
+Every environment in every repository sets `can_admins_bypass: false`, since an admin can otherwise start a
+deploy job that is waiting on the environment's rules. An admin therefore deploys to `release` only through its
+reviewer's approval, as anyone else does.
 
 ### Secrets
 
