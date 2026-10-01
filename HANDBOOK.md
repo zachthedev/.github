@@ -1085,6 +1085,11 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   and every `mise.lock` backend to `aqua:` or `github:<owner>/<repo>`. mise runs options written in brackets after
   a tool key or a backend, `postinstall` among them. A key such as `taplo[postinstall=...]` would run its command
   in the job's own `mise install`.
+- The steps also hold every version to a plain release, a digit then letters, digits, `.`, `+` and `-` alone,
+  matched whole: a `[tools]` string or table `version` in `mise.toml`, and each `mise.lock` entry's `version`,
+  where a missing or non-string one is refused too. mise reads a `path:`, `system`, `ref:`, `prefix:` or `sub-`
+  version as something other than a release, so the steps refuse one before the install, beside mise's own
+  locked-mode refusal.
 - Its `Held tool sources` step then holds each `mise.lock` and `mise.semver.lock` entry to one repository, before
   `mise install`. A registry name's backend is the first one `mise registry --json <name>` names, run outside the
   checkout, and a name the registry does not hold fails. A `github:<owner>/<repo>` key's backend is the key. Each
