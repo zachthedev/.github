@@ -1973,6 +1973,10 @@ bears on, the defect, and the condition that removes it.
 - actionlint (Workflows): on Windows it stalls when it hands ShellCheck a `run:` script past about 4 KB. Every
   run script therefore stays under 4 KB, and a longer check becomes a step of its own. Removed once actionlint
   hands a long script over on Windows.
+- Python on Windows (Workflows): a shared step's `python3` script, run locally with its output captured, writes
+  through the ANSI code page, cp1252 on a default install. A finding holding a character outside that code page
+  crashes `print`, and an exit-code probe reads the crash as a refusal. A local run of a shared step sets
+  `PYTHONUTF8=1`. Removed once Python on Windows runs in UTF-8 mode by default (PEP 686).
 - actionlint (Releases): refuses the `queue` key under `concurrency`, which GitHub accepts. `queue: max` keeps up
   to 100 pending runs in a group, so no release merge's run is dropped. Upstream rhysd/actionlint#654. Removed
   once actionlint accepts the key, when the shared `release-pr` group and every caller's release group take
