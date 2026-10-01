@@ -925,7 +925,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   semver check alone, and it installs cargo-semver-checks in the job that holds the releaser token. `cd.yml`
   records the deviation.
 - A hand-rolled step closes a gap no tool closes and names that gap in a comment. Examples: the mise lockfile
-  assertions and the unattested-tool cross-check under Tools, and the ShellCheck canary below.
+  assertions and the lockfile asset check under Tools, and the ShellCheck canary below.
 - Every `run:` script stays under 4 KB (Known defects).
 - No repository test reads a workflow file. actionlint and zizmor are the readers of workflow YAML. A property
   neither checks (a step order, a trigger set, a matrix, a permission) is held by construction. The reusable
@@ -1457,12 +1457,32 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   (`NU1004`) on another. A lock change is proven with `AutomaticallyUseReferenceAssemblyPackages=false` as well as
   with the default.
 - A backend is chosen for integrity: the one whose entry reaches the higher tier, and `aqua:` on a tie. `cargo:`
-  and `ubi:` record no lockfile integrity, so neither is used (Known defects).
-- Each tool's integrity tier is stated under Dependencies in `CONTRIBUTING.md`. The tiers: provenance, a
-  checksum in a pinned tree, a checksum recorded by a third party, a checksum mise hashed at lock time, or a
-  version alone. "Verified" is never written for a hash check.
-- A `github:` backend records a checksum mise hashed at lock time. That binds every later install to the bytes
-  the lock fetched, and nothing outside the lockfile vouches for those bytes.
+  and `ubi:` record no lockfile integrity, so neither is used (Known defects). Inside the attestation tier the two
+  differ: `aqua:` checks the signer workflow its registry names, and `github:` accepts an attestation from any
+  workflow in the publisher's repository.
+- Each tool a repository pins states one integrity tier under Dependencies in `CONTRIBUTING.md`, below the shared
+  paragraph every repository copies from the Bun kickstart. The tier names who vouches for the tool's bytes. The
+  tiers, strongest first:
+  - the publisher's build attestation: a workflow in the publisher's repository signed a statement over the
+    artifact's digest, and mise checks it on every install. mise's lockfile records it as `provenance`.
+  - the publisher's signature: the publisher signed the artifact or its checksum file with a key the checking
+    tool carries.
+  - the registry's record: a registry that never replaces a published version recorded the hash, or signed the
+    package, at publish. npm, crates.io, the Go checksum database, nuget.org and an immutable GitHub release
+    qualify.
+  - the release's own checksum: GitHub's digest for the asset, or a checksum file in the same release, where the
+    release can still change.
+  - a hash this repository computed: the sha256 of one download, written into the file that pins the tool.
+    Nothing outside that file records it.
+  - a version alone: nothing recorded before the install vouches for the bytes.
+- A lockfile holds a hash and is not a tier. Each tier line names the file that holds the tool's hash, or its
+  version where the tier is a version alone.
+- A program Setup names is the contributor's own install, such as git, gh or a C toolchain, and that copy takes no
+  tier. A program in Setup that CI installs at a pinned version, such as Bun, Node.js, mise or a toolchain, takes
+  a line for the copy CI installs.
+- `mise lock` copies GitHub's asset digest, else a checksum file from the release, under `aqua:` and `github:`
+  alike. It downloads an artifact only to verify an attestation.
+- "Verified" is never written for a hash check.
 - The settings `locked`, `lockfile`, `locked_verify_provenance`, `provenance_api_failures_fatal`,
   `github_attestations` and `aqua.github_attestations` are set. `lockfile_platforms` names the platforms the
   lockfile pins. `[tool_config] locked` is set, because no environment variable reaches it.
@@ -1529,13 +1549,15 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   holds.
 - A release whose GitHub assets carry no digest and whose aqua entry names no checksum file gets no checksum
   from `mise lock`. Its checksum is the sha256 of the artifact at the recorded url, computed once and written
-  into `mise.lock`, and mise verifies it on install. The comment in `mise.toml` records how it was produced.
+  into `mise.lock`, and mise checks each install's download against it. The comment in `mise.toml` records how it
+  was produced.
 - Those hand-written lines survive a relock at the same version and vanish on a bump, so a bump recomputes them.
   No mise command writes them.
-- A mise-pinned tool without attestations gets a second source. The shared `workflows` job resolves each
-  lockfile asset id through GitHub's API. It requires `browser_download_url` to equal the lockfile url, and
-  `digest` to equal the checksum where GitHub records one. A tool with neither attestation nor digest stays on
-  its hand-computed checksum.
+- The shared `workflows` job reads every asset `mise.lock` names, and every asset a Rust repository's
+  `mise.semver.lock` names, by id through GitHub's API. It requires `browser_download_url` to equal the lockfile
+  url, and `digest` to equal the checksum where GitHub records one. That digest is the record `mise lock` copied,
+  so the check holds the lockfile to it and adds no independent source. A tool with no digest stays on its
+  computed hash. A lockfile the job reads that names no asset fails it.
 - `locked_verify_provenance` verifies against the coordinate the lockfile itself supplies. It arms the downgrade
   refusal for an entry that claims provenance and replaces none of the assertions.
 - For a tool mise's registry routes, mise reads attestation bundles from its versions host,
