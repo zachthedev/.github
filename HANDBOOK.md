@@ -991,6 +991,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   Cargo cache.
 - The rule covers a cache one job saves and another restores, through `actions/cache` or an action's own cache.
   The runner image's tool cache is outside it, since no job writes it.
+- The one exception is the overlay database codeql-action restores into a pull request's analysis while GitHub's
+  overlay flags are on. It stays with those flags, a named residual (CodeQL).
 - A linter, formatter or cargo plugin runs from the stack's own pin file where the stack has one. Otherwise it
   runs from mise, installed by mise's official action. A per-tool action is not used. Each one runs on Linux
   alone, records a lower integrity tier, or resolves its own version at run time. None gives a contributor the
@@ -1084,9 +1086,14 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   a tool key or a backend, `postinstall` among them. A key such as `taplo[postinstall=...]` would run its command
   in the job's own `mise install`.
 - Its `Held tool sources` step then holds each `mise.lock` and `mise.semver.lock` entry to one repository, before
-  `mise install`. A registry name's backend is the first one the pinned mise's registry names for it, and a
-  `github:<owner>/<repo>` key's backend is the key. Each platform's url is a release download from that
-  repository and its `url_api` an asset of it, both matched whole. Before a download, mise checks only the version
+  `mise install`. A registry name's backend is the first one `mise registry --json <name>` names, run outside the
+  checkout, and a name the registry does not hold fails. A `github:<owner>/<repo>` key's backend is the key. Each
+  platform table, in both spellings, holds a url matching
+  `https://github.com/<owner>/<repo>/releases/download/<tag>/<file>` and a `url_api` matching
+  `https://api.github.com/repos/<owner>/<repo>/releases/assets/<digits>`, both whole and in exact case.
+  `<owner>/<repo>` comes from that backend or key. `<tag>` and `<file>` are one segment each, of letters, digits
+  and `._+-`, and neither is `.` or `..`, since a dot segment after a matching prefix resolves to another
+  repository. A missing backend, url or `url_api` fails. Before a download, mise checks only the version
   numbers in a url's release tag and file name, never its owner, repository or host.
 - zizmor's online audits run in the shared `workflows` job alone, on every pull request and daily from
   `audit.yml`. That job is the one CI job whose steps name the job token: its zizmor step and its lockfile asset
