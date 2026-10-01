@@ -1245,6 +1245,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   users see. A squash of several commits lands the title as its header, so a `!` in a commit's own header is lost
   unless the title carries it. A `BREAKING CHANGE:` footer in a commit's body survives the squash.
 - A body paragraph never opens with a bare type, because release-please reads it as a second change.
+- A commit message never writes a skip instruction such as `[skip ci]`, in its subject or its body. GitHub starts no
+  push workflow when one appears anywhere in the head commit's message. A squash carries every commit's body into
+  that message, so one quoted instruction leaves `ci`, `cd` and `codeql` unrun on the merge.
 
 ## Hooks
 
