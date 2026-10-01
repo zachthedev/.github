@@ -1865,8 +1865,8 @@ A reviewer holds this row, except where a bullet names a check.
   - A user-facing minimum of software the repository does not pin stays.
   - A restatement stays where a test binds it to its pin, as the next bullet allows. The test fails whenever the
     pin moves without the text.
-  - A demo or fixture value that equals a real pin moves to another value, so a search for a pinned version finds
-    the pin file alone.
+  - A demo or fixture value is written as a placeholder, never as a copy of a pin. It stays when a later bump
+    makes it equal a pin, and no sweep chases that collision.
   - A `# vX.Y.Z` comment that a bot rewrites with its pin is outside the rule.
 - A duplication is removed, not bound. Where a command prints the list, the document names the command and holds
   no copy. Where no command prints it and a reader needs the restated form, a test binds the document to its
