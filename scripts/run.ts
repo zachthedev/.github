@@ -204,15 +204,17 @@ export function resolveProgram(program: string): string | undefined {
  * through `bun x --bun --no-install` under the Bun running the gate.
  *
  * @remarks
- * `bun x` is bunx. It runs the command the install put in the working
- * directory's `node_modules/.bin`, under Bun rather than a `node` on PATH,
- * and it fetches nothing. When that directory lacks the command, bunx runs a
- * copy from a parent directory's `node_modules/.bin`, from PATH or from its
- * own cache, none of them the version bun.lock pins. So the command is
- * refused first unless the entry bunx reads resolves, through every link, to
- * a regular file: `<tool>.exe` on Windows, and `<tool>` elsewhere, where the
- * install writes a link. A link left behind by a removed package points at
- * nothing. bunx ignores `--no-env-file`, so none is passed.
+ * `bun x` runs the command the install put in the working directory's
+ * `node_modules/.bin`, under Bun rather than a `node` on PATH, and it fetches
+ * nothing. When that directory lacks the command, `bun x` runs a copy from a
+ * parent directory's `node_modules/.bin`, from PATH or from its own cache,
+ * none of them the version bun.lock pins. So the command is refused first
+ * unless the entry `bun x` reads resolves, through every link, to a regular
+ * file: `<tool>.exe` on Windows, and `<tool>` elsewhere, where the install
+ * writes a link. The check reads the tool's command alone, never a package the
+ * tool loads. On Windows the `.exe` is a shim file that outlives its package,
+ * so the check passes after the package is gone and the start fails with
+ * `bun x`'s own error. `bun x` ignores `--no-env-file`, so none is passed.
  *
  * @throws When the entry is missing, a dangling link or not a file, naming
  * the install to run
@@ -270,9 +272,9 @@ export interface RunOptions {
 }
 
 /**
- * The proxy variables, in both spellings the tools' HTTP clients read. Bun
- * 1.4.2 on Windows reads a lowercase-only name directly but leaves it out when
- * it lists the environment, so {@link run} reads each one by name.
+ * The proxy variables, in both spellings the tools' HTTP clients read. The
+ * pinned Bun on Windows reads a lowercase-only name directly but leaves it out
+ * when it lists the environment, so {@link run} reads each one by name.
  */
 export const PROXY_NAMES: readonly string[] = [
   'HTTPS_PROXY',
@@ -286,8 +288,8 @@ export const PROXY_NAMES: readonly string[] = [
 /**
  * What every process that inherits the gate's environment gets, so no tool
  * colors its output: NO_COLOR set, and the two names that force color
- * removed. Bun 1.4.2 colors bun test's summary under FORCE_COLOR even with
- * NO_COLOR set.
+ * removed. The pinned Bun colors bun test's summary under FORCE_COLOR even
+ * with NO_COLOR set.
  */
 const COLORLESS: Readonly<Record<string, string | undefined>> = {
   NO_COLOR: '1',
@@ -340,6 +342,9 @@ async function readAll(stream: unknown, stop: Promise<void>): Promise<string> {
  * @remarks
  * Every process the gate starts goes through here. No row carries a deadline:
  * the CI job's timeout-minutes bounds the gate, and Ctrl-C ends a local run.
+ * Each starts with windowsHide. On Windows a console program, such as the
+ * cmd.exe that runs a .cmd file, opens a console window of its own when the
+ * process starting it has no console, as under an agent or a service.
  * When a process it started still holds its output {@link DRAIN_MS} after it
  * exited, the run fails, and that process runs on, since nothing Bun offers
  * reaches a process whose parent is gone.
@@ -419,6 +424,7 @@ export async function run(
       stdout: 'pipe',
       stderr: 'pipe',
       ...(options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }),
+      windowsHide: true,
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

@@ -15,13 +15,13 @@
  * absolute PATH entry outside the checkout alone. Every tool that searches for
  * a config runs with its one config named. Before any row, the gate refuses to
  * run beside a config a tool would read in place of the one the gate names, a
- * tracked env file Bun loads, a project config outside the named paths, a
- * node_modules below the root, a JSON key Bun and the shared commits job read
- * two ways, a patch a package.json names, anything that would steer how Bun
- * resolves the gate's own imports, a workflow the workflows row would not
- * read, or an inline zizmor waiver under .github. No config's text is held:
- * code-owner review is the control on a change to one. The other files that
- * run code before the gate's first line, such as a bunfig.toml preload, are
+ * project config outside the named paths, a node_modules below the root,
+ * anything that would steer how Bun resolves the gate's own imports, a
+ * workflow the workflows row would not read, or a composite action outside
+ * .github/actions/. No config's text is held: code-owner review is the control
+ * on a change to one. The tracked files that run code or waive a check before
+ * any row reads them, such as an env file, a patchedDependencies key, a
+ * repeated JSON key, a bunfig.toml preload or an inline zizmor waiver, are
  * refused before a merge by the shared commits and workflows jobs. ci.yml
  * calls those jobs by relative path, so a pull request runs its own copy of
  * each, and code-owner review of .github/workflows/ is the control on a change
@@ -50,11 +50,14 @@ import {
   comparable,
   compilerFinding,
   files,
+  type HeldFile,
+  heldNote,
   ignoreCommentFindings,
-  inheritedCallFindings,
-  inheritedCalls,
+  lintedAsWritten,
+  lintedWithoutComments,
   taploFound,
   testCount,
+  unlintedSourceFinding,
   unreadSourceFinding,
   zizmorCompleted,
 } from './rows';
@@ -77,8 +80,9 @@ const BUN = process.execPath;
 /**
  * The flag every Bun the gate starts directly gets first, so no env file on
  * disk sets a variable inside the row: the test runs and the ShellCheck
- * stand-in. The pinned Bun honors it over all eight names it loads, in every
- * mode. `bun x` ignores it, so no JavaScript tool gets it.
+ * stand-in. The pinned Bun honors it over every env file it loads, in each
+ * mode, as a case in run.test.ts holds. `bun x` ignores it, so no JavaScript
+ * tool gets it.
  */
 const NO_ENV_FILE = '--no-env-file';
 
@@ -103,7 +107,7 @@ const ARGUMENT_BUDGET = 24_000;
 delete process.env['SHELLCHECK_OPTS'];
 
 /** A row of the gate: its name, what it checks, and the check itself. */
-export interface Row {
+interface Row {
   readonly name: string;
   readonly checks: string;
   /** Runs the check. A string it returns prints after the row's time. */
@@ -113,6 +117,15 @@ export interface Row {
    * file a later row reads, so the preflight runs again before the next row.
    */
   readonly runsCode?: true;
+  /**
+   * The tracked JavaScript or TypeScript files this row holds byte for byte,
+   * such as a generated file it regenerates and diffs against the index, each
+   * spelled exactly as git ls-files prints it. Name each through the constant
+   * the row's check reads, so what the row declares and what it holds stay one
+   * list. The lint row passes each though ESLint does not lint it, and names
+   * each with this row in its line.
+   */
+  readonly holds?: readonly string[];
 }
 
 /** The binary paths the `tools` row resolves, read by the rows after it. */
@@ -204,6 +217,15 @@ function batches(paths: readonly string[]): string[][] {
  */
 const TEST_ENV: Readonly<Record<string, string>> = { CI: 'true' };
 
+/**
+ * How many of the gate's own tests skip on this platform by design: the cases
+ * for a behavior only Windows has skip on Linux and macOS, and the cases for
+ * one Windows lacks skip there. The scripts:test row fails on any other count,
+ * so on Windows it fails where the temporary directory's volume keeps no 8.3
+ * short names, since the short-name case skips there too.
+ */
+const SCRIPTS_TEST_SKIPS = process.platform === 'win32' ? 2 : 6;
+
 /* ///// scripts:test ///// */
 
 // The gate's own tests. Each case starts a stand-in in place of every program
@@ -215,7 +237,7 @@ async function scriptsTest(): Promise<string> {
   if (finished.exitCode !== 0) {
     throw new Error(`bun test ./scripts/ ${describe(finished)}`);
   }
-  return testCount('bun test ./scripts/', finished);
+  return testCount('bun test ./scripts/', finished, SCRIPTS_TEST_SKIPS);
 }
 
 /* ///// tools ///// */
@@ -232,13 +254,14 @@ async function tools(): Promise<undefined> {
 
 /* ///// typecheck ///// */
 
-/** The package.json name of the native TypeScript 7 compiler the typecheck row runs. */
+/** The package.json name of the native TypeScript compiler the typecheck row runs. */
 const NATIVE = '@typescript/native';
 
-// The native TypeScript 7 compiler, from the `@typescript/native` alias. The
-// 6.x `typescript` package that typescript-eslint needs ships a tsc too, and
-// bun install links a command two packages claim to the one whose name sorts
-// first, so node_modules/.bin/tsc is the alias's. The row first holds
+// The native TypeScript compiler, from the `@typescript/native` alias. The
+// `typescript` package typescript-eslint needs, on the last major carrying the
+// JavaScript compiler API, ships a tsc too, and bun install links a command
+// two packages claim to the one whose name sorts first, so
+// node_modules/.bin/tsc is the alias's. The row first holds
 // `tsc --version` to the major package.json pins for the alias, so a renamed
 // alias or another tie-break turns it red. The gate is the only TypeScript
 // here besides eslint.config.ts, which the root config reads alone. Each
@@ -302,160 +325,33 @@ function isAbsolutePath(line: string): boolean {
 
 /* ///// lint ///// */
 
-/** One message ESLint's json formatter reports against a file. */
-interface LintMessage {
-  readonly ruleId?: string | null;
-  readonly severity?: number;
-  readonly message?: string;
-  readonly line?: number;
-  readonly column?: number;
-}
+/** The lint row's name, which no row's holds may name. */
+const LINT = 'lint';
 
-/** One file ESLint's json formatter reports on. */
-interface LintResult {
-  readonly filePath: string;
-  readonly messages: readonly LintMessage[];
-  /** The reports a directive turned off, which ESLint lists whatever the directive says. */
-  readonly suppressedMessages: readonly LintMessage[];
-}
-
-/** Whether `value`, parsed from ESLint's json output, is one file's result. */
-function isLintResult(value: unknown): value is LintResult {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as { filePath?: unknown }).filePath === 'string' &&
-    Array.isArray((value as { messages?: unknown }).messages) &&
-    Array.isArray((value as { suppressedMessages?: unknown }).suppressedMessages)
-  );
-}
-
-/** The rule that refuses a waiver whose reason holds no letter or digit. */
-const VISIBLE_REASON = 'gate/visible-reason';
-
-/**
- * Every report of {@link VISIBLE_REASON} a directive turned off, as findings
- * naming the file, line and column.
- *
- * @remarks
- * ESLint applies a directive to the reports at its own position, so a
- * directive naming the rule hides the rule's report on that directive, and a
- * block disable naming it hides every report up to its enable. ESLint lists
- * each report a directive turned off under `suppressedMessages`, and no
- * directive removes one from that list.
- */
-export function suppressedReasonFindings(results: readonly LintResult[]): string[] {
-  return results.flatMap((result) =>
-    result.suppressedMessages
-      .filter((message) => message.ruleId === VISIBLE_REASON)
-      .map(
-        (message) =>
-          `${quote(result.filePath)}:${String(message.line ?? 0)}:${String(message.column ?? 0)}  a directive turned off ${VISIBLE_REASON}, which no directive may do. Take the rule out of the directive and give each waiver a reason in words`,
-      ),
-  );
-}
-
-/** The rule that holds a TypeScript waiver comment to a description. */
-const BAN_TS_COMMENT = '@typescript-eslint/ban-ts-comment';
-
-/** The prefix of every rule of the plugin that checks ESLint's own directive comments. */
-const ESLINT_COMMENTS = '@eslint-community/eslint-comments/';
-
-/** Whether `ruleId` names a rule that reads comments: the visible-reason rule, ban-ts-comment, or an eslint-comments rule. */
-function isCommentRule(ruleId: string | null | undefined): boolean {
-  return ruleId === VISIBLE_REASON || ruleId === BAN_TS_COMMENT || (ruleId ?? '').startsWith(ESLINT_COMMENTS);
-}
-
-/**
- * Every report of a rule that reads comments, from a pass that ignored every
- * directive and configuration comment, as findings naming the file, line and
- * column.
- *
- * @remarks
- * A configuration comment setting a rule to off turns it off for the whole
- * file, and the rule then reports nothing, so nothing lands in
- * `suppressedMessages` either. Under `--no-inline-config` ESLint reads no
- * comment as configuration, so each such rule runs over every file, and each
- * of its reports is one the first pass let a comment hide.
- */
-export function unwaivedCommentFindings(results: readonly LintResult[]): string[] {
-  return results.flatMap((result) =>
-    result.messages
-      .filter((message) => isCommentRule(message.ruleId))
-      .map(
-        (message) =>
-          `${quote(result.filePath)}:${String(message.line ?? 0)}:${String(message.column ?? 0)}  ${message.ruleId ?? ''} reports this with every configuration comment ignored, and no comment may turn that rule off: ${message.message ?? ''}`,
-      ),
-  );
-}
-
-/**
- * ESLint over the tree with the one config, and `options` after it, as its
- * finished process and its json results.
- *
- * @throws When ESLint prints no json, or json that is not a list of file results
- */
-async function eslintResults(
-  label: string,
-  options: readonly string[],
-): Promise<{ readonly finished: Finished; readonly results: readonly LintResult[] }> {
-  const finished = await run([...jsTool('eslint'), '--config', ESLINT_CONFIG, ...options, '.', '--format', 'json']);
-  let results: unknown;
-  try {
-    results = JSON.parse(plain(finished.stdout));
-  } catch {
-    // No json means ESLint stopped before it linted anything, a config error among them.
-    throw new Error(`${label} ${describe(finished)}`);
-  }
-  if (!Array.isArray(results) || !results.every((result) => isLintResult(result))) {
-    throw new Error(`${label} printed json that is not a list of file results: ${describe(finished)}`);
-  }
-  return { finished, results };
-}
-
-// The json formatter names every file ESLint linted, so the row counts them
-// and prints each problem itself. It also refuses every report of the
-// visible-reason rule a directive turned off, which ESLint lists apart from
-// the problems and counts in no exit code. A second pass runs with
-// --no-inline-config, which reads no comment as configuration, and the row
-// refuses every report there of a rule that reads comments. That pass exits 1
-// wherever a directive waives another rule, so its exit code decides nothing
-// but a crash. --config names the one config, so ESLint runs no
-// eslint.config.* nearer a file than the root.
+// Two passes, each with the json formatter, which names every file ESLint
+// linted, so the row counts them and prints each problem itself. The first
+// reads every comment and allows no warning, and the row fails on a tracked
+// JavaScript or TypeScript file it did not lint, unless another row's holds
+// name it. The second reads no comment as a directive or as configuration, and
+// the row refuses every report there from a rule that reads comments, over the
+// same files. rows.ts holds what the row concludes from each. --config names
+// the one config, so ESLint runs no eslint.config.* nearer a file than the
+// root.
 async function lint(): Promise<string> {
-  const { finished, results } = await eslintResults('eslint', ['--max-warnings=0']);
-  const problems = results.flatMap((result) =>
-    result.messages.map(
-      (message) =>
-        `${quote(result.filePath)}:${String(message.line ?? 0)}:${String(message.column ?? 0)}  ${message.severity === 2 ? 'error' : 'warning'}  ${message.message ?? ''}  ${message.ruleId ?? ''}`,
-    ),
+  const eslint = [...jsTool('eslint'), '--config', ESLINT_CONFIG];
+  const first = lintedAsWritten(await run([...eslint, '.', '--max-warnings=0', '--format', 'json']));
+  const held: HeldFile[] = rows.flatMap((row) => (row.holds ?? []).map((path) => ({ path, row: row.name })));
+  const unlinted = unlintedSourceFinding(
+    await trackedFiles(),
+    new Set(first.map((result) => comparable(result.filePath))),
+    held,
+    LINT,
   );
-  const suppressed = suppressedReasonFindings(results);
-  if (finished.exitCode !== 0) {
-    throw new Error(
-      `eslint exited ${String(finished.exitCode)} over ${files(results.length)}:\n${[...problems, ...suppressed, finished.stderr.trim()].filter((line) => line.length > 0).join('\n')}`,
-    );
+  if (unlinted !== undefined) {
+    throw new Error(unlinted);
   }
-  if (results.length === 0) {
-    throw new Error('eslint linted no file, so it checked nothing');
-  }
-  if (suppressed.length > 0) {
-    throw new Error(suppressed.join('\n'));
-  }
-  const second = await eslintResults('eslint --no-inline-config', ['--no-inline-config']);
-  if (second.finished.exitCode !== 0 && second.finished.exitCode !== 1) {
-    throw new Error(`eslint --no-inline-config ${describe(second.finished)}`);
-  }
-  if (second.results.length !== results.length) {
-    throw new Error(
-      `eslint --no-inline-config linted ${files(second.results.length)} and the first pass ${files(results.length)}, so the two passes read different trees`,
-    );
-  }
-  const unwaived = unwaivedCommentFindings(second.results);
-  if (unwaived.length > 0) {
-    throw new Error(unwaived.join('\n'));
-  }
-  return files(results.length);
+  const counted = lintedWithoutComments(await run([...eslint, '--no-inline-config', '.', '--format', 'json']), first);
+  return [counted, heldNote(held)].filter((part) => part.length > 0).join(', ');
 }
 
 /* ///// format ///// */
@@ -684,85 +580,7 @@ async function workflows(): Promise<string> {
       `zizmor completed ${files(completed.size)}, and these tracked workflows were not among them: ${unaudited.map((path) => quote(path)).join(', ') || 'none'}`,
     );
   }
-  const held = await inheritedCallsHeld(await binary('zizmor'));
-  return `${files(workflowFiles.length)}, zizmor ${online ? 'online' : 'offline'} over ${files(completed.size)}, ${String(held)} secrets-inherit ${held === 1 ? 'call' : 'calls'} held`;
-}
-
-/** What a workflow that passes `secrets: inherit` may call: this repository's reusable workflows, by either path. */
-const INHERIT_CALLEES: readonly string[] = ['./.github/workflows/', 'zachthedev/.github/.github/workflows/'];
-
-/**
- * The entries the committed zizmor config's `secrets-inherit` ignore list
- * names, each a file or a file:line:column.
- *
- * @throws When the config does not parse, or the list holds anything but strings
- */
-async function inheritWaivers(): Promise<string[]> {
-  let parsed: unknown;
-  try {
-    parsed = Bun.YAML.parse(await Bun.file(ZIZMOR_CONFIG).text());
-  } catch (error: unknown) {
-    throw new Error(
-      `${ZIZMOR_CONFIG} does not parse as the gate reads YAML, so its secrets-inherit waivers are unknown: ${quote(error instanceof Error ? error.message : String(error))}`,
-      { cause: error },
-    );
-  }
-  const ignore = (parsed as { rules?: { 'secrets-inherit'?: { ignore?: unknown } } } | null)?.rules?.['secrets-inherit']
-    ?.ignore;
-  if (ignore === undefined) {
-    return [];
-  }
-  if (!Array.isArray(ignore) || !ignore.every((entry) => typeof entry === 'string')) {
-    throw new Error(`${ZIZMOR_CONFIG} rules.secrets-inherit.ignore is not a list of file names`);
-  }
-  return ignore;
-}
-
-/**
- * How many jobs pass `secrets: inherit`, each held to {@link INHERIT_CALLEES},
- * with a call in every file the committed zizmor.yml waives.
- *
- * @remarks
- * zizmor runs with no config and `--no-ignores`, which drops inline ignore
- * comments too, so it reports every such job, waived or not. ZIZMOR_CONFIG
- * would name a config against --no-config, so it is removed. zizmor exits 10
- * to 14 when it reports findings.
- *
- * @throws When zizmor fails, a job calls anything else, or a waived file holds no call
- */
-async function inheritedCallsHeld(zizmor: string): Promise<number> {
-  const finished = await run(
-    [
-      zizmor,
-      '--no-progress',
-      '--offline',
-      '--no-config',
-      '--no-ignores',
-      '--strict-collection',
-      '--format',
-      'json',
-      '--collect=all',
-      '.github',
-    ],
-    { ZIZMOR_CONFIG: undefined },
-  );
-  if (finished.exitCode !== 0 && (finished.exitCode < 10 || finished.exitCode > 14)) {
-    throw new Error(`zizmor with no config ${describe(finished)}`);
-  }
-  let calls: ReturnType<typeof inheritedCalls>;
-  try {
-    calls = inheritedCalls(finished.stdout);
-  } catch (error: unknown) {
-    throw new Error(
-      `zizmor with no config: ${error instanceof Error ? error.message : String(error)}. It ${describe(finished)}`,
-      { cause: error },
-    );
-  }
-  const refused = inheritedCallFindings(calls, INHERIT_CALLEES, await inheritWaivers());
-  if (refused.length > 0) {
-    throw new Error(refused.join('\n'));
-  }
-  return calls.length;
+  return `${files(workflowFiles.length)}, zizmor ${online ? 'online' : 'offline'} over ${files(completed.size)}`;
 }
 
 /* ///// renovate ///// */
@@ -790,9 +608,8 @@ async function renovate(): Promise<string> {
 
 // The two rows that run the repository's own code come last: lint runs
 // eslint.config.ts, and scripts:test runs the gate's own tests. So every row
-// that reads a config runs before any code could write one. A single row run
-// keeps this order.
-export const rows: readonly Row[] = [
+// that reads a config runs before any code could write one.
+const rows: readonly Row[] = [
   {
     name: 'tools',
     checks: 'the root, mise.toml and mise.lock against scripts/tools.ts, then the install',
@@ -818,7 +635,7 @@ export const rows: readonly Row[] = [
   {
     name: 'workflows',
     checks:
-      'actionlint over every tracked workflow with ShellCheck behind a stand-in that refuses its directives, both proven by a canary, then zizmor over .github with nothing ignored and each workflow proven audited, online when gh has a token and offline otherwise, then every job passing secrets: inherit held to a reusable workflow of zachthedev/.github',
+      'actionlint over every tracked workflow with ShellCheck behind a stand-in that refuses its directives, both proven by a canary, then zizmor over .github with nothing ignored and each workflow proven audited, online when gh has a token and offline otherwise',
     check: workflows,
   },
   {
@@ -827,16 +644,16 @@ export const rows: readonly Row[] = [
     check: renovate,
   },
   {
-    name: 'lint',
+    name: LINT,
     checks:
-      'eslint over the tree with eslint.config.ts alone and no warnings allowed, counting the files it linted, and no gate/visible-reason report a directive turned off, then eslint again with --no-inline-config and no report from a rule that reads comments',
+      "eslint over the tree with eslint.config.ts alone and no warnings allowed, counting the files it linted, every tracked JavaScript or TypeScript file among them but those another row's holds name, each named with its row, and no gate/visible-reason report a directive turned off, then eslint again over the same files with --no-inline-config and no report from a rule that reads comments",
     check: lint,
     runsCode: true,
   },
   {
     name: 'scripts:test',
     checks:
-      "bun test over the gate's own scripts/*.test.ts, every program they start a stand-in, counting the tests and failing when every one was skipped",
+      "bun test over the gate's own scripts/*.test.ts, every program they start a stand-in, counting the tests and failing on a skip count other than the one declared for this platform",
     check: scriptsTest,
     runsCode: true,
   },
@@ -850,8 +667,67 @@ const glyph = (ok: boolean): string => (color ? styleText(ok ? 'green' : 'red', 
 const width = Math.max(...rows.map((row) => row.name.length));
 const seconds = (started: number): string => `${((performance.now() - started) / 1000).toFixed(1)}s`;
 
-async function main(): Promise<number> {
-  if (process.argv.includes('--rows')) {
+/** The flags the gate takes. Any other argument that starts with `--` is refused. */
+const FLAGS: readonly string[] = ['--rows'];
+
+/** What a run's arguments ask for. */
+export interface Selection {
+  /** The rows to run, in the table's order. */
+  readonly rows: readonly Row[];
+  /** `--rows`: print the rows and run nothing. */
+  readonly list: boolean;
+}
+
+/**
+ * What a run's arguments ask for, or the refusal it prints when an argument
+ * is neither a row's name nor a flag the gate takes.
+ *
+ * @remarks
+ * Every argument is read here and nowhere else. Named rows run in the table's
+ * order. One unknown name or flag refuses the whole run, so a mistyped name
+ * never selects nothing and reads as a green gate, and a mistyped flag never
+ * runs the whole gate in place of what it asked for.
+ *
+ * @param args - The arguments after the script's path
+ */
+export function selectRows(args: readonly string[]): Selection | { readonly refusal: string } {
+  const flags = args.filter((argument) => argument.startsWith('--'));
+  const names = args.filter((argument) => !argument.startsWith('--'));
+  const unknownFlags = flags.filter((flag) => !FLAGS.includes(flag));
+  const unknownNames = names.filter((name) => !rows.some((row) => row.name === name));
+  const refusals = [
+    ...(unknownFlags.length > 0
+      ? [
+          `no such flag: ${printable(unknownFlags.map((flag) => quote(flag)).join(', '))}. The gate takes ${FLAGS.join(' and ')}.`,
+        ]
+      : []),
+    ...(unknownNames.length > 0
+      ? [
+          `no such row: ${printable(unknownNames.map((name) => quote(name)).join(', '))}. bun run check:rows lists them.`,
+        ]
+      : []),
+  ];
+  if (refusals.length > 0) {
+    return { refusal: refusals.join(' ') };
+  }
+  return {
+    rows: rows.filter((row) => names.length === 0 || names.includes(row.name)),
+    list: flags.includes('--rows'),
+  };
+}
+
+/**
+ * Runs the gate over `args` and returns the process's exit code.
+ *
+ * @param args - The arguments after the script's path
+ */
+async function main(args: readonly string[]): Promise<number> {
+  const selection = selectRows(args);
+  if ('refusal' in selection) {
+    console.error(selection.refusal);
+    return 1;
+  }
+  if (selection.list) {
     console.log(dim('rows'));
     console.log();
     for (const row of rows) {
@@ -860,16 +736,7 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  const requested = process.argv.slice(2).filter((argument) => !argument.startsWith('--'));
-  const unknown = requested.filter((name) => !rows.some((row) => row.name === name));
-  if (unknown.length > 0) {
-    console.error(
-      `no such row: ${printable(unknown.map((name) => quote(name)).join(', '))}. bun run check:rows lists them.`,
-    );
-    return 1;
-  }
-  const selected = requested.length === 0 ? rows : rows.filter((row) => requested.includes(row.name));
-
+  const selected = selection.rows;
   console.log(dim('check'));
   console.log();
 
@@ -923,7 +790,7 @@ async function main(): Promise<number> {
 }
 
 // Run as a file, the gate runs. Imported, as scripts/check.test.ts does, it
-// runs nothing and hands over its rows.
+// runs nothing.
 if (import.meta.main) {
-  process.exitCode = await main();
+  process.exitCode = await main(process.argv.slice(2));
 }

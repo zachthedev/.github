@@ -12,10 +12,12 @@ rules:
   self-repository:
     disable: true
   # cd.yml passes secrets: inherit to release-pr.yml, whose job reads its environment's secret,
-  # which a caller in no environment cannot name. The waiver covers that file alone. Every waiver
-  # lives here, since the workflows job refuses an inline ignore comment. The waiver binds to the
-  # file, not to what a job calls, so the gate and the workflows job hold every job that passes
-  # secrets: inherit to a reusable workflow of zachthedev/.github.
+  # which a caller in no environment cannot name. Every waiver lives here, since the workflows job
+  # refuses an inline ignore comment. Each entry names a file, and a file entry waives every job
+  # there that passes secrets: inherit, whatever it calls. The shared workflows job binds the
+  # callee: it reads zizmor with no config and refuses any such job whose uses is not a reusable
+  # workflow of zachthedev/.github, an entry naming a position, and an entry naming a file with no
+  # such job.
   secrets-inherit:
     ignore:
       - cd.yml

@@ -85,12 +85,15 @@ async function main(): Promise<number> {
       Reflect.deleteProperty(process.env, name);
     }
   }
+  // windowsHide, as every start under scripts/ passes: a ShellCheck started
+  // from an actionlint with no console opens no console window.
   const child = Bun.spawn({
     cmd: [shellcheck, ...args],
     env: { ...process.env },
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
+    windowsHide: true,
   });
   // The script is written on its own task while both outputs are read, so
   // neither side waits on a full pipe. A ShellCheck that exits before reading
@@ -140,7 +143,7 @@ try {
   process.exitCode = 2;
 }
 
-// Bun 1.4.2 ends a file with no import or export before its read of stdin
+// The pinned Bun ends a file with no import or export before its read of stdin
 // settles, exit 0 with nothing printed, so the empty export makes this file a
 // module that waits on the await above.
 export {};
