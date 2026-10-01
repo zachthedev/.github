@@ -378,9 +378,9 @@ jobs:
       # failed call, or a lockfile read that names no asset fails the step, and each finding names
       # its lockfile. mise.semver.lock is read in that exact spelling alone, since the Refused
       # files step refuses it in another case and as a link. A lockfile value reaches the log
-      # through printf %q, so a control character in it prints as an escape. mise starts with
-      # GH_TOKEN taken out of its environment, so it never holds the job token, whichever names a
-      # later mise reads a token from.
+      # through printf %q, so a control character in it prints as an escape. mise and taplo start
+      # with GH_TOKEN taken out of their environment, since only the gh call needs it. So neither
+      # holds the job token, whichever names a later mise reads a token from.
       - name: Lockfile assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -391,7 +391,7 @@ jobs:
             if [ "$lock" != mise.lock ] && [ ! -e "$lock" ]; then
               continue
             fi
-            "$taplo" get -f "$lock" -o json > "$RUNNER_TEMP/lock.json"
+            env -u GH_TOKEN "$taplo" get -f "$lock" -o json > "$RUNNER_TEMP/lock.json"
             jq -r --arg lock "$lock" '
               .tools // {} | to_entries[] | .key as $tool | .value[] |
               ( (to_entries[] | select(.key | startswith("platforms.")) | {platform: (.key | ltrimstr("platforms.")), entry: .value}),
