@@ -304,6 +304,59 @@ jobs:
               print(f"::error::{finding}, the shapes the set pins. mise runs options written in brackets there, a postinstall among them.")
           sys.exit(1 if found or shapes else 0)
           PY
+      # mise installs a locked tool from the url its lock entry names. Before the download it
+      # reads only the version numbers in that url's release tag and file name, never its owner,
+      # repository or host. A registry name's lock backend decides where mise installs it from.
+      # So each entry in mise.lock and mise.semver.lock is held to one repository. A registry
+      # name's backend must be the first one the pinned mise's registry names for it, and a
+      # github:<owner>/<repo> key's backend must be the key. Each platform's url must then be a
+      # release download from that repository, and its url_api an asset of it. Both match whole,
+      # since a dot segment after a matching prefix resolves to another repository. mise reads
+      # its registry in an empty directory, so no file of the checkout reaches it. A value
+      # reaches the log through repr, so a control character prints as an escape.
+      - name: Held tool sources
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess, sys, tomllib
+          SEGMENT = r"(?!\.\.?(?:/|$))[A-Za-z0-9._+-]+"
+          SOURCE = re.compile(r"(?:aqua|github):([A-Za-z0-9-]+/[A-Za-z0-9_.-]+)")
+          registry = {}
+          found = []
+          def first(name):
+              if name not in registry:
+                  listed = subprocess.run(["mise", "registry", "--json", name], cwd=os.environ["RUNNER_TEMP"],
+                                          capture_output=True, text=True)
+                  registry[name] = (json.loads(listed.stdout)["backends"] or [None])[0] if listed.returncode == 0 else None
+              return registry[name]
+          for lock in ("mise.lock", "mise.semver.lock"):
+              if lock != "mise.lock" and not os.path.lexists(lock):
+                  continue
+              with open(lock, "rb") as file:
+                  tools = tomllib.load(file).get("tools", {})
+              for key, entries in tools.items():
+                  expected = key if key.startswith("github:") else first(key)
+                  if expected is None:
+                      found.append(f"{lock} locks {key!r}, a name the pinned mise's registry does not hold")
+                      continue
+                  source = SOURCE.fullmatch(expected)
+                  for entry in entries:
+                      backend = entry.get("backend")
+                      if backend != expected or source is None:
+                          found.append(f"{lock} gives {key!r} the backend {backend!r}, and its source is {expected!r}")
+                          continue
+                      repository = re.escape(source[1])
+                      rules = {"url": rf"https://github\.com/{repository}/releases/download/{SEGMENT}/{SEGMENT}",
+                               "url_api": rf"https://api\.github\.com/repos/{repository}/releases/assets/[0-9]+"}
+                      tables = [(name[10:], fields) for name, fields in entry.items() if name.startswith("platforms.")]
+                      for platform, fields in tables + list(entry.get("platforms", {}).items()):
+                          for field, rule in rules.items():
+                              value = fields.get(field)
+                              if not isinstance(value, str) or not re.fullmatch(rule, value):
+                                  found.append(f"{lock} gives {key!r} on {platform!r} the {field} {value!r}, outside {source[1]}'s releases")
+          for finding in found:
+              print(f"::error::{finding}.")
+          sys.exit(1 if found else 0)
+          PY
       # With the refusals passed, the four tools this job runs install, locked, so a tool the
       # lockfile does not pin for this platform is refused. mise re-verifies each artifact and its
       # provenance line, since nothing was restored. Each is a registry tool whose attestation
