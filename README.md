@@ -16,10 +16,11 @@ repository calls or extends the rest.
 
 The reusable workflows:
 
-- [commits.yml](.github/workflows/commits.yml): commitlint over a pull request's commits and the subject its
-  squash writes.
+- [commits.yml](.github/workflows/commits.yml): the refusal of tracked files that run code before any check reads
+  them, on every event, and commitlint over a pull request's commits and the subject its squash writes.
 - [workflows.yml](.github/workflows/workflows.yml): actionlint and zizmor over a repository's `.github`, with
-  zizmor's online audits, and each `mise.lock` asset checked against GitHub's record.
+  zizmor's online audits, the refusal of an action outside `.github/actions/`, and each `mise.lock` and
+  `mise.semver.lock` asset checked against GitHub's record.
 - [dependency-review.yml](.github/workflows/dependency-review.yml): the advisory check on what a change adds.
 - [codeql.yml](.github/workflows/codeql.yml): code scanning over the caller's languages and `actions`.
 - [deps.yml](.github/workflows/deps.yml): the daily Renovate run, under the updater app.
