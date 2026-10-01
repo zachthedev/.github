@@ -24,7 +24,8 @@ name: codeql
 # one every Bun repository copies. Every other repository carries the caller in the kickstart.
 #
 # codeql-action falls back from build-mode none to autobuild for C# and Java on a server-side
-# flag, and logs it. The init step below turns the C# flag off. No caller analyzes Java.
+# flag, and logs it. The init step below turns off the C# flag alone, so a Java caller keeps the
+# fallback and reads its first run's log.
 #
 # A caller's uses: job grants permissions: security-events: write, contents: read, actions: read.
 # A called job can only lower what its caller passes, and a caller passing less is refused before
