@@ -59,18 +59,27 @@ before it merges, and nothing stops its first run on your machine but the diff r
 
 What reaches the tools from your own environment:
 
-- `BUN_OPTIONS` reaches every direct Bun start: the gate itself through `bun run check`, `check:rows` and the push
-  hook, and the `prepare` script's lefthook install. A `--preload` in it runs a module first in each. The gate
-  withholds it from the processes it starts. A tool started through `bun x --bun --no-install` does not read it,
-  and none of this repository's JavaScript tools starts a Bun of its own that would. Leave it unset.
+- `BUN_OPTIONS`, which Bun reads as arguments ahead of its own. A `--preload` in it runs a module first in each
+  Bun start that runs code: a file, `bun test` or `bun -e`. Those include the gate itself, whichever script or hook
+  starts it, and a `bun test` you run. `bun install` runs one in the `prepare` script's lefthook install. Where no
+  `node` is on `PATH`, it runs another in lefthook's own install script when the install installs lefthook, as a
+  first install or a lefthook bump does. `--ignore-scripts` stops both. It runs none in `bun install` itself, in
+  `bun run audit`, or in a tool started through `bun x --bun --no-install`. The gate withholds `BUN_OPTIONS` from
+  the processes it starts. A tool started through `bun x` that starts Bun processes of its own passes `BUN_OPTIONS`
+  and `BUN_INSPECT_PRELOAD` on to them. Leave it unset.
 - `BUN_INSPECT`, `BUN_INSPECT_CONNECT_TO` and `BUN_INSPECT_PRELOAD`. Leave them unset too. The last runs a module in
-  every direct Bun start, the gate's `scripts:test` row and its ShellCheck stand-in among them, and nothing in the
-  hooks or the gate clears them. A tool started through `bun x` does not run it.
+  each start where a `--preload` in `BUN_OPTIONS` runs one. The gate withholds `BUN_OPTIONS` but not these. So the
+  last also runs a module in each `bun test` the gate starts, and in the ShellCheck stand-in,
+  `scripts/shellcheck.ts`, that actionlint starts. It runs none in `bun install` itself, in `bun run audit`, or in a
+  tool started through `bun x --bun`.
 - A personal env file. `bun x` ignores `--no-env-file`, so an untracked `.env` reaches every JavaScript tool the
   hooks, the `format` script and the gate's rows start, and can change what one reports
   ([Troubleshooting](#troubleshooting)).
 - `MISE_BACKENDS_<TOOL>`. Leave it unset. It overrides a tool's backend from the environment, no setting reports
   it, and the gate does not close that gap.
+
+In this repository, no Bun start beyond those runs a file, and no JavaScript tool the gate or the hooks start
+through `bun x` starts a Bun process of its own.
 
 The hooks are no control:
 
@@ -104,8 +113,8 @@ Generated files, and the command that writes each:
   gh's token, `shellcheck.ts` stands in for ShellCheck under actionlint, `eslint-plugin.ts` holds the ESLint rule
   `eslint.config.ts` loads, and `tsconfig.json` is the gate's own TypeScript config. The `*.test.ts` files are the
   gate's own tests, and `stand-ins.ts` holds the programs they start in place of the real ones. `check.test.ts`
-  tests what this repository's `check.ts` adds and is this repository's alone. Which of the rest every Bun
-  repository shares byte for byte is under [Gate](HANDBOOK.md#gate).
+  tests how `check.ts` reads its arguments, and like `check.ts` it is this repository's own. Which of the rest
+  every Bun repository shares byte for byte is under [Gate](HANDBOOK.md#gate).
 - The root `tsconfig.json`: the TypeScript config for `eslint.config.ts`, the one TypeScript file outside
   `scripts/`.
 - The root and `.github/`: the community files GitHub serves as defaults, and this repository's own boilerplate.
@@ -117,8 +126,15 @@ Generated files, and the command that writes each:
 - Validate at the boundary and trust the inside. Input from a user, a file or a network is checked where it
   arrives, with zod where it has a shape.
 - A comment explains why the code is shaped as it is. What changed goes in the commit message.
-- Every process a gate script starts goes through `scripts/run.ts`, so every one starts from `PATH` alone, with no
-  shell.
+- Every process a gate script under `scripts/` starts goes through `scripts/run.ts`, so every one starts from
+  `PATH` alone, with no shell. A `package.json` script or a hook starts its tool itself.
+- Every `Bun.spawn` and `Bun.spawnSync` under `scripts/`, the tests' own included, ends its options with
+  `windowsHide: true`. On Windows a console program opens a console window of its own when the process starting it
+  has no console, as under an agent or a service. A case in `scripts/run.test.ts` reads the direct starts in every
+  JavaScript or TypeScript file under `scripts/` and refuses one without the flag last. It also refuses each other
+  start it can see by name: `Bun.$`, `Bun.openInEditor`, a destructuring of a start from `Bun`, a member named
+  `Bun`, and an import, a `require` or a re-export of a start from `bun` or of `node:child_process`. It follows no
+  value, so review holds a start reached through `Bun` kept in another name or read through `satisfies`.
 - A message that quotes input, such as a path or a value read from a file, JSON-quotes it. A newline or a carriage
   return in input then stays inside one line, where it cannot start a workflow command in a CI log.
 - ESLint lints and Prettier formats. An ESLint rule that is wrong for this code is turned off in
@@ -131,12 +147,13 @@ Generated files, and the command that writes each:
   `eslint-enable`, `eslint-env`, `global`, `globals` and `exported` directive, and each `@ts-expect-error` or
   `@ts-ignore`. It refuses a reason that holds no letter or digit once default-ignorable code points are removed.
   The eslint-comments plugin and ban-ts-comment accept a reason of a soft hyphen, a word joiner or a Braille blank
-  alone, and the rule refuses each. A directive that names the rule itself hides the rule's report on that
-  directive, so the `lint` row also refuses every report of the rule ESLint lists as suppressed. A configuration
-  comment can turn a rule off for a whole file, so the row lints the tree a second time with
-  `--no-inline-config` and refuses every report there from `gate/visible-reason`, ban-ts-comment or an
-  eslint-comments rule. Nothing checks a reason on Prettier's ignore comment, so the `format` row refuses the
-  comment itself.
+  alone, and the rule refuses each. Nothing checks a reason on Prettier's ignore comment, so the `format` row
+  refuses the comment itself.
+- A comment never configures ESLint. `eslint.config.ts` holds every rule's setting and every global, and
+  eslint-comments' `no-use` refuses each directive but `eslint-disable`, `eslint-enable`, `eslint-disable-line` and
+  `eslint-disable-next-line`: a configuration comment such as `/* eslint no-debugger: "off" */`, `global`,
+  `globals`, `exported` and `eslint-env`. A configuration comment holds a rule off for its whole file with nothing
+  to close it, where a waiver is a disable closed by its enable or a directive for one line.
 - An import carries `with { type: 'json' }` or no attribute, and a dynamic import takes no options. ESLint refuses
   any other attribute, since Bun runs a file of any extension as code under one naming a loader, and no row reads
   a `.txt` as code.
@@ -149,14 +166,19 @@ Generated files, and the command that writes each:
 - A test states what the code is supposed to do, derived from the requirement, never copied from what the code
   printed.
 - Table-driven cases through `test.each` are the default where several inputs share one assertion.
+- bun test counts a `failing` or `failingIf` case as a pass and names it nowhere in its summary. So in a test file,
+  a name bun test finds such as `*.test.ts`, ESLint refuses a member named `failing` or `failingIf` on any chain, a
+  destructuring that takes either, a destructuring of `test`, `it` or `describe`, and a computed member of `test`,
+  `it` or `describe` or one step down their chain. A file that is no test file may name a field `failing`.
+- A test that skips on a platform by design changes the count `scripts/check.ts` declares for its row. The count
+  is a number, not the skipped tests' names, so review reads which tests a change skips.
 - A test touches no file outside a temporary directory and no network.
 
 No test needs a real service. The gate's own tests under `scripts/` start a stand-in, itself a Bun process, in
 place of every program the gate starts, and their `PATH` holds the stand-ins alone. So no case starts your gh, git
 or mise or reaches the network. The suite covers `scripts/rows.ts`, which holds what the rows conclude from their
-tools' output, and `scripts/check.test.ts` lints each waiver form the `lint` row refuses, the configuration
-comment included. The rest
-of what `scripts/check.ts` wires together is proven by a break round.
+tools' output, and how `scripts/check.ts` reads its arguments. What `scripts/check.ts` itself wires together is
+proven by a break round.
 
 ## The gate
 
@@ -169,8 +191,9 @@ whole. CI's gate job runs the same gate on Linux, macOS and Windows. A new check
 never a step in a workflow. When a local run fails or disagrees with CI, [Troubleshooting](#troubleshooting) says
 why.
 
-`bun run check:rows` lists the rows. `bun run check <row>` runs one row, resolving the pinned binaries without
-installing them.
+`bun run check:rows` lists the rows. `bun run check <row>` runs the rows it names, one or several, resolving the
+pinned binaries without installing them. A name no row carries, or a flag `FLAGS` in `scripts/check.ts` does not
+name, refuses the run before anything starts.
 
 CI and the push hook run the gate by its file, `bun --no-env-file scripts/check.ts`, so no `node_modules/.bin` sits
 ahead of `PATH`. The `check` and `check:rows` scripts pass `--no-env-file` too, and so do the `scripts:test` row's
@@ -222,7 +245,8 @@ default-branch ruleset requires a code owner's review, so a change to a config i
 
 Every row that walks the tree says how many files it checked, and fails when that is none. The `typecheck` row
 first holds `tsc --version` to the major `package.json` pins for `@typescript/native`, since `typescript` ships a
-`tsc` too ([Dependencies](#dependencies)). It then fails on a tracked TypeScript file that no project reads. The
+`tsc` too ([Dependencies](#dependencies)). It then fails on a tracked TypeScript file that no project reads, and
+the `lint` row fails on a tracked JavaScript or TypeScript file that ESLint did not lint. The
 `format`, `toml`, `workflows` and `renovate` rows hand their tool the tracked files, so a new file counts once
 `git add` names it, and `.gitignore` never hides a tracked one. The `format` row also refuses a Prettier ignore
 comment in any file it checks, since Prettier leaves the code after one unformatted and asks no reason. It matches
@@ -231,12 +255,6 @@ keyword, so a document can name the keyword in prose or in backticks. The `toml`
 each file it was handed, and the `workflows` row that actionlint and zizmor each report every tracked workflow.
 The `renovate` row requires the validator's success line beside its exit code for each preset and
 `.github/renovate.json`, since the validator exits 0 over a config it never validated.
-
-The `workflows` row then runs zizmor again with no config and inline ignores off, so it sees every job that passes
-`secrets: inherit`, waived or not. Each such job calls a reusable workflow of this repository, by
-`./.github/workflows/` or by `zachthedev/.github/.github/workflows/`, and a job calling anything else fails the
-row. Each file the `secrets-inherit` waiver in `.github/zizmor.yml` names must hold such a job, so a waiver left
-behind fails the row too.
 
 actionlint runs ShellCheck through `scripts/shellcheck.ts`, which it hands each workflow script exactly as
 ShellCheck reads it: YAML escapes and folding decoded, and every `${{ }}` expression blanked. The stand-in refuses
@@ -248,11 +266,34 @@ every run: one script whose SC2086 must come back from ShellCheck, and one whose
 come back refused. actionlint runs ShellCheck for a `bash` or `sh` step alone, so the gate refuses a `shell:` value
 outside `bash`, `sh` and `pwsh`, on a step or under `defaults.run`.
 
+The `lint` row runs ESLint twice over the tree. The first pass reads every comment and allows no warning. It also
+refuses a report of `gate/visible-reason` that a directive turned off: a directive naming the rule hides the rule's
+report on that directive, and ESLint lists such a report apart from the problems and counts it in no exit code. The
+row then fails on a tracked file ending in `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.mts` or `.cts`, in any
+case, that the first pass did not lint. Bun runs each of those as a module, and ESLint passes over a file without a
+word where an ignore covers it or no `files` pattern matches it. So a file tracked under an ignored directory such
+as `dist/`, a `.jsx`, or a `.TS` fails the row, unless another row holds it. The second pass runs with
+`--no-inline-config`, which reads no comment as a directive or as configuration, over the same files. It refuses
+every report there from a rule that reads comments: `gate/visible-reason`, `@typescript-eslint/ban-ts-comment` and
+every eslint-comments rule. So a comment that turns one of those rules off, `no-use` included, fails the row. The
+second pass reports each rule a waiver turns off, and the row passes those.
+
+A tracked file ESLint does not read passes the `lint` row when another row's `holds` in `scripts/check.ts` name it.
+A row lists in `holds` each tracked JavaScript or TypeScript file it holds byte for byte, such as a generated file
+it regenerates and diffs against the index. Such a row names each file through the constant its check reads, and
+review checks that it does. No row in this repository holds a file. The `lint` row names each held file with its
+row in its line. A hold names a file in the exact spelling `git ls-files` prints, so it names one file on every
+platform, and a pattern names none. The row refuses a hold naming no tracked JavaScript or TypeScript file, or a
+file the first pass linted, since it passes nothing. It also refuses a file held twice and a hold on the `lint` row
+itself. So the ignores keep untracked output, and a file another row holds, out of the lint.
+
 The `lint` row runs `eslint.config.ts`, and the `scripts:test` row runs the gate's own tests, `bun test ./scripts/`.
-They are the last two rows, since each runs repository code that can write any file a row reads, and the checks
+They run after every other row, since each runs repository code that can write any file a row reads, and the checks
 before the first row run again after each. A finding there prints as `preflight  after <row>, no later row ran`.
 The test row says how many ran, and fails when none ran, when every one it counted was skipped, and when a name
-pattern left any out. The count comes from bun test's own summary on stderr: the last `Ran` line and the counts
+pattern left any out. It also fails when the tests it skipped, todos included, differ from the count
+`scripts/check.ts` declares for it on the platform: a skip nobody declared fails, and so does a declared one that
+no longer happens. The count comes from bun test's own summary on stderr: the last `Ran` line and the counts
 directly above it, which must add up to it. It runs with `CI=true`, so a `test.only` fails the row rather than
 running alone and leaving its file's other tests out of the count.
 
@@ -265,9 +306,8 @@ the gate on your machine agrees with CI:
   `lefthook.yml` is missing, and a tracked `lefthook-local`, `lefthook-local.*`, `.lefthook-local` or
   `.lefthook-local.*`, which lefthook merges over `lefthook.yml`. `.gitignore` lists the local ones for your own
   use;
-- a `.config` directory at the root, which mise, lefthook and commitlint's cosmiconfig each read, and a root
-  `package.yaml` or a `cosmiconfig` key in the root `package.json`. cosmiconfig reads its own settings from all
-  three whatever `--config` names, and a `$import` there runs a module inside commitlint;
+- a `.config` directory at the root, which mise, lefthook and commitlint's cosmiconfig each read whatever a flag
+  names;
 - a `node_modules` directory anywhere below the root, tracked or not. Bun, tsc and typescript-eslint resolve a bare
   import from the nearest one, so it replaces the installed package for the files beside it;
 - a `tsconfig.json` or `jsconfig.json` at a path `scripts/expected.ts` does not list, tracked or not, since
@@ -276,24 +316,12 @@ the gate on your machine agrees with CI:
   `node_modules` under `scripts/`, since Bun resolves the gate's imports through them;
 - a tracked workflow whose path is not `.github/workflows/<name>.yml` exactly, since actionlint and zizmor read that
   spelling alone, a tracked workflow whose `shell:` is not `bash`, `sh` or `pwsh`, and one the gate cannot read as
-  YAML.
-
-It also refuses these, tracked alone:
-
-- a tracked env file Bun loads (`.env`, `.env.local`, and the `development`, `production` and `test` pairs), at
-  any depth, since Bun loads one into every start beside it. A template such as `.env.example` passes, and so does
-  your own untracked env file;
-- a key repeated within one object of a tracked `package.json`, `tsconfig.json` or `jsconfig.json`, or of a file
-  its `extends` names. Bun reads the first copy where `JSON.parse` reads the last, so a repeated
-  `patchedDependencies` or `paths` could pass a check while Bun applies it. A file that does not parse as plain
-  JSON is refused too;
-- a `patchedDependencies` key in a tracked `package.json`, since `bun install` applies each patch it names over the
-  package `bun.lock` pins;
-- a `zizmor: ignore[...]` comment in a tracked file under `.github`. A waiver is an entry in `.github/zizmor.yml`.
-
-The shared `commits` and `workflows` jobs refuse each of those four too. The gate keeps its copies because
-`scripts/startup.ts` is shared byte for byte with every Bun repository, and the Bun kickstart, the shared text's one
-writer, drops them once it pins the release that carries the shared checks.
+  YAML;
+- a tracked composite action, an `action.yml` or `action.yaml` in any case, outside `.github/actions/` in that exact
+  spelling, or under it named in another case, such as `ACTION.YML`, which zizmor never reads and a case-insensitive
+  runner opens. zizmor reads `.github` alone, in the `workflows` row and in the shared `workflows` job, while
+  `uses: ./<path>` runs an action from anywhere in the checkout, so an action at `tools/x` or under a `.GitHub`
+  would run with no audit.
 
 Each name is compared with its case folded, broader than any filesystem's comparison, so a spelling that a
 case-insensitive filesystem opens as a refused name is refused too. The first check names the work tree through
@@ -304,26 +332,59 @@ with no system or global config and nothing inherited from your environment.
 The shared `commits` and `workflows` jobs refuse, before a merge, the files that run code or waive a check before
 any gate row reads them. This repository's `ci.yml` calls both by `./`, so a pull request runs its own copy of
 each, and code-owner review of `.github/workflows/` is the control on a change to them or to the job that runs the
-gate. Beyond the gate's own refusals, the shared jobs refuse:
+gate. The `commits` job runs its refusals on every pull request, on every push to
+`main` and daily from `audit.yml`, and its commitlint steps on a pull request alone. The shared jobs refuse:
 
-- a tracked `node_modules`, or a tracked path under one, and every tracked symbolic link;
+- a tracked `node_modules`, or a tracked path under one, and every tracked symbolic link, since `bun install` keeps
+  one as it finds it and Bun reads through it to a file `bun.lock` never named;
+- a tracked env file Bun loads (`.env`, `.env.local`, and the `development`, `production` and `test` pairs), at
+  any depth, since Bun loads one into every start beside it. A template such as `.env.example` passes, and so does
+  your own untracked env file;
+- a `patchedDependencies` key in any tracked `package.json`, since `bun install` applies each patch it names over
+  the package `bun.lock` pins, and an `exports` key, since Bun resolves a bare import of the package's own name
+  through it;
+- a key repeated within one object of a tracked `package.json`, `tsconfig.json` or `jsconfig.json`, or of a file
+  its `extends` names, and any of them that does not parse as plain JSON. Bun reads the first copy of a key where
+  another reader takes the last;
+- a root `package.yaml`, a `cosmiconfig` key in the root `package.json`, and a tracked root `.config`. cosmiconfig
+  reads its own settings from each whatever `--config` names, and a `$import` there runs a module inside
+  commitlint;
 - a `bunfig.toml` holding any key but `[install] minimumReleaseAge`;
 - `paths` or `baseUrl` in a tracked `tsconfig.json` or `jsconfig.json` or in a file its `extends` chain reads;
-- an `exports` key in a tracked `package.json`, since a bare import of the package's own name resolves to it ahead
-  of `node_modules`;
-- a `secrets-inherit` waiver in `.github/zizmor.yml` holding a colon, since this audit's waivers name a whole file;
+- a tree that does not track `.github/renovate.json` as a file, since without it Renovate reads a root
+  `renovate.json`, a `.renovaterc` or a `package.json` `renovate` key in its place;
+- a `packageManager` other than `bun@X.Y.Z`, and a root `.node-version` other than one `X.Y.Z` line, since
+  setup-bun and setup-node resolve a range or a name such as `latest` when the job runs, past the cooldown;
+- a `zizmor: ignore[...]` comment in a tracked file under `.github`, since a waiver is an entry in
+  `.github/zizmor.yml`;
+- a key repeated in one mapping of `.github/zizmor.yml`, an anchor, or a second document, since zizmor keeps the
+  last copy of a repeated audit and a later copy can turn off an audit the first configures;
+- a tracked action outside `.github/actions/`, or one under it named in another case, which the gate refuses too;
+- a job passing `secrets: inherit` to anything but a reusable workflow of `zachthedev/.github`, and a
+  `secrets-inherit` waiver that names a position or a file holding no such job, so no waiver outlives its job;
 - a root file named like a program the gate, its hooks or an install start (`bun`, `bunx`, `gh`, `git`, `mise` or
   `node`), and a root entry named `'`, which actionlint would read in place of the ShellCheck stand-in.
 
-Review refuses what no row checks, since each such file sits in the diff: anything under `dist/`, `coverage/`,
-`.claude/worktrees/` or a `.git`, `.sl`, `.svn`, `.hg` or `.jj` directory, a JavaScript or declaration file beyond
-`commitlint.config.js`, a path below a personal file's name, a tracked `.claude/settings.local.json`, and a tracked
-`.npmrc`, whose registry would fail every package's integrity check against `bun.lock`.
+Review refuses what no row checks, since each such file sits in the diff and runs no code: any file under `dist/`,
+`coverage/` or `.claude/worktrees/` but a JavaScript or TypeScript one, which the `lint` row refuses unless another
+row holds it, anything under a `.git`, `.sl`, `.svn`, `.hg` or `.jj` directory, a JavaScript or declaration file
+beyond `commitlint.config.js` and the files the rows' `holds` name, a path below a personal file's name, and a
+tracked `.claude/settings.local.json`. Review also refuses a tracked `.npmrc`: a registry it names fails every
+package's integrity check against `bun.lock`. A hold lifts more than lint. The `lint` row's `@ts-nocheck` refusal
+never reads a held file, no project reads a JavaScript file, `skipLibCheck` skips every declaration file, and
+`.prettierignore` keeps the three ignored directories out of the `format` row. So for a held JavaScript or
+declaration file under one of those directories, the holding row is the file's one reader. A held `.ts` file
+elsewhere is still typechecked and formatted. No check proves that a row's check regenerates and compares each file
+its `holds` name, so review reads the check against each. The coverage checks in the `typecheck` and `lint` rows
+find a file by its extension. Bun also runs a file with no extension as TypeScript, started or imported, and a
+`.es6` file it starts directly. Review alone reads such a tracked file, since neither check names it.
 
 The `tools` row reads `mise.toml` and `mise.lock` against the expectations in `scripts/tools.ts`, and installs
 from the lockfile only after that read passes. `mise.toml` holds `[tools]`, `[tool_config]` and `[settings]`
 alone, and the last two equal the values in `scripts/tools.ts` exactly, because mise runs a `[hooks]`, `[env]` or
-`[vars]` table on install. Every key of `mise.lock` is one `scripts/tools.ts` names. The row refuses every other
+`[vars]` table on install. Each `[tools]` key is a tool `scripts/tools.ts` expects, spelled exactly, since mise
+reads options written in brackets after a tool's name, `postinstall` among them. Every key of `mise.lock` is one
+`scripts/tools.ts` names. The row refuses every other
 file mise reads as config or a lockfile in the root, such as `mise.local.toml`, `.tool-versions` or `.miserc.toml`,
 because mise merges each one, and a lockfile beside it, over `mise.lock`. It refuses a link at the root or under
 `.config`, `.mise` or `mise`. Every mise command the gate starts carries an environment built from a short list:
@@ -416,8 +477,10 @@ Every version heading in `CHANGELOG.md` after the first links GitHub's compare v
 lists every change in the release, hidden types included. The same list locally:
 
 ```sh
-git log --oneline v0.1.0..v0.2.0
+git log --oneline v<previous>..v<version>
 ```
+
+A first release has no previous tag, and `git log --oneline v<version>` lists it.
 
 ## Dependencies
 
@@ -459,18 +522,33 @@ entry on `ci.yml`'s `dependency-review` job, with a comment naming the advisory,
 safer and the condition that removes it. A red advisory check blocks the merge like every required check
 ([What never happens](#what-never-happens)).
 
-Each tool the gate runs, and how its bytes are held to their source:
+### Tool integrity
 
-- actionlint and zizmor: provenance. `mise.lock` records `github-attestations`, mise verifies the attestation on
+Each tool this repository pins, and who vouches for its bytes. The publisher's build attestation is a statement a
+workflow in the publisher's repository signed over the artifact's digest. The publisher's signature is made with a
+key the checking tool carries. The registry's record is a hash, or a signature, from a registry that never replaces
+a published version. The release's own checksum is GitHub's digest for the asset, or a checksum file beside it, in
+a release that can still change. A hash this repository computed comes from one download, and nothing outside the
+file that pins it records it. A version alone names a release, and nothing recorded before the install vouches for
+its bytes. Setup names the programs you install yourself, and the copy you install takes no tier. A program in
+Setup that CI installs at a pinned version takes a line for that copy.
+
+- actionlint and zizmor: the publisher's build attestation, held in `mise.lock`. mise checks the attestation on
   every install, and the gate refuses a lockfile that drops the line.
-- ShellCheck and taplo: a checksum in a pinned tree, `mise.lock`. The `workflows` job also holds ShellCheck's
-  checksum to the digest GitHub records for its asset. taplo's checksums were computed once from its release
-  artifacts, as `mise.toml` records.
-- commitlint, `yaml`, ESLint, typescript-eslint, the eslint-comments plugin, Prettier, lefthook, TypeScript, zod
-  and renovate: a checksum in a pinned tree, `bun.lock`.
-- Bun itself: a version alone. `packageManager` plus the cooldown is the control, because the setup action
-  verifies no download.
-- mise itself: a publisher signature, which `jdx/mise-action` checks against the release's signed checksums.
+- ShellCheck: the release's own checksum, GitHub's digest for the asset, held in `mise.lock`. The `workflows` job
+  reads that digest back from GitHub on every run.
+- taplo: a hash this repository computed, held in `mise.lock`. Its release carries no digest and no checksum file,
+  so its checksums come from one download per platform, as `mise.toml` records.
+- Every package `bun.lock` records, the JavaScript tools the gate and the hooks start among them: the registry's
+  record, held in `bun.lock`.
+- Bun itself: a version alone, named by `packageManager` in `package.json`. The cooldown is the control, because
+  the setup action checks no download.
+- Node.js, in the `codeql` job: a version alone, named by the `node-version:` input of that job's
+  `actions/setup-node` step in `.github/workflows/codeql.yml`. The cooldown is the control, because the setup
+  action checks no download.
+- mise itself, in CI: the publisher's signature, named by the `version:` line of each `jdx/mise-action` step. The
+  action checks the release's checksum file against the key it carries. Locally, mise is your own install
+  ([Setup](#setup)).
 
 `MISE_BACKENDS_<TOOL>` overrides a tool's backend from the environment, and no setting reports it
 ([Safety](#safety)).
@@ -511,13 +589,25 @@ A local run that fails or disagrees with CI:
   and its ShellCheck stand-in too. Leave all four unset ([Safety](#safety)).
 - A local gate can pass where CI's `commits` or `workflows` job fails, since those jobs refuse files the gate does
   not repeat ([The gate](#the-gate)).
-- A `workflows` row that differs from CI can come from zizmor's online audits. They run on your machine when gh
-  answers with a token and never in CI's gate job. `ZIZMOR_OFFLINE=1` runs what CI runs.
+- A `workflows` row that differs from CI can come from zizmor's online audits. Three of them can fail a
+  hash-pinned workflow: a known-vulnerable action, an impostor commit, and a hash pin whose version comment names
+  another tag. An offline run sees none of the three. The row runs them when gh answers with a token. CI's gate
+  job runs offline, and the shared `workflows` job runs them online on every pull request. So a local row green
+  offline can meet a red `workflows` job, and a local row red online can meet a green gate job.
+  `ZIZMOR_OFFLINE=1` runs what CI's gate job runs.
 - In a checkout another account owns, git refuses the repository as dubious ownership, and the gate stops. Make
   your account the directory's owner. The gate starts git with no system or global config, so it reads no
   `safe.directory` entry, by design.
 - A row that fails because a process its tool started still holds the tool's output leaves that process running,
   since nothing the gate can reach ends a process whose parent is gone. Find it and end it.
+- On a case-insensitive checkout, on Windows or macOS, a case variant of a tracked path can merge two tracked paths
+  into one file, and on Windows so can an 8.3 short name, such as `GITHUB~1` for `.github` or `packag~1.jso` for
+  `package.json`. git warns of a collision. Your local gate then reads a file the diff does not show, while the
+  shared jobs on Linux read the real files. Read a pull request's diff before you run its branch
+  ([Safety](#safety)).
+- On Windows, a `scripts:test` row that skips one test more than it declares can come from the temporary
+  directory's volume. The case for a program reached through an 8.3 short name skips where the volume keeps no
+  short names. Point `TEMP` at a volume that keeps them.
 
 ## What never happens
 
@@ -525,8 +615,8 @@ A local run that fails or disagrees with CI:
   release-please writes all three from the commits, and a hand edit is overwritten or, worse, shifts the next
   version it computes. A mistyped squash is corrected with the override under
   [Commit messages](#commit-messages), never in the changelog.
-- No version number goes into `HANDBOOK.md`. A version lives in the file that pins it, so a bump is one edit
-  and the handbook never goes stale.
+- No version number goes into prose, `HANDBOOK.md` included. A version lives in the file that pins it, so a bump
+  is one edit and no document goes stale.
 - No `mise.lock` line is written outside `mise lock`, except a checksum computed as `mise.toml` says. The
   lockfile is what an install fetches and compares, and the gate holds it to the expectations in
   `scripts/tools.ts`. A hand-written line is a line nothing verified.

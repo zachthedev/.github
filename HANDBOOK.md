@@ -146,18 +146,21 @@ command. A row that a section owns names that section.
 - Safety says what a contributor does to stay safe locally. A pull request's diff is read before anything runs
   on its branch, because the branch supplies the install, the hooks and the gate. The section names what reaches
   the tools from the contributor's own environment, and says hooks are not a control:
-  - `BUN_OPTIONS` stays unset. Safety names the direct Bun starts it reaches in that kind, never a row the gate
-    withholds it from. A tool started through `bun x` does not read it. A tool that starts Bun children of its
-    own, such as wrangler or vitest, passes it and `BUN_INSPECT_PRELOAD` on to them, and Safety names each such
-    tool the kind runs.
-  - The `BUN_INSPECT` names stay unset. `BUN_INSPECT_PRELOAD` runs a module in every direct Bun start, and a tool
-    started through `bun x` does not run it.
+  - `BUN_OPTIONS` stays unset. A `--preload` in it runs a module in each Bun start that runs code: a file,
+    `bun test` or `bun -e`, one an install script starts included. It runs none in `bun install` itself, in
+    `bun run audit` or in a `bun x --bun --no-install` start. Safety names the starts in that kind that run one,
+    never a row the gate withholds it from. A tool that starts Bun processes of its own, such as wrangler or
+    vitest, passes it and `BUN_INSPECT_PRELOAD` on to them, and Safety names each such tool the kind runs.
+  - The `BUN_INSPECT` names stay unset. `BUN_INSPECT_PRELOAD` runs a module in each start where a `--preload` in
+    `BUN_OPTIONS` runs one. The gate withholds `BUN_OPTIONS` alone, so it also runs in each Bun the gate starts,
+    such as a `bun test` row or the ShellCheck stand-in.
   - A top-level `bunfig.toml` preload runs under `bun x` too.
   - `bun x` ignores `--no-env-file`, so a personal env file reaches the JS tools.
 - Troubleshooting covers a local run that fails or differs from CI: a stale install, the install after every
   pull and every branch switch, a frozen install that leaves a package `bun.lock` dropped in place, the other copy
-  `bun x` may run, a partial or copied install that runs a parent directory's binary, env files and a proxy that
-  catches loopback.
+  `bun x` may run, a partial or copied install that runs a parent directory's binary, env files, a proxy that
+  catches loopback, and a case variant or an 8.3 short name that merges two tracked paths on a case-insensitive
+  checkout (Workflows).
 - A cross-reference stands wherever an agent that skims would otherwise miss an item. Setup points at the Safety
   items it touches, and The gate points at Troubleshooting for a local and CI mismatch.
 - `AGENTS.md` lives at the repository root under the vendor-neutral name, so every vendor's agent reads one
@@ -511,7 +514,7 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The spelling is `bun x`, never `bunx`. On Windows `bunx.exe` fails wrangler outright and becomes vitest's
   worker `execPath`, so vitest's workers die. `bun x` runs both.
 - The `prepare` script is the one exception, in every repository of the set. It starts lefthook's installer by
-  path, `bun ./node_modules/lefthook/bin/index.js install`, so it is a direct Bun start (Files).
+  path, `bun ./node_modules/lefthook/bin/index.js install`, so it is a Bun start that runs a file (Files).
 - A script file a `package.json` script runs, such as a service's deploy script, starts its JS tools the same way,
   or records at the drift site why it does not.
 - A gate row starts the tool under the Bun running the gate.
@@ -581,18 +584,31 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   one, and a root `tsconfig.json` with `paths` or `baseUrl` redirects that tool's imports. Committing on
   an unread branch runs that branch's `commitlint.config.js` from the commit hook
   before any check, as a preload runs before the hook's tool.
-- The shared `commits` and `workflows` jobs are the one CI copy of the refusals that block a merge: a tracked env
-  file at any depth, a tracked `node_modules`, a `patchedDependencies` key, a `bunfig.toml` key, tsconfig `paths`
-  and `baseUrl`, a `package.json` `exports` key, a duplicated JSON key, a `package.json` or project config that
-  does not parse, a root `package.yaml`, a root `package.json` `cosmiconfig` key, a root file named like a
-  program, an inline zizmor waiver, the `secrets: inherit` callee hold, and a stale or positional
-  `secrets-inherit` waiver. A pull request cannot change
-  what either job runs at the commit its `ci.yml` pins. It can change `ci.yml`'s call, and code-owner review of
-  `.github/workflows/` holds that. `zachthedev/.github`'s own `ci.yml` calls both jobs by `./`, so a pull request
-  there runs its own copy of each, and the same review holds that. A gate need not repeat them once its
-  repository pins the `.github` release that carries them. The gate keeps what no shared job reads and what keeps
-  a local run in step with CI: the mise assertions, the `scripts/` shield, the tsconfig location rule, every
-  on-disk config-name refusal, the stand-in, the `shell:` hold, and the Go module and Rust toolchain checks.
+- The shared `commits` and `workflows` jobs are the one CI copy of the refusals that block a merge. A gate need
+  not repeat one once its repository pins the `.github` release that carries it.
+  - The `commits` job refuses a tracked env file at any depth, a tracked `node_modules`, every tracked symbolic
+    link, a tracked root `.config`, a root `package.yaml`, a `bunfig.toml` key, a `patchedDependencies` key, a
+    `package.json` `exports` key, a root `package.json` `cosmiconfig` key, tsconfig `paths` and `baseUrl`, a
+    duplicated JSON key, and a `package.json` or project config that does not parse.
+  - It also refuses a tree without a tracked `.github/renovate.json` (Updates), and a runtime pin that names no
+    exact version (Workflows).
+  - The `workflows` job refuses a root file named like a program, an inline zizmor waiver, an action outside
+    `.github/actions/`, a repeated key, an anchor or a second document in `.github/zizmor.yml`, a stale or
+    positional `secrets-inherit` waiver, and a job passing `secrets: inherit` to another callee.
+- A pull request cannot change what either job runs at the commit its `ci.yml` pins. It can change `ci.yml`'s
+  call, and code-owner review of `.github/workflows/` holds that. `zachthedev/.github`'s own `ci.yml` calls both
+  jobs by `./`, so a pull request there runs its own copy of each, and the same review holds that. The gate keeps
+  what no shared job reads and what keeps a local run in step with CI: the mise assertions, the `scripts/` shield,
+  the tsconfig location rule, every on-disk config-name refusal, the stand-in, the `shell:` hold, and the Go module
+  and Rust toolchain checks.
+- The `commits` job's refusals run on every pull request, on every push to the default branch and daily from
+  `audit.yml`, as the `workflows` job's do. Its setup-bun step, its install and both commitlint steps run after
+  every refusal, on a pull request alone. Two pull requests that each pass can merge into a tree
+  neither run read, such as a `package.json` holding a key twice, and the push run reads it. A push whose commit
+  message holds a skip instruction such as `[skip ci]`, or one the workflow token makes, starts no push run. The
+  next daily run reads what it left. A direct push to the default branch meets the refusals the same way, after it
+  lands. A C# gate keeps its duplicate-key check over `global.json` and `dotnet-tools.json`, which the
+  `commits` job does not read.
 - `CODEOWNERS`, `* @zachthedev`, with `require_code_owner_review` on `default-branch`, makes the owner's review a
   merge condition for every change to gate code or to a config a row reads. The owner's own pull request merges
   through the admin bypass (Branch rules).
@@ -657,26 +673,39 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   gate agrees with CI. A personal file, a `lefthook-local` or `.lefthook-local` file in any form or an env file,
   is refused only when committed, and `.gitignore` names it.
 - A Go gate refuses a tracked Go file no build compiles.
+- A Bun gate refuses a tracked TypeScript file no project reads, in its typecheck row. Its lint row refuses a
+  tracked JavaScript or TypeScript file, the extension compared folded, that ESLint's first pass did not lint,
+  unless another row holds it. Bun runs each such file, and ESLint passes over a file an ignore covers or no
+  `files` pattern matches without a word.
+- A row holds a tracked file when it regenerates the file and compares it byte for byte, as a generated file's row
+  does. It names the file in its `holds`, through the constant its check reads. No check proves that the check
+  reads it, so review does.
 - A reviewer, not the gate, refuses a tracked file no row checks: anything under `dist/`, `coverage/`,
   `.claude/worktrees/` or a `.git`, `.sl`, `.svn`, `.hg` or `.jj` directory, a JavaScript or declaration file
   beyond the ones a tool needs, such as `commitlint.config.js`, a path below a personal file's name, and
-  `.claude/settings.local.json`. Each sits in the diff and runs no code, so `CODEOWNERS` review holds it.
+  `.claude/settings.local.json`. Each sits in the diff and runs no code, so `CODEOWNERS` review holds it. In a
+  Bun repository the lint row refuses such a JavaScript or TypeScript file first, unless another row holds it.
+- Bun also runs a file with no extension as TypeScript, started or imported, and a `.es6` file it starts
+  directly. No coverage check names either, so review alone reads one.
 - In Go a reviewer also refuses a package under an `_` directory, below a second `go.mod`, or under a `testdata`
   directory that a build imports. `./...` skips each, so no row checks one, and review of the diff holds it.
 - The gate refuses a root `.config` directory outright, in any letter case. mise, the dotnet tool manifest,
   cosmiconfig's meta config and lefthook all read it.
 - cosmiconfig reads its own settings from a root `package.json` `cosmiconfig` key, a root `package.yaml` and the
-  root `.config`, whatever `--config` names, and a `$import` there runs a module inside commitlint. Each is
-  refused before any commitlint step, the shared `commits` job included.
+  root `.config`, whatever `--config` names, and a `$import` there runs a module inside commitlint. The shared
+  `commits` job refuses a tracked root `package.yaml`, a root `package.json` `cosmiconfig` key and a tracked root
+  `.config` before any commitlint step (the one CI copy, above). The gate refuses the root `.config` on disk too,
+  since mise and lefthook read it.
 - Every gate tool that searches for its own config runs with the one config named explicitly. The tools are
   Prettier, commitlint, golangci-lint, ESLint, taplo and zizmor, CSharpier in C#, and rustfmt, clippy and
   cargo-deny in Rust.
 - A config the tool finds first replaces the shared one: a committed `.golangci.json` beside `.golangci.yml`
   replaced the lint config and hid a `govet` finding while the row named no config.
 - The gate refuses the other names a tool reads only where the tool has no named-config form: cargo's config, the
-  toolchain file, the actionlint config, lefthook's configs, the env files, cosmiconfig's own root sources,
-  mise's configs, and the project configs typescript-eslint reads (above). Refusals match at every depth the tool
-  reads, without regard to case.
+  toolchain file, the actionlint config, lefthook's configs, mise's configs, and the project configs
+  typescript-eslint reads (above). Refusals match at every depth the tool reads, without regard to case. A
+  tracked env file, a root `package.yaml` and a root `package.json` `cosmiconfig` key are the shared `commits`
+  job's to refuse (above).
 - A tool whose row names its config drops the refusal of its other names, but only where a measurement shows the
   named form stops every read that tool makes. Each tool below has that measurement, and keeps a refusal only for
   the exception measured beside it:
@@ -705,10 +734,20 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every row that walks the tree prints what it checked, the files or their count, and fails on zero. A row that
   checked nothing reads green otherwise: taplo and Prettier each exit 0 on empty input.
   - A test row fails on zero, on every test skipped, and on a filtered run. A row whose runner reports skips, bun
-    test, vitest, nextest and Microsoft.Testing.Platform among them, also fails on any skip beyond an allowance the
-    gate declares, 0 by default. vitest, nextest and Microsoft.Testing.Platform report a filter as a skip, so the
-    allowance is what catches a filter there. A platform-only skip is declared the same way, per platform, and so
-    is a Rust `#[ignore]`, which nextest counts as a skip.
+    test, vitest, nextest and Microsoft.Testing.Platform among them, also fails on any skip count other than the
+    one the gate declares for that platform, 0 by default. An undeclared skip fails, and so does a declared one
+    that no longer happens, so a declaration fails once its gap closes. vitest, nextest and
+    Microsoft.Testing.Platform report a filter as a skip, so the declaration is what catches a filter there. A
+    platform-only skip is declared the same way, per platform, and so is a Rust `#[ignore]`, which nextest counts
+    as a skip.
+  - A declaration is a count, not the skipped tests' names, so review reads which tests a change skips.
+  - The gate refuses a case its runner counts as passing while the case expects a failure. bun test counts a
+    `failing` or `failingIf` case as a pass and names it nowhere in its summary, so a Bun repository's ESLint
+    refuses either in a test file. vitest passes a `fails` case whose body fails and counts it as an expected
+    fail, so a row reading vitest refuses any expected fail.
+  - A row reading vitest reads the `Tests` line of its text summary on stdout. It refuses stdout holding more than
+    one line of that shape, since a test can print one. The counts under the line's labels must add up to its
+    total. vitest's JSON reporter reports an expected fail as passed, so it is no reader.
   - Under Microsoft.Testing.Platform, a runner config that marks every test explicit exits 0 with every test
     skipped. A runner config that can skip or filter tests falls under the tool config search above, in every
     stack.
@@ -760,10 +799,16 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - The shared `workflows` job refuses a `zizmor: ignore[` comment in a tracked file under `.github` (the one CI
   copy, above), so every waiver lives in `.github/zizmor.yml`. An inline comment waives any audit on its line,
   `unpinned-uses` included. The job searches every file as text, with `git grep -a`, so a `.gitattributes` line
-  marking a file `-diff` or `binary` cannot hide a comment from it.
+  marking a file `-diff` or `binary` cannot hide a comment from it. The search reads `.github` in its exact
+  spelling, the directory zizmor reads on the runner.
 - A waiver in `.github/zizmor.yml` names `file:line`, as an `artipacked` waiver does, so an edit that moves the
   finding turns the gate red and the waiver is read again. `secrets-inherit` alone takes the file form,
   because the callee hold is its control (Secrets).
+- The shared `workflows` job reads `.github/zizmor.yml` with the runner image's `yq` before any other step reads
+  it. It refuses a key repeated in one mapping at any depth, an anchor, a second document, and a file `yq` cannot
+  parse (the one CI copy, above). zizmor keeps the last copy of a repeated audit under `rules`, so a later
+  `disable: true` turns off an audit whose first copy a reviewer reads. An alias needs an anchor in its own
+  document, so the anchor refusal covers every alias.
 - The shared `workflows` job refuses a `secrets-inherit` entry holding a colon. zizmor binds a `file:line:column`
   entry to that position alone, where a later shift can land another call, and a position that matches nothing
   waives nothing while its file part would read as held.
@@ -810,10 +855,10 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   process tree, and on a contributor's machine Ctrl-C ends a hung tool.
 - A gate can still bound a pipe a leftover process holds after its tool exits, and fail the row: a Go gate through
   `exec.Cmd.WaitDelay`, a Bun gate through a short drain in its run helper.
-- Where a runtime loads an env file before the gate starts, such as Task's `dotenv`, CI and the `pre-push` hook
-  run the gate's tree rules as a step of their own, before that runtime starts and before `bun install` reads
-  `package.json`. The duplicate-key check and the other tree rules then run ahead of both. A tracked root `.env`
-  itself is the shared `commits` job's to refuse.
+- Task reads files of its own before the gate's first row. In a Go repository CI and the `pre-push` hook
+  therefore run the gate's tree rules as a step of their own before Task starts. The rules then refuse a
+  `.taskrc` or a second Taskfile before Task reads one. Task's `dotenv` loads `.env` into every task, so a tracked
+  `.env` is the shared `commits` job's to refuse before a merge.
 - In a Go repository the gate job and the `pre-push` hook set `GOWORK=off` and `GOFLAGS=-mod=readonly`, and the
   gate refuses a tracked `go.work`, `go.work.sum` and `vendor/`. Each can put checkout code in place of a module
   the gate's own `go run` builds, as a tracked `go.work` did.
@@ -850,6 +895,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   otherwise writes into the hook's own repository.
 - A script file counts as a script there. A `package.json` script line that runs git inherits the environment. No
   hook runs such a line, so no hook's `GIT_DIR` reaches it, and it stays a named residual.
+- Every process a Bun gate script starts, its tests' own included, starts with `windowsHide: true`. On Windows a
+  console program opens a console window of its own when the process starting it has no console, as under an
+  agent or a service. A case in the shared `scripts/run.test.ts` refuses a start without it.
 - The gate's own `git` child starts with an empty environment plus `GIT_CONFIG_NOSYSTEM` and
   `GIT_CONFIG_GLOBAL=/dev/null`, and `SystemRoot` on Windows where the stack's start of git needs it, as Go's does.
   Listing tracked files needs no inherited name.
@@ -864,12 +912,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   word. A broader fold costs a false refusal at worst.
 - The stack's own runner drives the gate: Bun scripts in `package.json`, `xtask` for Rust, Cake for C#, go-task
   for Go. A `Makefile` is a violation.
-- In a Bun repository every file under `scripts/` that the Bun kickstart carries, but `check.ts`, `expected.ts`,
-  `tsconfig.json` and `markers.ts`, is byte-identical across the set, the tests and their stand-ins included.
-  `markers.ts` writes the template's `MARKERS.md` (Kickstarts), so it is the template's own file, and no other
-  repository carries it. A file the kickstart does not carry, such as a `check.test.ts` for the repository's own
-  `check.ts`, is the repository's own. The repository's own list, its project config paths, lives in
-  `scripts/expected.ts`.
+- In a Bun repository every file under `scripts/` that the Bun kickstart carries, but `check.ts`, `check.test.ts`,
+  `expected.ts`, `tsconfig.json` and `markers.ts`, is byte-identical across the set, the tests and their stand-ins
+  included. `check.test.ts` tests the repository's own `check.ts`, so it is the repository's own too. `markers.ts`
+  writes the template's `MARKERS.md` (Kickstarts), so it is the template's own file, and no other repository
+  carries it. A file the kickstart does not carry is the repository's own. The repository's own list, its project
+  config paths, lives in `scripts/expected.ts`.
 - A Rust repository's gate modules are shared by copy the same way, never through a shared crate.
 - `cargo xtask` is `cargo run --package xtask`, and the outer cargo resolves the workspace before any row runs.
   The alias in `.cargo/config.toml` therefore carries `--locked`: `run --locked --package xtask --quiet --`.
@@ -885,6 +933,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   anything.
 - `check` is the whole gate. A `check:quick` without the slow rows, such as the tests, is allowed for the
   `pre-push` hook, per stack: `task check:quick`, `cargo xtask check --quick`, a Cake target.
+- A Bun gate refuses an argument that is neither a row's name nor a flag it takes, before any row starts. A
+  mistyped row name would otherwise select nothing and read as green, and a mistyped flag would run the whole
+  gate.
 - One gate task lists the gate's rows, and `bun run` with no arguments counts. Documentation names that task
   and restates no list.
 
@@ -915,8 +966,33 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   refuses the call otherwise.
 - A tool published by GitHub, a platform service or a runtime setup runs through its maintainer's official
   action, pinned by commit. Platform services: code scanning, dependency review, a release bot, a dependency
-  bot, an app token, an attestation, a secret scanner. Runtime setups: Go, .NET, Bun. A runtime setup action
-  verifies no download. The pin file the runtime reads plus the cooldown is the control.
+  bot, an app token, an attestation, a secret scanner. Runtime setups: Go, .NET, Bun, Node.js. A runtime setup
+  action verifies no download. The pin file the runtime reads plus the cooldown is the control.
+- A CI job that runs a tool under Node.js installs Node.js through `actions/setup-node` before the tool runs, from
+  a committed `.node-version` that Renovate bumps under the cooldown. Its tier is a version alone, named by that
+  file. A tool started through `bun x --bun` runs under Bun and needs none. The shared `codeql` job names its
+  version on the step itself (CodeQL).
+- A runtime pin names one exact version. setup-bun and setup-node resolve a range, or a name such as `latest` or
+  `lts/*`, when the job runs, past any cooldown. setup-bun installs the newest release where `packageManager` is
+  missing or names no Bun. setup-node keeps the image's Node.js on an empty `.node-version` and follows a JSON one
+  to another file. The shared `commits` job therefore refuses a `packageManager` other than `bun@X.Y.Z` and a
+  root `.node-version` other than one `X.Y.Z` line (the one CI copy, Gate). It runs that check on every event,
+  before its setup-bun step.
+- A restored CI package cache is trusted as it stands. The set's package checks run at download, and a restored
+  package is not checked again. A module already in Go's module cache, for one, is compared with the hash recorded
+  at its download, and its files are not hashed again. After the first download, the cache is the trust boundary.
+- Every job on the default branch shares one cache scope, so a dependency that runs code in one job can plant a
+  cache another job restores. A release build therefore restores no cache, and neither does a job holding a secret
+  or a token with a write permission. Nor does a job whose output such a job consumes, as an artifact, an output
+  or a file. That covers a tool's executable, such as the Bun `setup-bun` caches, which such a job turns off with
+  `no-cache: true`, and an extraction cache, such as CodeQL's TRAP cache (CodeQL).
+- Every other job that restores a package cache names the boundary in a comment beside the cache: `setup-go`,
+  whose `cache` input defaults to true, `setup-dotnet` with `cache: true`, `Swatinem/rust-cache`, and any Bun or
+  Cargo cache.
+- The rule covers a cache one job saves and another restores, through `actions/cache` or an action's own cache.
+  The runner image's tool cache is outside it, since no job writes it.
+- The one exception is the overlay database and its status file, which codeql-action restores into a pull
+  request's analysis while GitHub's overlay flags are on. Both stay with those flags, a named residual (CodeQL).
 - A linter, formatter or cargo plugin runs from the stack's own pin file where the stack has one. Otherwise it
   runs from mise, installed by mise's official action. A per-tool action is not used. Each one runs on Linux
   alone, records a lower integrity tier, or resolves its own version at run time. None gives a contributor the
@@ -925,14 +1001,17 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   semver check alone, and it installs cargo-semver-checks in the job that holds the releaser token. `cd.yml`
   records the deviation.
 - A hand-rolled step closes a gap no tool closes and names that gap in a comment. Examples: the mise lockfile
-  assertions and the unattested-tool cross-check under Tools, and the ShellCheck canary below.
+  assertions and the lockfile asset check under Tools, and the ShellCheck canary below.
 - Every `run:` script stays under 4 KB (Known defects).
 - No repository test reads a workflow file. actionlint and zizmor are the readers of workflow YAML. A property
   neither checks (a step order, a trigger set, a matrix, a permission) is held by construction. The reusable
   workflow or the one gate task that sequences it holds it. A test that parses `ci.yml` for its shape is glue,
   and it goes.
-- The `commits` workflow runs commitlint over the pull request range and over the subject the squash writes,
-  with ` (#N)` appended. For a one-commit pull request that is the commit's own subject (Merge settings).
+- A caller's own lines in `ci.yml`, such as the gate's start, the `jdx/mise-action` settings and the frozen
+  install, are held by code-owner review of `.github/workflows/`.
+- On a pull request, the `commits` workflow runs commitlint over the pull request range and over the subject the
+  squash writes, with ` (#N)` appended. For a one-commit pull request that is the commit's own subject (Merge
+  settings). Its refusals run on a push and daily too (Gate).
 - The range lint's log stops at 64 KiB on a runner, so the range lint runs without `--verbose` and prints the
   problems and the summary alone. Its exit code covers every commit either way.
 - The subject lint runs through a generated wrapper that turns every commitlint ignore off, the caller's and
@@ -977,21 +1056,50 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   and no flag changes that.
 - zizmor reads `--collect=all .github`, with `--strict-collection`, in every gate row and in the shared job. No
   ignore file hides a workflow from that input. It collects `dependabot.yml` and the composite actions under
-  `.github/actions`, and it never walks `node_modules`, a worktree or a submodule. A composite action outside
-  `.github` is named as a second file input, with the reason beside it.
+  `.github/actions`, and it never walks `node_modules`, a worktree or a submodule.
+- A local action lives under `.github/actions/` alone. zizmor reads `.github`, while `uses: ./<path>` runs an
+  action from anywhere in the checkout. The shared `workflows` job therefore refuses a tracked `action.yml` or
+  `action.yaml`, its name compared folded, whose path does not start with `.github/actions/` in that exact
+  spelling (the one CI copy, Gate). It also refuses one under that directory whose name is spelled in another
+  case, which zizmor never reads and a case-insensitive runner opens.
+- The runner also runs a local action from a directory holding a `Dockerfile` and no metadata file. No tool in the
+  set reads a Dockerfile wherever it sits, so review holds one. That is a named residual.
+- On a case-insensitive checkout, a case variant of a tracked path can merge two tracked paths into one file, and
+  on Windows so can an 8.3 short name such as `GITHUB~1`. The local gate then reads a file the diff does not show,
+  while the shared jobs on Linux read the real files. `CONTRIBUTING.md` names it under Troubleshooting, and no
+  gate refuses it.
 - The shared `workflows` job runs beside the caller's gate, not after it, so a red gate stops nothing there.
   Before any mise command reads the checkout, the job refuses another mise config, lock or rc file, a root file
   named like a program a gate starts, and a link at the root or under `.config`, `.mise` or `mise`. Its
-  `Refused keys` step then reads `mise.toml` and `mise.lock` with Python's `tomllib` and refuses any key outside
-  the gate's allow-lists (Tools), `[settings.aqua]` included, which holds `github_attestations` alone. A job
-  holding a token loads no `mise.toml` whose keys are unchecked.
-- The step also refuses a form the gate does not read: a `[tools]` entry that is neither a version nor a table,
+  `Refused keys` and `Refused lock keys` steps then read `mise.toml` and `mise.lock` with Python's `tomllib` and
+  refuse any key outside the gate's allow-lists (Tools), `[settings.aqua]` included, which holds
+  `github_attestations` alone. A job holding a token loads no `mise.toml` whose keys are unchecked.
+- The steps also refuse a form the gate does not read: a `[tools]` entry that is neither a version nor a table,
   the `[[tools.<name>]]` array of tables included, a `[tools]`, `[tool_config]` or `[settings]` that is not a
   table, and a `mise.lock` tool that is not a list of tables. mise reads an array-of-tables entry, a postinstall
-  included. The step checks the fields of a nested `platforms` table as it checks a quoted `"platforms.<name>"`
-  one.
+  included. The lock step checks the fields of a nested `platforms` table as it checks a quoted
+  `"platforms.<name>"` one.
   `jdx/mise-action` exports `MISE_TRUSTED_CONFIG_PATHS` for the workspace to every later step, and mise evaluates
   exec templates on any load of a trusted config.
+- The steps also hold every tool key in `mise.toml` and `mise.lock` to a registry name or `github:<owner>/<repo>`,
+  and every `mise.lock` backend to `aqua:` or `github:<owner>/<repo>`. mise runs options written in brackets after
+  a tool key or a backend, `postinstall` among them. A key such as `taplo[postinstall=...]` would run its command
+  in the job's own `mise install`.
+- The steps also hold every version to a plain release, a digit then letters, digits, `.`, `+` and `-` alone,
+  matched whole: a `[tools]` string or table `version` in `mise.toml`, and each `mise.lock` entry's `version`,
+  where a missing or non-string one is refused too. mise reads a `path:`, `system`, `ref:`, `prefix:` or `sub-`
+  version as something other than a release, so the steps refuse one before the install, beside mise's own
+  locked-mode refusal.
+- Its `Held tool sources` step then holds each `mise.lock` and `mise.semver.lock` entry to one repository, before
+  `mise install`. A registry name's backend is the first one `mise registry --json <name>` names, run outside the
+  checkout, and a name the registry does not hold fails. A `github:<owner>/<repo>` key's backend is the key. Each
+  platform table, in both spellings, holds a url matching
+  `https://github.com/<owner>/<repo>/releases/download/<tag>/<file>` and a `url_api` matching
+  `https://api.github.com/repos/<owner>/<repo>/releases/assets/<digits>`, both whole and in exact case.
+  `<owner>/<repo>` comes from that backend or key. `<tag>` and `<file>` are one segment each, of letters, digits
+  and `._+-`, and neither is `.` or `..`, since a dot segment after a matching prefix resolves to another
+  repository. A missing backend, url or `url_api` fails. Before a download, mise checks only the version
+  numbers in a url's release tag and file name, never its owner, repository or host.
 - zizmor's online audits run in the shared `workflows` job alone, on every pull request and daily from
   `audit.yml`. That job is the one CI job whose steps name the job token: its zizmor step and its lockfile asset
   check under Tools. It installs taplo, ShellCheck, actionlint and zizmor alone, each routed by mise's registry,
@@ -1012,6 +1120,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Inside a job, a step's environment is not a boundary: any step can read the job token from the runner. The
   job is the boundary, so the token goes to the job that installs no dependencies and runs no build or test.
 - Every `jdx/mise-action` step takes an empty `github_token`, so the action exports no token to later steps.
+- The two steps that name the job token hand it to `gh` and zizmor alone. Each starts mise, and the asset check
+  starts taplo, with the token taken out of the environment, so neither holds it, whichever names a later mise
+  reads a token from.
 - A locked install reads a registry tool's attestations from mise's versions host. A tool mise's registry does not
   route queries the GitHub API on every install.
 - A job installing such a tool runs the gate's checks of `mise.toml` and `mise.lock` first, in an earlier step of
@@ -1021,7 +1132,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `contents: read`, and that step alone names it. The token already sits in the job, and the unauthenticated
   limit of 60 requests an hour per runner address fails installs at random. The gate step itself stays tokenless.
 - A step order inside one job is no boundary, since the token sits in the runner's memory. Installing before the
-  checks would run an unchecked `mise.toml`'s hooks in the token step.
+  checks would run an unchecked `mise.toml`'s hooks in the token step. mise also sends `MISE_GITHUB_TOKEN` to the
+  host an `api_url` option names when its path has GitHub Enterprise's `/api/v3` shape, so the checks refuse that
+  option before the token step runs.
 - A scheduled workflow's header states the requirement its section names and claims nothing tighter (Known
   defects). `deps` runs at least once a day, and so does every `audit.yml` job, on that workflow's one cron.
   `codeql` runs weekly.
@@ -1041,6 +1154,19 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   shared workflow adds none. The `actions` analysis runs beside zizmor. Neither replaces the other.
 - Every analysis runs the `security-extended` suite on the CodeQL bundle the pinned action ships, `tools: linked`.
   Without it, a server-side flag picks the bundle at run time, and no pin or cooldown sees the change.
+- The JavaScript and TypeScript extractor starts `node` from `PATH`. For those languages the shared job installs
+  Node.js through `actions/setup-node` before its checkout, at the version its `node-version:` input names. The
+  job runs in the caller's checkout and reads no file of its own repository. So the version sits on that input in
+  place of a `.node-version`, and Renovate bumps it under the cooldown. Its tier is a version alone, named by that
+  input.
+- The shared job restores no TRAP or dependency cache, since it holds `security-events: write` and its upload
+  decides the `code_scanning` rule (Workflows). Its init step sets `trap-caching: false`. Unset, TRAP caching is on
+  for every hosted runner, and a pull request's analysis restores a TRAP cache under a key any default-branch job
+  can write first. It also sets `dependency-caching: false`, the value an unset input resolves to, so a later
+  action commit cannot turn that cache on.
+- Nothing stops the overlay database and its status file a pull request's analysis restores while GitHub's overlay
+  flags are on. That is a named residual: planting one takes code already running on the default branch, landing
+  between that branch's own scans.
 - The build mode is `none` wherever the extractor supports it and `autobuild` for Go, whose extractor refuses
   `none`. A Go caller passes `build-mode: autobuild` in its language's entry.
 - Under `none` the C# extractor runs a package restore of its own, which reads no lock file. It can fail, and it
@@ -1126,6 +1252,12 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   the gate.
 - A Go repository pins lefthook as a `go.mod` tool directive, because lefthook is a Go program and the stack
   leans on its native abilities. Its `package.json` carries commitlint, `yaml` and Prettier alone.
+- `trustedDependencies` in `package.json` names lefthook alone in every repository that installs lefthook through
+  `package.json`, `bun-service` included. Naming a list replaces Bun's built-in allow list, which also runs
+  esbuild's and workerd's install scripts. Each of those checks for the platform binary its optional dependency
+  installs from `bun.lock`, and fetches one from the registry outside `bun.lock` only when it finds none. A
+  Worker repository's gate and tests pass with both blocked.
+- An empty `trustedDependencies` does not hold past the install that writes `bun.lock` (Known defects).
 - A hook job starts its tool in the one spelling, `bun x --bun --no-install <tool>` (Gate), with no presence
   check. A hook runs in the contributor's own environment and clears no inherited variable, because a hook is not
   a control: CI's gate and `commits` job decide the merge.
@@ -1227,10 +1359,16 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   therefore hides the rule's report on itself, and a block disable naming it hides every report up to its enable.
   The lint row refuses every report of the rule that ESLint lists under `suppressedMessages`, where no directive
   can remove one.
+- A comment never configures ESLint. eslint-comments' `no-use` allows `eslint-disable`, `eslint-enable`,
+  `eslint-disable-line` and `eslint-disable-next-line` alone, so a configuration comment, `global`, `globals`,
+  `exported` and `eslint-env` fail the lint. A rule's setting and a global live in `eslint.config.ts`.
 - A configuration comment, such as one setting `gate/visible-reason` to `off`, turns a rule off for its whole file,
-  so the rule reports nothing and nothing lands in `suppressedMessages`. The lint row therefore runs ESLint a
-  second time with `--no-inline-config`, which reads no comment as configuration. It refuses every report there
-  from a rule that reads comments: `gate/visible-reason`, `ban-ts-comment` and the eslint-comments rules.
+  so the rule reports nothing and nothing lands in `suppressedMessages`. One setting `no-use` to `off` does the
+  same for `no-use`. The lint row therefore runs ESLint a second time with `--no-inline-config`, which reads no
+  comment as a directive or as configuration. It refuses every report there from a rule that reads comments:
+  `gate/visible-reason`, `ban-ts-comment` and the eslint-comments rules.
+- `no-use` reports at column -1, so a next-line directive naming it hides nothing. A block disable naming it moves
+  its report into `suppressedMessages`, and the second pass reports it again.
 - A byte that is not UTF-8 before a directive reads alike under tsc, ESLint and Prettier, so a directive and its
   refusal see the same text. Bun's runtime decodes such a byte differently, a named residual with no refusal.
 - The gate refuses the text of Prettier's ignore comment, in any case and in prose too, in every file the format
@@ -1326,12 +1464,16 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   `zachthedev/.github`, under the updater app. It is the only bot that opens pull requests.
 - `.github/renovate.json` extends one kind preset from `zachthedev/.github//renovate/` on its default branch,
   and adds only what is true of that repository alone. The `.github` repository validates every preset change
-  before it merges. That is the check on a change that reaches every repository on the next run.
-- Renovate reads a root `renovate.json`, `renovate.jsonc` or `renovate.json5` ahead of `.github/renovate.json`.
-  The shared `deps` job therefore sets `RENOVATE_CONFIG_FILE_NAMES` to `.github/renovate.json`, and Renovate puts
-  the names it lists ahead of its own. `.github/renovate.json` then wins wherever it exists, and a root file added
-  beside it is never read. A pull request that deletes `.github/renovate.json` and adds a root file is review's to
-  refuse.
+  before it merges. That is the check on a change that reaches every repository on the next run. A preset change
+  takes effect at its merge to the default branch, with no release or tag, since each repository extends the
+  presets with no ref.
+- Renovate reads the first config file it finds in its own list: a root `renovate.json`, `renovate.jsonc` or
+  `renovate.json5` ahead of `.github/renovate.json`, and a `.renovaterc` in any of its forms or a `package.json`
+  `renovate` key after it. The shared `deps` job sets `RENOVATE_CONFIG_FILE_NAMES` to `.github/renovate.json`, and
+  Renovate puts the names it lists ahead of its own. `.github/renovate.json` then wins wherever it exists, and a
+  root file added beside it is never read. With the file missing, Renovate falls back to its own list. The shared
+  `commits` job therefore refuses a tree that does not track `.github/renovate.json` as a file, in that exact
+  spelling (the one CI copy, Gate).
 - The base preset holds the standard, and no preset or repository file restates a Renovate default:
   - `config:recommended` with digest pinning and abandonment flags
   - new pull requests in the Monday window, every other run rebasing open branches
@@ -1397,7 +1539,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   content-addressed, so no step compares the two registries. The workflow caps the Docker Hub lookup at ten
   pages. The registry refuses anonymous pagination past a thousand tags, and Renovate then drops every
   timestamp. The secret scanner's image is pinned the same way on its action's `version` input, which the
-  github-actions manager does not read, so the base preset's regex manager moves its tag and digest.
+  github-actions manager does not read, so the base preset's regex manager moves its tag and digest. Its second
+  pattern reads the `version` line alone. Its update and the github-actions manager's move of the action's own
+  line, the SHA and its comment, then rewrite different lines of one pull request.
 
 ## Advisories
 
@@ -1426,9 +1570,9 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 - Every repository with a `bun.lock`, whatever its stack, carries `"audit": "bun audit --audit-level=high"` in
   `package.json`, and `audit.yml`'s daily job runs `bun run audit`. High is the set's level, and the script is
   the one home of `--ignore` waivers. The dependency graph reads a Bun repository's direct `package.json`
-  dependencies alone, so the daily run is what reads its transitive ones. `audit.yml` also carries a
-  daily job that calls the reusable `workflows` workflow, so zizmor's online audits of the pinned actions run
-  without a pull request. A red run is the report.
+  dependencies alone, so the daily run is what reads its transitive ones. `audit.yml` also carries daily jobs
+  that call the reusable `commits` and `workflows` workflows, so the shared refusals and zizmor's online audits of
+  the pinned actions run without a pull request. A red run is the report.
 - The advisory check sees direct npm packages only under Bun, no NuGet package under central package
   management, and full lockfiles under Cargo. `CONTRIBUTING.md` states which legs the check covers.
 - A C# repository submits a dependency snapshot on every pull request head and every push to the default branch
@@ -1457,12 +1601,32 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   (`NU1004`) on another. A lock change is proven with `AutomaticallyUseReferenceAssemblyPackages=false` as well as
   with the default.
 - A backend is chosen for integrity: the one whose entry reaches the higher tier, and `aqua:` on a tie. `cargo:`
-  and `ubi:` record no lockfile integrity, so neither is used (Known defects).
-- Each tool's integrity tier is stated under Dependencies in `CONTRIBUTING.md`. The tiers: provenance, a
-  checksum in a pinned tree, a checksum recorded by a third party, a checksum mise hashed at lock time, or a
-  version alone. "Verified" is never written for a hash check.
-- A `github:` backend records a checksum mise hashed at lock time. That binds every later install to the bytes
-  the lock fetched, and nothing outside the lockfile vouches for those bytes.
+  and `ubi:` record no lockfile integrity, so neither is used (Known defects). Inside the attestation tier the two
+  differ: `aqua:` checks the signer workflow its registry names, and `github:` accepts an attestation from any
+  workflow in the publisher's repository.
+- Each tool a repository pins states one integrity tier under Dependencies in `CONTRIBUTING.md`, below the shared
+  paragraph every repository copies from the Bun kickstart. The tier names who vouches for the tool's bytes. The
+  tiers, strongest first:
+  - the publisher's build attestation: a workflow in the publisher's repository signed a statement over the
+    artifact's digest, and mise checks it on every install. mise's lockfile records it as `provenance`.
+  - the publisher's signature: the publisher signed the artifact or its checksum file with a key the checking
+    tool carries.
+  - the registry's record: a registry that never replaces a published version recorded the hash, or signed the
+    package, at publish. npm, crates.io, the Go checksum database, nuget.org and an immutable GitHub release
+    qualify.
+  - the release's own checksum: GitHub's digest for the asset, or a checksum file in the same release, where the
+    release can still change.
+  - a hash this repository computed: the sha256 of one download, written into the file that pins the tool.
+    Nothing outside that file records it.
+  - a version alone: nothing recorded before the install vouches for the bytes.
+- A lockfile holds a hash and is not a tier. Each tier line names the file that holds the tool's hash, or its
+  version where the tier is a version alone.
+- A program Setup names is the contributor's own install, such as git, gh or a C toolchain, and that copy takes no
+  tier. A program in Setup that CI installs at a pinned version, such as Bun, Node.js, mise or a toolchain, takes
+  a line for the copy CI installs.
+- `mise lock` copies GitHub's asset digest, else a checksum file from the release, under `aqua:` and `github:`
+  alike. It downloads an artifact only to verify an attestation.
+- "Verified" is never written for a hash check.
 - The settings `locked`, `lockfile`, `locked_verify_provenance`, `provenance_api_failures_fatal`,
   `github_attestations` and `aqua.github_attestations` are set. `lockfile_platforms` names the platforms the
   lockfile pins. `[tool_config] locked` is set, because no environment variable reaches it.
@@ -1479,6 +1643,8 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   hooks, `[env]` or tasks, and each of them runs code (Known defects), so the gate holds the file to an
   allow-list:
   - `[tool_config]` and `[settings]` are compared whole against the expected values;
+  - the `[tools]` keys are the tools the gate expects, spelled exactly. mise reads tool options written in
+    brackets after a tool's name, `postinstall` included, and an exact key carries none;
   - a tool entry in any pin file, and the lockfile's `options`, carries `version` and a `version_prefix` equal to
     the tool's tag prefix, and nothing else;
   - the lockfile's keys are allow-listed at the top, entry and platform levels, its `tools` table holds the
@@ -1529,13 +1695,15 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
   holds.
 - A release whose GitHub assets carry no digest and whose aqua entry names no checksum file gets no checksum
   from `mise lock`. Its checksum is the sha256 of the artifact at the recorded url, computed once and written
-  into `mise.lock`, and mise verifies it on install. The comment in `mise.toml` records how it was produced.
+  into `mise.lock`, and mise checks each install's download against it. The comment in `mise.toml` records how it
+  was produced.
 - Those hand-written lines survive a relock at the same version and vanish on a bump, so a bump recomputes them.
   No mise command writes them.
-- A mise-pinned tool without attestations gets a second source. The shared `workflows` job resolves each
-  lockfile asset id through GitHub's API. It requires `browser_download_url` to equal the lockfile url, and
-  `digest` to equal the checksum where GitHub records one. A tool with neither attestation nor digest stays on
-  its hand-computed checksum.
+- The shared `workflows` job reads every asset `mise.lock` names, and every asset a Rust repository's
+  `mise.semver.lock` names, by id through GitHub's API. It requires `browser_download_url` to equal the lockfile
+  url, and `digest` to equal the checksum where GitHub records one. That digest is the record `mise lock` copied,
+  so the check holds the lockfile to it and adds no independent source. A tool with no digest stays on its
+  computed hash. A lockfile the job reads that names no asset fails it.
 - `locked_verify_provenance` verifies against the coordinate the lockfile itself supplies. It arms the downgrade
   refusal for an entry that claims provenance and replaces none of the assertions.
 - For a tool mise's registry routes, mise reads attestation bundles from its versions host,
@@ -1726,6 +1894,10 @@ bears on, the defect, and the condition that removes it.
   `continue` upstream.
 - wrangler (Gate): `wrangler types --check` compares a hash of the config inputs against the file's header and
   passes a hand-edited body. The gate regenerates the file and diffs it. Removed once the check reads the body.
+- Bun `trustedDependencies` (Hooks): `bun.lock` does not keep an empty list, so an empty list blocks install
+  scripts on the install that writes the lockfile alone. The next install from that lockfile runs Bun's built-in
+  allow list again. A fix proposed upstream, oven-sh/bun#31197, closed unmerged. Removed once an empty list
+  survives the lockfile.
 - Windows `NoDefaultCurrentDirectoryInExePath` (Gate): a shell that sets it hides the current-directory search of
   CreateProcess and Bun. A probe run from such a shell reports no exposure where a runner or a maintainer's
   terminal has one, so a probe sets its child's environment explicitly. Windows documents the variable, so the
@@ -1747,6 +1919,10 @@ bears on, the defect, and the condition that removes it.
 - Renovate docker datasource (Updates): carries a release timestamp on Docker Hub alone, so a `ghcr.io` image
   under a timestamp-required cooldown is held forever. Removed once the datasource times `ghcr.io`, upstream
   issue 39064, when the lookup moves there.
+- Renovate `node-version` datasource (Workflows): dates a Node.js release by the day its `index.json` lists, at
+  midnight UTC, which ran 14 to 46 hours ahead of publication in four releases measured. The three-day cooldown
+  on a `.node-version` bump therefore runs up to two days short. Removed once the datasource carries the
+  publication time.
 - mise `cargo:` backend (Tools): writes no checksum, no platform table and no URL to the lockfile, and
   `mise lock` reports success over it. Removed once the backend writes them.
 - mise lockfile (Tools): mise accepts a lockfile entry with its checksum removed, its backend rewritten, or its

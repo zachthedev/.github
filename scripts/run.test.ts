@@ -2,7 +2,10 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, setDefaultTimeout, 
 import { dlopen, FFIType, ptr } from 'bun:ffi';
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, delimiter, dirname, join, sep } from 'node:path';
+import { basename, delimiter, dirname, join, relative, sep } from 'node:path';
+import { ESLint, type Rule } from 'eslint';
+import { defineConfig } from 'eslint/config';
+import tseslint from 'typescript-eslint';
 import { fold, git, jsTool, resolveProgram, run } from './run';
 import { isolate, launcherName, spellings, StandIns, WINDOWS } from './stand-ins';
 import { trackedFindings } from './startup';
@@ -183,6 +186,314 @@ test('a program no PATH entry holds exits 127, saying which and that the working
   expect(finished.stderr).toStartWith('"gate-absent-program": ');
   expect(finished.stderr).toContain('working directory is never searched');
   expect(started()).toEqual([]);
+});
+
+/* ///// Console windows ///// */
+
+// On Windows a console program opens a console window of its own when the
+// process starting it has no console, as under an agent or a service, unless
+// the start passes windowsHide. So every Bun.spawn and Bun.spawnSync call in a
+// JavaScript or TypeScript file under scripts/, the suites' own included, ends
+// its options with windowsHide: true, and the check below reads each such file
+// as ESLint parses it. It also refuses each other start it can see by name:
+// Bun.$ and Bun.openInEditor, a destructuring of a start from Bun, a member
+// named Bun, and an import, a require or a re-export of a start from bun or of
+// node:child_process. It follows no value, so review holds a start reached
+// through Bun kept in another name or read through a satisfies expression.
+
+/** The repository root, whose scripts/ the check reads. */
+const ROOT = join(import.meta.dir, '..');
+
+/** Every file the check reads: each JavaScript or TypeScript file under scripts/, at any depth. */
+const SCRIPT_FILES = 'scripts/**/*.{ts,mts,cts,tsx,js,mjs,cjs,jsx}';
+
+/** The Bun functions that start a process with an options object. */
+const SPAWNS: readonly string[] = ['spawn', 'spawnSync'];
+
+/** Every Bun function that starts a process: the two above, and two that take no windowsHide. */
+const STARTS: readonly string[] = [...SPAWNS, '$', 'openInEditor'];
+
+/** The modules a start can be imported from. */
+const START_MODULES: readonly string[] = ['bun', 'node:child_process', 'child_process'];
+
+/** A node as the check reads it: its type, and the name or the value it can carry. */
+interface Named {
+  readonly type: string;
+  readonly name?: unknown;
+  readonly value?: unknown;
+}
+
+/**
+ * The name a key, a member or an import spells, or undefined when a computed
+ * key reads it from a value.
+ */
+function spelled(node: Named, computed: boolean): string | undefined {
+  if (node.type === 'Literal') {
+    return typeof node.value === 'string' ? node.value : undefined;
+  }
+  return node.type === 'Identifier' && !computed && typeof node.name === 'string' ? node.name : undefined;
+}
+
+/** Whether a node that can be type-only, such as an import, an export or a specifier of either, is. */
+function typeOnly(node: {
+  readonly type: string;
+  readonly importKind?: unknown;
+  readonly exportKind?: unknown;
+}): boolean {
+  return node.importKind === 'type' || node.exportKind === 'type';
+}
+
+/** Whether `source`, what an import, an export or a require names, is a module a start can come from. */
+function startModule(source: Named | null | undefined): boolean {
+  return source !== null && source !== undefined && START_MODULES.includes(spelled(source, true) ?? '');
+}
+
+/** Each file in which the check passed a start, one entry for each start. */
+let hiddenStarts: string[] = [];
+
+const hiddenWindows: Rule.RuleModule = {
+  meta: {
+    type: 'problem',
+    schema: [],
+    messages: {
+      shown:
+        'This start does not end its options with windowsHide: true, so on Windows it can open a console window when the process starting it has no console. End its options with windowsHide: true.',
+      reached:
+        'This starts a process another way than a Bun.spawn or Bun.spawnSync call, where windowsHide cannot be checked. Call Bun.spawn or Bun.spawnSync with windowsHide: true.',
+    },
+  },
+  create(context: Rule.RuleContext): Rule.RuleListener {
+    return {
+      MemberExpression(node): void {
+        const property = spelled(node.property, node.computed);
+        if (property === 'Bun') {
+          context.report({ node, messageId: 'reached' });
+          return;
+        }
+        if (node.object.type !== 'Identifier' || node.object.name !== 'Bun' || !STARTS.includes(property ?? '')) {
+          return;
+        }
+        const call = node.parent;
+        if (!SPAWNS.includes(property ?? '') || call.type !== 'CallExpression' || call.callee !== node) {
+          context.report({ node, messageId: 'reached' });
+          return;
+        }
+        // The flag is the options' last property, so no spread after it can
+        // set it back.
+        const [first, second] = call.arguments;
+        const options = first?.type === 'ObjectExpression' ? first : second;
+        const last = options?.type === 'ObjectExpression' ? options.properties.at(-1) : undefined;
+        const hidden =
+          last?.type === 'Property' &&
+          spelled(last.key, last.computed) === 'windowsHide' &&
+          last.value.type === 'Literal' &&
+          last.value.value === true;
+        if (hidden) {
+          hiddenStarts.push(context.filename);
+        } else {
+          context.report({ node: call, messageId: 'shown' });
+        }
+      },
+      VariableDeclarator(node): void {
+        if (
+          node.init?.type === 'Identifier' &&
+          node.init.name === 'Bun' &&
+          node.id.type === 'ObjectPattern' &&
+          node.id.properties.some(
+            (property) =>
+              property.type === 'Property' && STARTS.includes(spelled(property.key, property.computed) ?? ''),
+          )
+        ) {
+          context.report({ node, messageId: 'reached' });
+        }
+      },
+      ImportDeclaration(node): void {
+        if (typeOnly(node) || !startModule(node.source)) {
+          return;
+        }
+        const values = node.specifiers.filter((specifier) => !typeOnly(specifier));
+        const reaches =
+          node.source.value === 'bun'
+            ? values.some(
+                (specifier) =>
+                  specifier.type !== 'ImportSpecifier' || STARTS.includes(spelled(specifier.imported, false) ?? ''),
+              )
+            : values.length > 0;
+        if (reaches) {
+          context.report({ node, messageId: 'reached' });
+        }
+      },
+      ImportExpression(node): void {
+        if (startModule(node.source)) {
+          context.report({ node, messageId: 'reached' });
+        }
+      },
+      CallExpression(node): void {
+        if (node.callee.type === 'Identifier' && node.callee.name === 'require' && startModule(node.arguments[0])) {
+          context.report({ node, messageId: 'reached' });
+        }
+      },
+      ExportAllDeclaration(node): void {
+        if (!typeOnly(node) && startModule(node.source)) {
+          context.report({ node, messageId: 'reached' });
+        }
+      },
+      ExportNamedDeclaration(node): void {
+        if (typeOnly(node) || !startModule(node.source)) {
+          return;
+        }
+        const values = node.specifiers.filter((specifier) => !typeOnly(specifier));
+        const reaches =
+          node.source?.value === 'bun'
+            ? values.some((specifier) => STARTS.includes(spelled(specifier.local, false) ?? ''))
+            : values.length > 0;
+        if (reaches) {
+          context.report({ node, messageId: 'reached' });
+        }
+      },
+    };
+  },
+};
+
+/**
+ * An ESLint that runs the check alone over files under `root`, with no type
+ * information and no inline configuration, so no comment can waive the check
+ * and no comment naming another plugin's rule can fail it.
+ */
+function windowCheck(root: string): ESLint {
+  return new ESLint({
+    cwd: root,
+    overrideConfigFile: true,
+    allowInlineConfig: false,
+    overrideConfig: defineConfig({
+      files: ['**/*.{ts,mts,cts,tsx,js,mjs,cjs,jsx}'],
+      languageOptions: { parser: tseslint.parser },
+      plugins: { windows: { rules: { hidden: hiddenWindows } } },
+      rules: { 'windows/hidden': 'error' },
+    }),
+  });
+}
+
+/** What the check reports over every script file under `root`, as each file's path from `root` and the report's kind. */
+async function windowReports(root: string): Promise<string[]> {
+  const results = await windowCheck(root).lintFiles([SCRIPT_FILES]);
+  return results
+    .flatMap((result) =>
+      result.messages.map(
+        (message) =>
+          `${relative(root, result.filePath).replaceAll('\\', '/')}:${String(message.line)} ${message.messageId ?? message.message}`,
+      ),
+    )
+    .sort();
+}
+
+test('every Bun.spawn and Bun.spawnSync under scripts/ ends its options with windowsHide: true, and nothing there starts a process another way', async () => {
+  hiddenStarts = [];
+
+  expect(await windowReports(ROOT)).toEqual([]);
+  // The check read the files that start processes, so its silence is no empty read.
+  expect(hiddenStarts.map((file) => basename(file))).toEqual(
+    expect.arrayContaining(['run.ts', 'shellcheck.ts']) as string[],
+  );
+});
+
+/** Writes an unhidden start at each of `names` under the case's scripts/ directory. */
+function plantStarts(names: readonly string[]): void {
+  for (const name of names) {
+    mkdirSync(dirname(join(cwd, 'scripts', name)), { recursive: true });
+    writeFileSync(join(cwd, 'scripts', name), "Bun.spawnSync({ cmd: ['x'] });\n");
+  }
+}
+
+test('the check reads a script file in a subdirectory', async () => {
+  plantStarts(['helpers/nested.ts']);
+
+  expect(await windowReports(cwd)).toEqual(['scripts/helpers/nested.ts:1 shown']);
+});
+
+test('the check reads a script file of each JavaScript or TypeScript extension', async () => {
+  plantStarts(['start.mts', 'start.cts', 'start.tsx', 'start.js', 'start.mjs', 'start.cjs', 'start.jsx']);
+
+  expect(await windowReports(cwd)).toEqual([
+    'scripts/start.cjs:1 shown',
+    'scripts/start.cts:1 shown',
+    'scripts/start.js:1 shown',
+    'scripts/start.jsx:1 shown',
+    'scripts/start.mjs:1 shown',
+    'scripts/start.mts:1 shown',
+    'scripts/start.tsx:1 shown',
+  ]);
+});
+
+test.each([
+  ['an object ending with windowsHide: true', "Bun.spawn({ cmd: ['x'], windowsHide: true });\n", []],
+  ['a sync start ending with it', "Bun.spawnSync({ cmd: ['x'], windowsHide: true });\n", []],
+  ['options beside an argument list', "Bun.spawn(['x'], { windowsHide: true });\n", []],
+  ['the key in quotes', "Bun.spawn({ cmd: ['x'], 'windowsHide': true });\n", []],
+  [
+    'a spread before the flag',
+    "declare const base: { windowsHide?: boolean };\nBun.spawn({ cmd: ['x'], ...base, windowsHide: true });\n",
+    [],
+  ],
+  ['no options', "Bun.spawn(['x']);\n", ['shown']],
+  ['options without the key', "Bun.spawnSync({ cmd: ['x'] });\n", ['shown']],
+  ['the key set false', "Bun.spawn({ cmd: ['x'], windowsHide: false });\n", ['shown']],
+  [
+    'the key read from a variable',
+    "declare const hide: boolean;\nBun.spawn({ cmd: ['x'], windowsHide: hide });\n",
+    ['shown'],
+  ],
+  [
+    'options from a variable',
+    'declare const options: Bun.SpawnOptions.OptionsObject;\nBun.spawn(options);\n',
+    ['shown'],
+  ],
+  [
+    'a spread after the flag, which can set it back',
+    "declare const base: { windowsHide?: boolean };\nBun.spawn({ cmd: ['x'], windowsHide: true, ...base });\n",
+    ['shown'],
+  ],
+  ['the key nested in env', "Bun.spawn({ cmd: ['x'], env: { windowsHide: 'true' } });\n", ['shown']],
+  ['a computed name without the key', "Bun['spawn']({ cmd: ['x'] });\n", ['shown']],
+  [
+    'a waiver of the check above a start, since no comment is read',
+    "// eslint-disable-next-line windows/hidden -- the start is hidden elsewhere\nBun.spawn({ cmd: ['x'] });\n",
+    ['shown'],
+  ],
+  [
+    "a waiver of another plugin's rule and no start",
+    '// eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- nothing starts here\nexport const value = 1;\n',
+    [],
+  ],
+  ['an alias', 'const start = Bun.spawn;\n', ['reached']],
+  ['a destructuring', 'const { spawnSync } = Bun;\n', ['reached']],
+  ['a destructuring by a computed name', "const { ['spawnSync']: start } = Bun;\n", ['reached']],
+  ['a member named Bun', "globalThis.Bun.spawnSync({ cmd: ['x'] });\n", ['reached']],
+  ["Bun's shell", 'await Bun.$`ls`;\n', ['reached']],
+  ["Bun's editor start", "Bun.openInEditor('a.ts');\n", ['reached']],
+  ['spawn imported from bun', "import { spawn } from 'bun';\n", ['reached']],
+  ['$ imported from bun', "import { $ } from 'bun';\n", ['reached']],
+  ['bun imported whole', "import * as bun from 'bun';\n", ['reached']],
+  ["bun's default import", "import bun from 'bun';\n", ['reached']],
+  ['a dynamic import of bun', "export const bun = await import('bun');\n", ['reached']],
+  ['a start re-exported from bun', "export { spawnSync } from 'bun';\n", ['reached']],
+  ['node:child_process', "import { execFile } from 'node:child_process';\n", ['reached']],
+  ['child_process', "import cp from 'child_process';\n", ['reached']],
+  [
+    'a dynamic import of node:child_process',
+    "export const childProcess = await import('node:child_process');\n",
+    ['reached'],
+  ],
+  ['a require of child_process', "export const childProcess = require('child_process');\n", ['reached']],
+  ['node:child_process re-exported whole', "export * from 'node:child_process';\n", ['reached']],
+  ['a type imported from node:child_process', "import type * as ChildProcess from 'node:child_process';\n", []],
+  ["a start's type imported from bun", "import { type spawn } from 'bun';\n", []],
+  ['another name imported from bun', "import { file } from 'bun';\n", []],
+])('a start written as %s is judged', async (_label: string, text: string, expected: readonly string[]) => {
+  const [result] = await windowCheck(ROOT).lintText(text, { filePath: join(ROOT, 'scripts', 'window-probe.ts') });
+
+  const kinds: string[] = (result?.messages ?? []).map((message) => message.messageId ?? message.message);
+  expect(kinds).toEqual([...expected]);
 });
 
 /* ///// Name folding ///// */
@@ -447,7 +758,7 @@ test.each(PLANTED_CASES)(
     // The fixture holds only when a bare spawn, with the variable that hides
     // the working directory absent as on a runner, starts the planted file.
     expect(spellings(process.env, 'NoDefaultCurrentDirectoryInExePath')).toEqual([]);
-    Bun.spawnSync({ cmd: [name, 'probe'], cwd, env: { ...process.env }, timeout: PROBE_MS });
+    Bun.spawnSync({ cmd: [name, 'probe'], cwd, env: { ...process.env }, timeout: PROBE_MS, windowsHide: true });
     expect(started()).toEqual([`planted-${name}`]);
     standIns.clear();
 
@@ -457,9 +768,9 @@ test.each(PLANTED_CASES)(
   },
 );
 
-/* ///// JavaScript tools through bunx ///// */
+/* ///// JavaScript tools through bun x ///// */
 
-/** The entry bunx reads for `tool` on this platform, below node_modules/.bin. */
+/** The entry `bun x` reads for `tool` on this platform, below node_modules/.bin. */
 function binEntry(tool: string): string {
   return join(cwd, 'node_modules', '.bin', WINDOWS ? `${tool}.exe` : tool);
 }
@@ -493,7 +804,7 @@ interface InstallCase {
 
 const INSTALLS: readonly InstallCase[] = [
   {
-    label: 'a file at the entry bunx reads',
+    label: 'a file at the entry bun x reads',
     plant: (entry: string) => {
       writeFileSync(entry, '');
     },
@@ -584,9 +895,13 @@ test("git starts with its two config switches and nothing from the caller's envi
 
 /* ///// Tracked env files and node_modules ///// */
 
-// The names Bun 1.4.2 loads from the directory it starts in, written out here
-// from its loader rather than read from the module.
-const BUN_ENV_NAMES: readonly string[] = [
+/* ///// The env files Bun loads ///// */
+
+// The names Bun loads from the directory it starts in, per NODE_ENV mode,
+// written out here from its loader rather than read from any module. Every Bun
+// the gate starts directly passes --no-env-file, and these cases hold that the
+// pinned Bun honors the flag over each name, in each mode.
+const ENV_FILES: readonly string[] = [
   '.env',
   '.env.local',
   '.env.development',
@@ -596,6 +911,40 @@ const BUN_ENV_NAMES: readonly string[] = [
   '.env.test',
   '.env.test.local',
 ];
+
+test.each([
+  ['development', ['.env', '.env.local', '.env.development', '.env.development.local']],
+  ['production', ['.env', '.env.local', '.env.production', '.env.production.local']],
+  ['test', ['.env', '.env.test', '.env.test.local']],
+])(
+  "in %s mode Bun loads that mode's env files, and none under --no-env-file",
+  (mode: string, loaded: readonly string[]) => {
+    // Each file sets its own variable, so the names that reach the child name the files Bun read.
+    const variable = (name: string): string => `GATE_ENV_${String(ENV_FILES.indexOf(name))}`;
+    for (const name of ENV_FILES) {
+      writeFileSync(join(cwd, name), `${variable(name)}=loaded\n`);
+    }
+    writeFileSync(
+      join(cwd, 'print.ts'),
+      "console.log(Object.keys(process.env).filter((name) => name.startsWith('GATE_ENV_')).sort().join(','));\n",
+    );
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(([name]) => !name.toUpperCase().startsWith('GATE_ENV_')),
+    );
+    const read = (flags: readonly string[]): string =>
+      Bun.spawnSync({
+        cmd: [process.execPath, ...flags, 'print.ts'],
+        cwd,
+        env: { ...env, NODE_ENV: mode },
+        windowsHide: true,
+      })
+        .stdout.toString()
+        .trim();
+
+    expect(read([])).toBe(loaded.map(variable).sort().join(','));
+    expect(read(['--no-env-file'])).toBe('');
+  },
+);
 
 /** The arguments of the git call that names the work tree. */
 const TOP_LEVEL = 'rev-parse --show-toplevel';
@@ -623,23 +972,6 @@ function gitArgs(): (readonly string[])[] {
     .filter((call) => call.name === 'git')
     .map((call) => call.args);
 }
-
-test.each([...BUN_ENV_NAMES])('a tracked %p is a finding naming it, at the root and below', async (name: string) => {
-  answerGit([name, `docs/${name}`]);
-
-  const found = await trackedFindings();
-
-  expect(found).toEqual([
-    carrying(`${JSON.stringify(name)} is an env file Bun loads`),
-    carrying(`${JSON.stringify(`docs/${name}`)} is an env file Bun loads`),
-  ]);
-});
-
-test('a tracked env file in another case is a finding naming it as it is spelled', async () => {
-  answerGit(['.Env.Production.Local']);
-
-  expect(await trackedFindings()).toEqual([carrying('".Env.Production.Local" is an env file Bun loads')]);
-});
 
 test('git names the work tree, then lists the whole index once and the untracked files once, with no pathspec', async () => {
   answerGit([]);
@@ -670,8 +1002,8 @@ test('a git that cannot name the work tree is the one finding, and nothing is li
   expect(gitArgs()).toEqual([['rev-parse', '--show-toplevel']]);
 });
 
-test('an untracked config a tool with no named form reads is a finding, and an untracked env file is not', async () => {
-  answerGit([], ['.github/actionlint.yaml', '.lefthook.yml', '.env']);
+test('an untracked config a tool with no named form reads is a finding', async () => {
+  answerGit([], ['.github/actionlint.yaml', '.lefthook.yml']);
 
   expect(await trackedFindings()).toEqual([
     carrying('".github/actionlint.yaml" is an actionlint config'),
@@ -718,19 +1050,6 @@ test('the untracked listing leaves the root node_modules out and nothing below i
   expect(others.filter((arg) => /node_modules/i.test(arg))).toEqual(['--exclude=/node_modules/']);
 });
 
-test('env files on disk that the index does not hold yield no finding', async () => {
-  writeFileSync(join(cwd, '.env'), '');
-  answerGit([], [...BUN_ENV_NAMES, 'docs/.env.local']);
-
-  expect(await trackedFindings()).toEqual([]);
-});
-
-test('a tracked env template, or an env file for a mode Bun never loads, yields no finding', async () => {
-  answerGit(['.env.example', '.env.local.template', 'docs/.env.staging', 'env.example', 'src/dotenv.ts']);
-
-  expect(await trackedFindings()).toEqual([]);
-});
-
 /* ///// Project configs ///// */
 
 test('a tsconfig.json outside the paths expected.ts names is a finding, tracked or not', async () => {
@@ -750,129 +1069,6 @@ test('the project configs expected.ts names and scripts/tsconfig.json yield no f
   answerGit(['tsconfig.json', 'scripts/tsconfig.json']);
 
   expect(await trackedFindings()).toEqual([]);
-});
-
-/* ///// Keys the gate refuses in a tracked JSON file ///// */
-
-/** A backslash, spelled so no formatter decodes the escape it starts. */
-const BACKSLASH = String.fromCharCode(92);
-
-interface KeyCase {
-  readonly label: string;
-  /** Every file the case writes below the working directory, by path. */
-  readonly files: Readonly<Record<string, string>>;
-  /** The paths the index lists. */
-  readonly tracked: readonly string[];
-  /** The paths the untracked listing names. */
-  readonly untracked?: readonly string[];
-  /** A fragment of each finding, in order, or none when the tree passes. */
-  readonly refused: readonly string[];
-}
-
-const KEYS: readonly KeyCase[] = [
-  {
-    label: 'a package.json repeating a top-level key',
-    files: { 'package.json': '{ "patchedDependencies": {}, "name": "a", "patchedDependencies": { "x@1.0.0": "p" } }' },
-    tracked: ['package.json'],
-    refused: [
-      '"package.json" carries a patchedDependencies key',
-      '"package.json" repeats "patchedDependencies" within one object, and Bun reads the first',
-    ],
-  },
-  {
-    label: 'a nested package.json repeating a key inside an object',
-    files: { 'tools/sub/package.json': '{ "scripts": { "a": "x", "a": "y" } }' },
-    tracked: ['tools/sub/package.json'],
-    refused: ['"tools/sub/package.json" repeats "a" within one object'],
-  },
-  {
-    label: 'a key repeated under an escaped spelling',
-    files: {
-      'package.json': `{ "patchedDependencie${BACKSLASH}u0073": {}, "patchedDependencies": {} }`,
-    },
-    tracked: ['package.json'],
-    refused: [
-      '"package.json" carries a patchedDependencies key',
-      '"package.json" repeats "patchedDependencies" within one object',
-    ],
-  },
-  {
-    label: 'a tsconfig.json repeating compilerOptions.paths',
-    files: { 'tsconfig.json': '{ "compilerOptions": { "paths": {}, "paths": { "x": ["./x.ts"] } } }' },
-    tracked: ['tsconfig.json'],
-    refused: ['"tsconfig.json" repeats "paths" within one object'],
-  },
-  {
-    label: 'a base a tsconfig.json extends repeating a key',
-    files: {
-      'tsconfig.json': '{ "extends": "./tsconfig.base" }',
-      'tsconfig.base.json': '{ "compilerOptions": { "baseUrl": ".", "baseUrl": "./src" } }',
-    },
-    tracked: ['tsconfig.json', 'tsconfig.base.json'],
-    refused: ['"tsconfig.json", through "tsconfig.base.json", repeats "baseUrl" within one object'],
-  },
-  {
-    label: 'a package.json that does not parse as plain JSON',
-    files: { 'package.json': '{ "name": "a", }' },
-    tracked: ['package.json'],
-    refused: ['"package.json" does not parse as plain JSON, so which keys it holds is unknown'],
-  },
-  {
-    label: 'a package.json carrying patchedDependencies beside a value nested deeper than jq reads',
-    files: {
-      'package.json': `{ "deep": ${'['.repeat(300)}${']'.repeat(300)}, "patchedDependencies": { "x@1.0.0": "patches/x.patch" } }`,
-    },
-    tracked: ['package.json'],
-    refused: [
-      '"package.json" carries a patchedDependencies key, and bun install applies each patch it names over the package bun.lock pins, so a tool a row runs can change while its pin stays the same. Remove it',
-    ],
-  },
-  {
-    label: 'a nested package.json carrying patchedDependencies, in another case',
-    files: { 'tools/sub/Package.JSON': '{ "patchedDependencies": {} }' },
-    tracked: ['tools/sub/Package.JSON'],
-    refused: ['"tools/sub/Package.JSON" carries a patchedDependencies key'],
-  },
-  {
-    label: 'patchedDependencies below the top of a package.json, or in a tsconfig.json',
-    files: {
-      'package.json': '{ "config": { "patchedDependencies": {} } }',
-      'tsconfig.json': '{ "patchedDependencies": {} }',
-    },
-    tracked: ['package.json', 'tsconfig.json'],
-    refused: [],
-  },
-  {
-    label: 'one key in two objects, and a repeat inside a string',
-    files: {
-      'package.json': `{ "scripts": { "a": "x" }, "config": { "a": "${BACKSLASH}"b${BACKSLASH}": 1, ${BACKSLASH}"b${BACKSLASH}": 2" } }`,
-    },
-    tracked: ['package.json'],
-    refused: [],
-  },
-  {
-    label: 'a package.json on disk that the index does not hold',
-    files: { 'package.json': '{ "a": 1, "a": 2 }' },
-    tracked: [],
-    untracked: ['package.json'],
-    refused: [],
-  },
-  {
-    label: 'an extends naming a package, which the shared commits job refuses',
-    files: { 'tsconfig.json': '{ "extends": "@tsconfig/strictest" }' },
-    tracked: ['tsconfig.json'],
-    refused: [],
-  },
-];
-
-test.each([...KEYS])('$label', async ({ files, tracked, untracked, refused }: KeyCase) => {
-  for (const [path, text] of Object.entries(files)) {
-    mkdirSync(dirname(join(cwd, path)), { recursive: true });
-    writeFileSync(join(cwd, path), text);
-  }
-  answerGit(tracked, untracked);
-
-  expect(await trackedFindings()).toEqual(refused.map((fragment) => carrying(fragment)));
 });
 
 test.each([
@@ -1011,62 +1207,41 @@ test('a shell outside the workflows directory, or in an untracked workflow, yiel
   expect(await trackedFindings()).toEqual([]);
 });
 
-/* ///// Inline zizmor waivers ///// */
+/* ///// Composite actions outside .github/actions ///// */
 
-interface WaiverCase {
-  readonly label: string;
-  readonly path: string;
-  readonly text: string;
-  readonly tracked: boolean;
-  readonly refused: boolean;
-}
+/** The finding for a tracked composite action at `path` outside .github/actions/. */
+const outsideActions = (path: string): string =>
+  `${JSON.stringify(path)} is a composite action outside .github/actions/, where zizmor reads none, while uses: ./<path> runs one from anywhere in the checkout. Move it under .github/actions/`;
 
-const WAIVERS: readonly WaiverCase[] = [
-  {
-    label: 'a waiver in a tracked workflow',
-    path: '.github/workflows/ci.yml',
-    text: 'jobs: {} # zizmor: ignore[unpinned-uses]\n',
-    tracked: true,
-    refused: true,
-  },
-  {
-    label: 'a waiver in the tracked dependabot.yml',
-    path: '.github/dependabot.yml',
-    text: 'version: 2 # zizmor: ignore[dependabot-cooldown]\n',
-    tracked: true,
-    refused: true,
-  },
-  {
-    label: 'a waiver in another case and spacing in a composite action',
-    path: '.github/actions/probe/action.yml',
-    text: 'runs: {} # ZIZMOR : IGNORE [template-injection]\n',
-    tracked: true,
-    refused: true,
-  },
-  {
-    label: 'the words outside .github',
-    path: 'docs/notes.md',
-    text: 'A `zizmor: ignore[x]` comment is refused.\n',
-    tracked: true,
-    refused: false,
-  },
-  {
-    label: 'a waiver in an untracked workflow',
-    path: '.github/workflows/ci.yml',
-    text: 'jobs: {} # zizmor: ignore[unpinned-uses]\n',
-    tracked: false,
-    refused: false,
-  },
-];
+test.each([
+  ['an action under tools', ['tools/x/action.yml'], [outsideActions('tools/x/action.yml')]],
+  ['an action under .GitHub', ['.GitHub/actions/x/action.yml'], [outsideActions('.GitHub/actions/x/action.yml')]],
+  [
+    'an action under an 8.3 short name of .github',
+    ['GITHUB~1/actions/x/action.yml'],
+    [outsideActions('GITHUB~1/actions/x/action.yml')],
+  ],
+  ['an action at the root', ['action.yml'], [outsideActions('action.yml')]],
+  ['an action.yaml in another case', ['ci/Action.YAML'], [outsideActions('ci/Action.YAML')]],
+  [
+    'an action under .github/actions named in another case',
+    ['.github/actions/x/ACTION.YML', '.github/actions/y/Action.yaml'],
+    [
+      `${JSON.stringify('.github/actions/x/ACTION.YML')} names a composite action in another case than action.yml or action.yaml, which zizmor never reads, while a case-insensitive runner opens it for uses:. Rename it action.yml`,
+      `${JSON.stringify('.github/actions/y/Action.yaml')} names a composite action in another case than action.yml or action.yaml, which zizmor never reads, while a case-insensitive runner opens it for uses:. Rename it action.yaml`,
+    ],
+  ],
+  [
+    'an action under .github/actions, nested or not',
+    ['.github/actions/x/action.yml', '.github/actions/y/action.yaml', '.github/actions/deep/sub/action.yml'],
+    [],
+  ],
+  ['a file named otherwise outside .github/actions', ['tools/x/actions.yml', 'tools/x/other.yml'], []],
+  ['an untracked action on disk', [], []],
+])('%s', async (_label: string, tracked: readonly string[], refused: readonly string[]) => {
+  answerGit(tracked, tracked.length === 0 ? ['tools/x/action.yml'] : []);
 
-test.each([...WAIVERS])('$label', async ({ path, text, tracked, refused }: WaiverCase) => {
-  mkdirSync(dirname(join(cwd, path)), { recursive: true });
-  writeFileSync(join(cwd, path), text);
-  answerGit(tracked ? [path] : [], tracked ? [] : [path]);
-
-  expect(await trackedFindings()).toEqual(
-    refused ? [carrying(`${JSON.stringify(path)} carries a zizmor ignore comment`)] : [],
-  );
+  expect(await trackedFindings()).toEqual([...refused]);
 });
 
 /* ///// Personal files ///// */

@@ -18,7 +18,7 @@ const BUN_DIRECTORY = dirname(process.execPath);
 // path.relative returns the absolute path, which the stand-in accepts.
 const RELATIVE_BUN = `.${sep}${basename(process.execPath)}`;
 
-/** The arguments actionlint 1.7.12 hands ShellCheck for a bash script. */
+/** The arguments the pinned actionlint hands ShellCheck for a bash script. */
 const SHELLCHECK_ARGS: readonly string[] = [
   '--norc',
   '-f',
@@ -98,6 +98,7 @@ function standIn(
     stdin: typeof script === 'string' ? new TextEncoder().encode(script) : script,
     stdout: 'pipe',
     stderr: 'pipe',
+    windowsHide: true,
   });
   return { exitCode: child.exitCode, stdout: child.stdout.toString(), stderr: child.stderr.toString() };
 }

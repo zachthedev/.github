@@ -1,18 +1,29 @@
-import { expect, test } from 'bun:test';
+import { expect, setDefaultTimeout, test } from 'bun:test';
+import { join } from 'node:path';
+import comments from '@eslint-community/eslint-plugin-eslint-comments/configs';
+import { ESLint } from 'eslint';
+import { defineConfig } from 'eslint/config';
+import tseslint from 'typescript-eslint';
+import { gatePlugin } from './eslint-plugin';
 import {
   actionlintFinished,
   comparable,
   compilerFinding,
   ignoreCommentFindings,
-  type InheritedCall,
-  inheritedCallFindings,
-  inheritedCalls,
+  type HeldFile,
+  heldNote,
+  lintedAsWritten,
+  lintedWithoutComments,
   taploFound,
   testCount,
+  unlintedSourceFinding,
   unreadSourceFinding,
   zizmorCompleted,
 } from './rows';
 import { type Finished, plain, printable, quote } from './run';
+
+// Loading typescript-eslint takes seconds on a cold cache.
+setDefaultTimeout(30_000);
 
 /** An asymmetric matcher for a finding carrying `fragment`. */
 function carrying(fragment: string): string {
@@ -74,13 +85,15 @@ interface CountCase {
   readonly summary: string;
   /** What the run printed on stdout, where a test's console output goes. */
   readonly stdout?: string;
+  /** The skips the gate declares for the run, none when absent. */
+  readonly allowed?: number;
   /** The row's line, or undefined when the count must throw. */
   readonly line?: string;
   /** A fragment the throw carries. */
   readonly refused?: string;
 }
 
-// Each summary is written the way Bun 1.4.2 prints it.
+// Each summary is written the way the pinned Bun prints it.
 const COUNTS: readonly CountCase[] = [
   {
     label: 'a passing run',
@@ -93,13 +106,45 @@ const COUNTS: readonly CountCase[] = [
     line: '1 test across 1 file',
   },
   {
-    label: 'some skipped, as on a platform a case does not run on',
+    label: 'as many skipped as the gate declares, as on a platform a case does not run on',
     summary: ' 5 pass\n 2 skip\n 0 fail\nRan 7 tests across 2 files. [80.00ms]\n',
+    allowed: 2,
     line: '7 tests across 2 files, 2 skipped',
+  },
+  {
+    label: 'a skip and a todo, together as many as the gate declares',
+    summary: ' 5 pass\n 1 skip\n 1 todo\n 0 fail\nRan 7 tests across 2 files. [80.00ms]\n',
+    allowed: 2,
+    line: '7 tests across 2 files, 2 skipped',
+  },
+  {
+    label: 'one more skipped than the gate declares',
+    summary: ' 4 pass\n 3 skip\n 0 fail\nRan 7 tests across 2 files. [80.00ms]\n',
+    allowed: 2,
+    refused:
+      'bun test skipped 3 of its 7 tests, and the gate declares 2 on this platform, so a test skipped that no declaration names',
+  },
+  {
+    label: 'a skip where the gate declares none',
+    summary: ' 6 pass\n 1 skip\n 0 fail\nRan 7 tests across 2 files. [80.00ms]\n',
+    refused: 'bun test skipped 1 of its 7 tests, and the gate declares 0 on this platform',
+  },
+  {
+    label: 'a todo where the gate declares none',
+    summary: ' 6 pass\n 1 todo\n 0 fail\nRan 7 tests across 2 files. [80.00ms]\n',
+    refused: 'bun test skipped 1 of its 7 tests, and the gate declares 0 on this platform',
+  },
+  {
+    label: 'one fewer skipped than the gate declares',
+    summary: ' 6 pass\n 1 skip\n 0 fail\nRan 7 tests across 2 files. [80.00ms]\n',
+    allowed: 2,
+    refused:
+      'bun test skipped 1 of its 7 tests, and the gate declares 2 on this platform, so the declaration names a skip that no longer happens',
   },
   {
     label: 'Windows line endings',
     summary: ' 3 pass\r\n 1 skip\r\n 0 fail\r\nRan 4 tests across 1 file. [8.00ms]\r\n',
+    allowed: 1,
     line: '4 tests across 1 file, 1 skipped',
   },
   {
@@ -125,13 +170,14 @@ const COUNTS: readonly CountCase[] = [
   },
   {
     label: 'a colored summary, as FORCE_COLOR gives',
+    allowed: 1,
     summary: `${colored(' 1 pass')}\n ${colored('1 skip')}\n${colored(' 0 fail')}\nRan 2 tests across 1 file. ${ESC}[2m[${ESC}[1m5.00ms${ESC}[0m${ESC}[2m]${ESC}[0m\n`,
     line: '2 tests across 1 file, 1 skipped',
   },
   {
     label: 'a forged Ran line on stdout over files holding no test',
     summary: ' 0 pass\n 0 fail\nRan 0 tests across 2 files. [5.00ms]\n',
-    stdout: 'bun test v1.4.2\nRan 9 tests across 2 files.\n',
+    stdout: 'bun test v9.8.7\nRan 9 tests across 2 files.\n',
     refused: 'ran no test',
   },
   {
@@ -158,11 +204,11 @@ const COUNTS: readonly CountCase[] = [
   },
 ];
 
-test.each([...COUNTS])('$label', ({ summary, stdout, line, refused }: CountCase) => {
+test.each([...COUNTS])('$label', ({ summary, stdout, allowed, line, refused }: CountCase) => {
   if (line !== undefined) {
-    expect(testCount('bun test', ended(summary, stdout))).toBe(line);
+    expect(testCount('bun test', ended(summary, stdout), allowed ?? 0)).toBe(line);
   } else {
-    expect(() => testCount('bun test', ended(summary, stdout))).toThrow(refused ?? '');
+    expect(() => testCount('bun test', ended(summary, stdout), allowed ?? 0)).toThrow(refused ?? '');
   }
 });
 
@@ -226,25 +272,555 @@ test('every tracked TypeScript file read yields nothing', () => {
   expect(unreadSourceFinding(['src/a.ts', 'docs/b.md'], new Set([comparable('src/a.ts')]))).toBeUndefined();
 });
 
-/* ///// The compiler the typecheck row runs ///// */
+/* ///// Lint coverage ///// */
 
-const PINNED = 'npm:typescript@7.0.2';
+/** What the lint row says to do about a tracked file ESLint did not lint, after naming it. */
+const LINT_OR_HOLD =
+  "Match each with a files pattern in eslint.config.ts and no ignore, or stop tracking it. A file another row regenerates and compares byte for byte can go in that row's holds in scripts/check.ts instead, which review alone checks";
+
+/** The lint row's name, the one row whose holds the finding refuses. */
+const LINT = 'lint';
+
+/** The lint row's finding for `path`, one tracked file ESLint did not lint and no row holds. */
+const unlintedLine = (path: string): string =>
+  `eslint lints no ${JSON.stringify(path)}, so no lint rule reads it. ${LINT_OR_HOLD}`;
+
+test('a tracked file ESLint did not lint is named with why and what to do, and one it linted is not', () => {
+  const linted = new Set([comparable('src/a.ts')]);
+
+  expect(unlintedSourceFinding(['src/a.ts', 'dist/b.ts', 'README.md'], linted, [], LINT)).toBe(
+    unlintedLine('dist/b.ts'),
+  );
+});
+
+test('several files ESLint did not lint are named together', () => {
+  expect(
+    unlintedSourceFinding(['coverage/x.js', 'src/c.jsx', 'src/a.ts'], new Set([comparable('src/a.ts')]), [], LINT),
+  ).toEqual(carrying('eslint lints no "coverage/x.js", "src/c.jsx", so no lint rule reads them.'));
+});
+
+// Every extension Bun runs as a module, in any case, since Bun reads one in any
+// case and a files pattern matches one case alone.
+test.each([
+  'x.js',
+  'x.jsx',
+  'x.mjs',
+  'x.cjs',
+  'x.ts',
+  'x.tsx',
+  'x.mts',
+  'x.cts',
+  'x.d.ts',
+  'x.d.mts',
+  'X.TS',
+  'x.Jsx',
+  '.wrangler/probe.ts',
+])('%p counts as a source ESLint lints', (path: string) => {
+  expect(unlintedSourceFinding([path], new Set(), [], LINT)).toEqual(
+    carrying(`eslint lints no ${JSON.stringify(path)}`),
+  );
+});
+
+test.each(['x.json', 'x.md', 'x.mjsx', 'x.ts.txt', 'x.tsxx', 'ts', 'src/jsx', 'x.yml'])(
+  '%p names no source ESLint lints and yields nothing',
+  (path: string) => {
+    expect(unlintedSourceFinding([path], new Set(), [], LINT)).toBeUndefined();
+  },
+);
+
+test('every tracked source linted yields nothing', () => {
+  expect(
+    unlintedSourceFinding(
+      ['src/a.ts', 'commitlint.config.js', 'docs/b.md'],
+      new Set(['src/a.ts', 'commitlint.config.js'].map((path) => comparable(path))),
+      [],
+      LINT,
+    ),
+  ).toBeUndefined();
+});
+
+// A row's holds pass each tracked file the row holds byte for byte. A hold
+// names one file, spelled exactly as git prints it, on every platform, so a
+// pattern, a directory, another spelling of the path, another case and a
+// look-alike letter each name none. A hold that passes nothing, a file held
+// twice and a hold on the lint row itself are each a finding.
+
+/** A generated file a row holds, which ESLint does not lint. */
+const GENERATED = 'gen/types.d.ts';
+
+/** The row that holds {@link GENERATED} in the cases. */
+const TYPES_ROW = 'types:check';
+
+/** The finding against {@link TYPES_ROW}'s hold of `path`, which names no tracked file. */
+const holdsNoFile = (path: string): string =>
+  `the ${TYPES_ROW} row's holds in scripts/check.ts name ${JSON.stringify(path)}, which is no tracked file, so the lint row passes nothing for it. Name the file exactly as git ls-files prints it, or take it out`;
+
+/** The finding against {@link TYPES_ROW}'s hold of `path`, a file the first pass linted. */
+const holdsLinted = (path: string): string =>
+  `the ${TYPES_ROW} row's holds in scripts/check.ts name ${JSON.stringify(path)}, which eslint lints, so the lint row passes nothing for it. Take it out`;
+
+/** The Kelvin sign, which lowercases to an ASCII k. */
+const KELVIN = String.fromCodePoint(0x212a);
+
+test('a file a row holds passes, and every other file ESLint did not lint is still named', () => {
+  expect(
+    unlintedSourceFinding(
+      [GENERATED, 'dist/b.ts', 'src/a.ts'],
+      new Set([comparable('src/a.ts')]),
+      [{ path: GENERATED, row: TYPES_ROW }],
+      LINT,
+    ),
+  ).toBe(unlintedLine('dist/b.ts'));
+});
 
 test.each([
-  ['the pinned major', 'Version 7.0.2\n', PINNED],
-  ['another minor of the pinned major', 'Version 7.1.4\r\n', PINNED],
-  ['the pinned major in color', `${colored('Version 7.0.2')}\n`, PINNED],
-  ['a plain version pin', 'Version 7.0.2\n', '7.0.2'],
+  ['a generated declaration file', GENERATED],
+  ['a JavaScript file under dist/', 'dist/app.js'],
+])('a hold of %s passes it', (_label: string, path: string) => {
+  expect(
+    unlintedSourceFinding([path, 'src/a.ts'], new Set([comparable('src/a.ts')]), [{ path, row: TYPES_ROW }], LINT),
+  ).toBeUndefined();
+});
+
+interface HoldCase {
+  readonly label: string;
+  readonly tracked: readonly string[];
+  /** The tracked files the first pass reported. */
+  readonly linted: readonly string[];
+  readonly held: readonly HeldFile[];
+  /** The whole finding, one line for each problem. */
+  readonly finding: string;
+}
+
+const HOLD_CASES: readonly HoldCase[] = [
+  {
+    label: 'a hold of a file nobody tracks is refused',
+    tracked: ['src/a.ts'],
+    linted: ['src/a.ts'],
+    held: [{ path: GENERATED, row: TYPES_ROW }],
+    finding: holdsNoFile(GENERATED),
+  },
+  {
+    label: 'a hold of a pattern is refused, and the file the pattern matches stays refused',
+    tracked: [GENERATED],
+    linted: [],
+    held: [{ path: 'gen/*.d.ts', row: TYPES_ROW }],
+    finding: [unlintedLine(GENERATED), holdsNoFile('gen/*.d.ts')].join('\n'),
+  },
+  {
+    label: 'a hold of the directory is refused, and the file in it stays refused',
+    tracked: [GENERATED],
+    linted: [],
+    held: [{ path: 'gen', row: TYPES_ROW }],
+    finding: [unlintedLine(GENERATED), holdsNoFile('gen')].join('\n'),
+  },
+  {
+    label: 'a hold spelled with a leading ./ names no file',
+    tracked: [GENERATED],
+    linted: [],
+    held: [{ path: `./${GENERATED}`, row: TYPES_ROW }],
+    finding: [unlintedLine(GENERATED), holdsNoFile(`./${GENERATED}`)].join('\n'),
+  },
+  {
+    label: 'a hold spelled through a .. segment names no file',
+    tracked: [GENERATED],
+    linted: [],
+    held: [{ path: 'gen/sub/../types.d.ts', row: TYPES_ROW }],
+    finding: [unlintedLine(GENERATED), holdsNoFile('gen/sub/../types.d.ts')].join('\n'),
+  },
+  {
+    label: 'a hold in another case names no file, on every platform',
+    tracked: [GENERATED],
+    linted: [],
+    held: [{ path: 'GEN/Types.d.ts', row: TYPES_ROW }],
+    finding: [unlintedLine(GENERATED), holdsNoFile('GEN/Types.d.ts')].join('\n'),
+  },
+  {
+    label: 'a hold spelled with the Kelvin sign names no file, and the ASCII file stays refused',
+    tracked: ['gen/key.d.ts'],
+    linted: [],
+    held: [{ path: `gen/${KELVIN}ey.d.ts`, row: TYPES_ROW }],
+    finding: [unlintedLine('gen/key.d.ts'), holdsNoFile(`gen/${KELVIN}ey.d.ts`)].join('\n'),
+  },
+  {
+    label: 'of two tracked files that differ in case alone, a hold passes the one it names and not the other',
+    tracked: [GENERATED, 'gen/Types.d.ts'],
+    linted: [],
+    held: [{ path: GENERATED, row: TYPES_ROW }],
+    finding: unlintedLine('gen/Types.d.ts'),
+  },
+  {
+    label: 'a hold of a file the first pass linted is refused',
+    tracked: ['src/a.ts'],
+    linted: ['src/a.ts'],
+    held: [{ path: 'src/a.ts', row: TYPES_ROW }],
+    finding: holdsLinted('src/a.ts'),
+  },
+  {
+    label: 'a hold of a tracked file that is no JavaScript or TypeScript file is refused',
+    tracked: ['README.md'],
+    linted: [],
+    held: [{ path: 'README.md', row: TYPES_ROW }],
+    finding: `the ${TYPES_ROW} row's holds in scripts/check.ts name "README.md", which is no JavaScript or TypeScript file, so the lint row passes nothing for it. Take it out`,
+  },
+  {
+    label: 'a file one row holds twice is refused',
+    tracked: [GENERATED],
+    linted: [],
+    held: [
+      { path: GENERATED, row: TYPES_ROW },
+      { path: GENERATED, row: TYPES_ROW },
+    ],
+    finding: `the ${TYPES_ROW} row's holds in scripts/check.ts name "${GENERATED}" 2 times. Keep it in the holds of the one row that regenerates and compares it`,
+  },
+  {
+    label: 'a file two rows hold is refused, naming both rows',
+    tracked: [GENERATED],
+    linted: [],
+    held: [
+      { path: GENERATED, row: TYPES_ROW },
+      { path: GENERATED, row: 'build' },
+    ],
+    finding: `the ${TYPES_ROW} and build rows' holds in scripts/check.ts name "${GENERATED}" 2 times. Keep it in the holds of the one row that regenerates and compares it`,
+  },
+  {
+    label: 'a hold on the lint row itself is refused',
+    tracked: [GENERATED],
+    linted: [],
+    held: [{ path: GENERATED, row: LINT }],
+    finding: `the lint row's holds in scripts/check.ts name "${GENERATED}", and the lint row cannot hold a file it passes unread. Move it to the holds of the row that regenerates and compares it`,
+  },
+  {
+    label: 'a file ESLint did not lint is named first, then each held path in the order it first appears',
+    tracked: [GENERATED, 'dist/b.ts', 'src/a.ts'],
+    linted: ['src/a.ts'],
+    held: [
+      { path: 'src/a.ts', row: TYPES_ROW },
+      { path: 'gen/none.d.ts', row: TYPES_ROW },
+      { path: GENERATED, row: TYPES_ROW },
+    ],
+    finding: [unlintedLine('dist/b.ts'), holdsLinted('src/a.ts'), holdsNoFile('gen/none.d.ts')].join('\n'),
+  },
+];
+
+test.each([...HOLD_CASES])('$label', ({ tracked, linted, held, finding }: HoldCase) => {
+  expect(unlintedSourceFinding(tracked, new Set(linted.map((path) => comparable(path))), held, LINT)).toBe(finding);
+});
+
+test.each([
+  ['no row holds a file', [], ''],
+  [
+    'one row holds one file',
+    [{ path: 'worker-configuration.d.ts', row: 'cf-typegen:check' }],
+    '1 held by cf-typegen:check: worker-configuration.d.ts',
+  ],
+  [
+    'one row holds two files',
+    [
+      { path: 'gen/a.d.ts', row: TYPES_ROW },
+      { path: 'gen/b.d.ts', row: TYPES_ROW },
+    ],
+    `2 held by ${TYPES_ROW}: gen/a.d.ts, gen/b.d.ts`,
+  ],
+  [
+    'two rows hold files, each group in the order its row first appears',
+    [
+      { path: 'gen/a.d.ts', row: TYPES_ROW },
+      { path: 'dist/app.js', row: 'build' },
+      { path: 'gen/b.d.ts', row: TYPES_ROW },
+    ],
+    `2 held by ${TYPES_ROW}: gen/a.d.ts, gen/b.d.ts, 1 held by build: dist/app.js`,
+  ],
+])('the lint row names each held file with its row when %s', (_label: string, held: HeldFile[], note: string) => {
+  expect(heldNote(held)).toBe(note);
+});
+
+/* ///// The compiler the typecheck row runs ///// */
+
+// Versions no package.json pins, so a search for a real pin finds the pin file alone.
+const PINNED = 'npm:typescript@9.1.2';
+
+test.each([
+  ['the pinned major', 'Version 9.1.2\n', PINNED],
+  ['another minor of the pinned major', 'Version 9.4.0\r\n', PINNED],
+  ['the pinned major in color', `${colored('Version 9.1.2')}\n`, PINNED],
+  ['a plain version pin', 'Version 9.1.2\n', '9.1.2'],
 ])('%s passes', (_label: string, printed: string, spec: string) => {
   expect(compilerFinding(printed, spec)).toBeUndefined();
 });
 
 test.each([
-  ['the 6.x compiler', 'Version 6.0.3\n', PINNED, 'printed "Version 6.0.3", and package.json pins major 7'],
-  ['no version line', 'error TS5083: Cannot read file\n', PINNED, 'package.json pins major 7'],
-  ['a pin naming no version', 'Version 7.0.2\n', 'npm:typescript@latest', 'which names no version'],
+  ["another package's compiler", 'Version 8.3.1\n', PINNED, 'printed "Version 8.3.1", and package.json pins major 9'],
+  ['no version line', 'error TS5083: Cannot read file\n', PINNED, 'package.json pins major 9'],
+  ['a pin naming no version', 'Version 9.1.2\n', 'npm:typescript@latest', 'which names no version'],
 ])('%s is a finding', (_label: string, printed: string, spec: string, fragment: string) => {
   expect(compilerFinding(printed, spec)).toEqual(carrying(fragment));
+});
+
+/* ///// What the lint row concludes from ESLint ///// */
+
+// ESLint lints each case in this process with the comment rules the
+// repository sets, once reading every comment and once with none read as a
+// directive or configuration, as the row's two passes do. The json each pass
+// prints is what lintedAsWritten and lintedWithoutComments read.
+
+/** The repository root, where the probe file each case is linted as would sit. */
+const ROOT = join(import.meta.dir, '..');
+
+/** The file each case's text is linted as. */
+const PROBE = join(ROOT, 'probe.ts');
+
+// Built from its code point, so no invisible character is written into this file.
+const WORD_JOINER = String.fromCodePoint(0x2060);
+
+/**
+ * The rules eslint.config.ts sets on a comment, and a rule for a waiver to
+ * turn off, with no type information, since each case is text that no
+ * project holds.
+ */
+const LINT_CONFIG = defineConfig(comments.recommended, {
+  files: ['**/*.ts'],
+  languageOptions: { parser: tseslint.parser },
+  plugins: { gate: gatePlugin, '@typescript-eslint': tseslint.plugin },
+  rules: {
+    'gate/visible-reason': 'error',
+    '@eslint-community/eslint-comments/require-description': 'error',
+    '@eslint-community/eslint-comments/no-use': [
+      'error',
+      { allow: ['eslint-disable', 'eslint-enable', 'eslint-disable-line', 'eslint-disable-next-line'] },
+    ],
+    '@typescript-eslint/ban-ts-comment': ['error', { minimumDescriptionLength: 10 }],
+    'no-debugger': 'error',
+  },
+});
+
+const asWritten = new ESLint({ cwd: ROOT, overrideConfigFile: true, overrideConfig: LINT_CONFIG });
+const noInline = new ESLint({
+  cwd: ROOT,
+  overrideConfigFile: true,
+  overrideConfig: LINT_CONFIG,
+  allowInlineConfig: false,
+});
+
+/** ESLint's json over `text` from `linter`, exiting 1 when it reports a problem, as its command line does. */
+async function linted(linter: ESLint, text: string): Promise<Finished> {
+  const results = await linter.lintText(text, { filePath: PROBE });
+  const formatter = await linter.loadFormatter('json');
+  return {
+    exitCode: results.some((result) => result.messages.length > 0) ? 1 : 0,
+    stdout: await formatter.format(results),
+    stderr: '',
+    heldOpen: false,
+  };
+}
+
+/** What the lint row ends with over `text`: `passed <line>`, or the message it throws. */
+async function lintRow(text: string): Promise<string> {
+  const [first, second] = [await linted(asWritten, text), await linted(noInline, text)];
+  try {
+    return `passed ${lintedWithoutComments(second, lintedAsWritten(first))}`;
+  } catch (error: unknown) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+/** The first pass's refusal of a gate/visible-reason report a directive turned off, at `line` and `column`. */
+const turnedOff = (line: number, column: number): string =>
+  `${quote(PROBE)}:${String(line)}:${String(column)}  a directive turned off gate/visible-reason, which no directive may do. Take the rule out of the directive and give each waiver a reason in words`;
+
+/** The second pass's refusal of a report from `rule`, at `line` and `column`, saying `message`. */
+const unwaived = (line: number, column: number, rule: string, message: string): string =>
+  `${quote(PROBE)}:${String(line)}:${String(column)}  ${rule} reports this with every directive and configuration comment ignored, and no comment may turn that rule off: ${message}`;
+
+/** The first pass's refusal of the one directive comment at `line` that no-use allows none of. */
+const directiveRefused = (line: number): string =>
+  `eslint exited 1 over 1 file:\n${quote(PROBE)}:${String(line)}:0  error  Unexpected ESLint directive comment.  @eslint-community/eslint-comments/no-use`;
+
+const NO_USE = '@eslint-community/eslint-comments/no-use';
+
+test.each([
+  [
+    'a disable-line naming the gate rule beside the one it waives, with an invisible reason',
+    `debugger; // eslint-disable-line no-debugger, gate/visible-reason -- ${WORD_JOINER}\n`,
+    turnedOff(1, 11),
+  ],
+  [
+    'a block disable naming the gate rule, closed by an enable with a reason in words, and a waiver between them',
+    `/* eslint-disable gate/visible-reason -- ${WORD_JOINER} */\n// eslint-disable-next-line no-debugger -- ${WORD_JOINER}\ndebugger;\n/* eslint-enable gate/visible-reason -- restore the rule */\n`,
+    [turnedOff(1, 1), turnedOff(2, 1)].join('\n'),
+  ],
+  [
+    'a configuration comment turning the gate rule off for its file',
+    `/* eslint gate/visible-reason: "off" -- the rule stays off in this file */\n// eslint-disable-next-line no-debugger -- ${WORD_JOINER}\ndebugger;\n`,
+    directiveRefused(1),
+  ],
+  [
+    'a configuration comment turning off a rule that reads no comments',
+    '/* eslint no-debugger: "off" -- this file steps through the gate by hand */\ndebugger;\n',
+    directiveRefused(1),
+  ],
+  [
+    'a global declared in a comment',
+    '/* global probe -- a global the runtime declares */\nexport const value: unknown = probe;\n',
+    directiveRefused(1),
+  ],
+  [
+    'globals declared in a comment',
+    '/* globals probe -- a global the runtime declares */\nexport const value: unknown = probe;\n',
+    directiveRefused(1),
+  ],
+  [
+    'an exported comment',
+    '/* exported value -- another file reads it */\nexport const value = 1;\n',
+    directiveRefused(1),
+  ],
+  [
+    'an eslint-env comment, which ESLint refuses beside no-use',
+    '/* eslint-env node -- the file runs under node */\nexport const value = 1;\n',
+    `${directiveRefused(1)}\n${quote(PROBE)}:1:1  error  /* eslint-env */ comments are no longer supported.  `,
+  ],
+  [
+    'a configuration comment turning no-use off before one setting a rule',
+    '/* eslint @eslint-community/eslint-comments/no-use: "off" -- the rule stays off */\n/* eslint no-debugger: "off" -- the file steps through by hand */\ndebugger;\n',
+    [
+      unwaived(1, 0, NO_USE, 'Unexpected ESLint directive comment.'),
+      unwaived(2, 0, NO_USE, 'Unexpected ESLint directive comment.'),
+    ].join('\n'),
+  ],
+  [
+    'a block disable of no-use around a configuration comment',
+    '/* eslint-disable @eslint-community/eslint-comments/no-use -- a block of settings */\n/* eslint no-debugger: "off" -- the file steps through by hand */\n/* eslint-enable @eslint-community/eslint-comments/no-use -- the block ends */\ndebugger;\n',
+    unwaived(2, 0, NO_USE, 'Unexpected ESLint directive comment.'),
+  ],
+])('%s is refused, naming each report', async (_label: string, text: string, refusal: string) => {
+  expect(await lintRow(text)).toBe(refusal);
+});
+
+test.each([
+  ['a next-line directive', '// eslint-disable-next-line no-debugger -- stepped through by hand\ndebugger;\n', 2],
+  ['a disable-line directive', 'debugger; // eslint-disable-line no-debugger -- stepped through by hand\n', 1],
+  [
+    'a block pair',
+    '/* eslint-disable no-debugger -- the block steps through by hand */\ndebugger;\n/* eslint-enable no-debugger -- the block ends here */\n',
+    2,
+  ],
+  [
+    'a block next-line directive',
+    '/* eslint-disable-next-line no-debugger -- stepped through by hand */\ndebugger;\n',
+    2,
+  ],
+  ['a block disable-line directive', 'debugger; /* eslint-disable-line no-debugger -- stepped through by hand */\n', 1],
+  [
+    'a block pair whose reason starts on the next line',
+    '/* eslint-disable no-debugger --\n   the reason on its own line */\ndebugger;\n/* eslint-enable no-debugger -- the pair */\n',
+    3,
+  ],
+])(
+  '%s with a reason in words passes both passes, though the second reports the rule it waives',
+  async (_label: string, text: string, line: number) => {
+    const second: unknown = JSON.parse((await linted(noInline, text)).stdout);
+
+    expect(second).toMatchObject([{ messages: [{ ruleId: 'no-debugger', line }] }]);
+    expect(await lintRow(text)).toBe('passed 1 file');
+  },
+);
+
+test('a @ts-expect-error with a description in words passes both passes', async () => {
+  expect(
+    await lintRow(
+      "// @ts-expect-error the fixture assigns a string to a number\nexport const count: number = 'text';\n",
+    ),
+  ).toBe('passed 1 file');
+});
+
+// A file name can hold the one-byte CSI before each quote. JSON writes such a
+// quote as a backslash and a quote, and a CSI strip ahead of the parse eats
+// the backslash, so the name would close its string and inject json tokens.
+// The names below would nest x's second-pass report under an injected key.
+test('a file name built to rewrite the json after a control-sequence strip leaves the second pass intact', () => {
+  const csi = String.fromCharCode(0x9b);
+  const smuggle = (text: string): string => text.replaceAll('"', `${csi}"`);
+  const x = `/abs/src/${smuggle('a","messages":[],"suppressedMessages":[],"hide":[{"k":"')}/x.ts`;
+  const y = `/abs/src/${smuggle('b"}],"q":"')}/y.ts`;
+  const report = { ruleId: NO_USE, severity: 2, message: 'Unexpected ESLint directive comment.', line: 2, column: 0 };
+  const first = printed([
+    { filePath: x, messages: [], suppressedMessages: [report] },
+    { filePath: y, messages: [], suppressedMessages: [] },
+  ]);
+  const second = printed(
+    [
+      { filePath: x, messages: [report], suppressedMessages: [] },
+      { filePath: y, messages: [], suppressedMessages: [] },
+    ],
+    1,
+  );
+
+  expect(() => lintedWithoutComments(second, lintedAsWritten(first))).toThrow(
+    `${quote(x)}:2:0  ${NO_USE} reports this with every directive and configuration comment ignored, and no comment may turn that rule off: Unexpected ESLint directive comment.`,
+  );
+});
+
+test('a control sequence in a message prints stripped', () => {
+  const esc = String.fromCharCode(0x1b);
+  const first = printed(
+    [
+      {
+        filePath: PROBE,
+        messages: [{ ruleId: 'no-debugger', severity: 2, message: `${esc}[31mred${esc}[0m`, line: 1, column: 1 }],
+        suppressedMessages: [],
+      },
+    ],
+    1,
+  );
+
+  expect(() => lintedAsWritten(first)).toThrow(`${quote(PROBE)}:1:1  error  red  no-debugger`);
+});
+
+/** One pass's printed json: `results` as ESLint's json formatter writes them. */
+function printed(results: unknown, exitCode = 0, stderr = ''): Finished {
+  return { exitCode, stdout: JSON.stringify(results), stderr, heldOpen: false };
+}
+
+/** One clean file result for `path`. */
+const clean = (path: string): unknown => ({ filePath: path, messages: [], suppressedMessages: [] });
+
+test.each([
+  [
+    'json whose results list no suppressed reports',
+    printed([{ filePath: PROBE, messages: [] }]),
+    'eslint printed json that is not a list of file results',
+  ],
+  [
+    'no json at all',
+    { exitCode: 2, stdout: '', stderr: 'config error', heldOpen: false },
+    'eslint exited 2 saying: config error',
+  ],
+  ['no file linted', printed([]), 'eslint linted no file, so it checked nothing'],
+])('a first pass printing %s is refused', (_label: string, first: Finished, refusal: string) => {
+  expect(() => lintedAsWritten(first)).toThrow(refusal);
+});
+
+test.each([
+  [
+    'lints no file',
+    printed([]),
+    'eslint --no-inline-config linted 0 files and the first pass 1 file, not the same ones',
+  ],
+  [
+    'lints another file',
+    printed([clean(join(ROOT, 'other.ts'))], 1),
+    'eslint --no-inline-config linted 1 file and the first pass 1 file, not the same ones',
+  ],
+  ['exits 2', printed([clean(PROBE)], 2, 'crashed'), 'eslint --no-inline-config exited 2 saying:'],
+  [
+    'prints no json',
+    { exitCode: 1, stdout: '', stderr: 'crashed', heldOpen: false },
+    'eslint --no-inline-config exited 1 saying: crashed',
+  ],
+])('a second pass that %s is refused', (_label: string, second: Finished, refusal: string) => {
+  expect(() => lintedWithoutComments(second, [{ filePath: PROBE, messages: [], suppressedMessages: [] }])).toThrow(
+    refusal,
+  );
 });
 
 /* ///// Prettier ignore comments ///// */
@@ -253,7 +829,7 @@ test.each([
 // row checks.
 const IGNORE = ['prettier', 'ignore'].join('-');
 
-// Every form Prettier 3.9.8 honors, measured per parser, and forms it does
+// Every form the pinned Prettier honors, measured per parser, and forms it does
 // not honor that the match still refuses.
 test.each([
   `// ${IGNORE}`,
@@ -309,106 +885,4 @@ test.each([
   `//! ${IGNORE}`,
 ])('%p names no comment Prettier honors and yields nothing', (text: string) => {
   expect(ignoreCommentFindings('docs/a.md', `${text}\n`)).toEqual([]);
-});
-
-/* ///// secrets: inherit ///// */
-
-/** One finding in the shape zizmor 1.30 prints with --format json. */
-function finding(ident: string, path: string, row: number, feature: string): unknown {
-  return {
-    ident,
-    locations: [
-      { symbolic: { kind: 'Related' }, concrete: { feature: 'secrets: inherit' } },
-      {
-        symbolic: { kind: 'Primary', key: { Local: { verbatim_path: path } } },
-        concrete: { feature, location: { start_point: { row } } },
-      },
-    ],
-  };
-}
-
-test('each secrets-inherit finding becomes its file, one-based line and unquoted callee, and other audits are skipped', () => {
-  const report = [
-    finding(
-      'secrets-inherit',
-      '.github\\workflows\\cd.yml',
-      35,
-      '"zachthedev/.github/.github/workflows/publish.yml@abc"',
-    ),
-    finding('unpinned-uses', '.github/workflows/ci.yml', 3, 'actions/checkout@v4'),
-    finding('secrets-inherit', '.github/workflows/deps.yml', 32, "'zachthedev/.github/.github/workflows/deps.yml@abc'"),
-  ];
-
-  const calls = [
-    { path: '.github/workflows/cd.yml', line: 36, callee: 'zachthedev/.github/.github/workflows/publish.yml@abc' },
-    { path: '.github/workflows/deps.yml', line: 33, callee: 'zachthedev/.github/.github/workflows/deps.yml@abc' },
-  ];
-  expect(inheritedCalls(JSON.stringify(report))).toEqual(calls);
-  expect(inheritedCalls(colored(JSON.stringify(report, null, 2).replaceAll('\n', '\r\n')))).toEqual(calls);
-});
-
-test.each(['', 'error: no input', '[{"ident": "secrets-inherit"'])(
-  'zizmor printing %p throws, naming no json',
-  (printed: string) => {
-    expect(() => inheritedCalls(printed)).toThrow('zizmor printed no json');
-  },
-);
-
-test.each([
-  ['a report that is not a list', { findings: [] }, 'not a list of findings'],
-  ['a finding with no primary location', [{ ident: 'secrets-inherit', locations: [] }], 'no primary file'],
-  [
-    'a finding with no callee',
-    [
-      {
-        ident: 'secrets-inherit',
-        locations: [{ symbolic: { kind: 'Primary', key: { Local: { verbatim_path: 'x' } } } }],
-      },
-    ],
-    'no primary file',
-  ],
-  ['a null finding location', [{ ident: 'secrets-inherit', locations: [null] }], 'no primary file'],
-])('%s throws', (_label: string, report: unknown, refused: string) => {
-  expect(() => inheritedCalls(JSON.stringify(report))).toThrow(refused);
-});
-
-const HELD = ['zachthedev/.github/.github/workflows/'];
-
-/** A call from `path` to `callee`, at line 10. */
-function call(path: string, callee: string): InheritedCall {
-  return { path, line: 10, callee };
-}
-
-test('calls to reusable workflows of zachthedev/.github, in any case, from every waived file yield nothing', () => {
-  const calls = [
-    call('.github/workflows/cd.yml', 'zachthedev/.github/.github/workflows/publish.yml@abc'),
-    call('.github/workflows/deps.yml', 'ZachTheDev/.GitHub/.github/workflows/deps.yml@abc'),
-  ];
-
-  expect(inheritedCallFindings(calls, HELD, ['cd.yml', 'deps.yml'])).toEqual([]);
-});
-
-test.each([
-  'someone/.github/.github/workflows/publish.yml@abc',
-  'zachthedev/.github-fork/.github/workflows/publish.yml@abc',
-  'zachthedev/other/.github/workflows/publish.yml@abc',
-  './.github/workflows/local.yml',
-  'zachthedev/.github/.github/workflowsx/publish.yml@abc',
-])('a call to %p is refused, naming the file, line and callee', (callee: string) => {
-  expect(inheritedCallFindings([call('.github/workflows/cd.yml', callee)], HELD, ['cd.yml'])).toEqual([
-    carrying(`".github/workflows/cd.yml" line 10 passes secrets: inherit to ${JSON.stringify(callee)}`),
-  ]);
-});
-
-test('a waived file holding no call is refused as stale, in the file form and the line form', () => {
-  const calls = [call('.github/workflows/cd.yml', 'zachthedev/.github/.github/workflows/publish.yml@abc')];
-
-  expect(inheritedCallFindings(calls, HELD, ['cd.yml', 'deps.yml', 'ci.yml:3:5'])).toEqual([
-    carrying('the secrets-inherit waiver names "deps.yml", and zizmor reported no job there'),
-    carrying('the secrets-inherit waiver names "ci.yml:3:5", and zizmor reported no job there'),
-  ]);
-});
-
-test('no calls and no waivers yield nothing', () => {
-  expect(inheritedCallFindings([], HELD, [])).toEqual([]);
 });

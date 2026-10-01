@@ -96,7 +96,7 @@ jobs:
             exit 1
           fi
       # zizmor honors an inline ignore comment, which waives any audit on its line outside
-      # .github/zizmor.yml, the one file the caller's gate compares whole. So every zizmor waiver
+      # .github/zizmor.yml, where code-owner review reads every waiver. So every zizmor waiver
       # lives in that file, and a tracked file under .github carrying such a comment is refused,
       # matched without regard to case or spacing. git grep reads every file as text (-a), since
       # a tracked .gitattributes line marking a workflow -diff or binary would otherwise make it
@@ -118,6 +118,36 @@ jobs:
             done <<< "$waivers"
             exit 1
           fi
+      # zizmor reads .github alone, in every gate row and in this job, while uses: ./<path> runs an
+      # action from anywhere in the checkout. So a tracked action.yml or action.yaml, its name
+      # compared folded, is refused unless its path starts with .github/actions/ in that exact
+      # spelling. One under that directory whose name is spelled in another case is refused too:
+      # zizmor never reads it, and a case-insensitive runner opens it for uses:. A name folds
+      # through upper then lower case, so a dotless i matches as well. The runner also
+      # runs a local action from a directory holding a Dockerfile and no metadata file, and no
+      # tool here reads a Dockerfile wherever it sits, so review holds that case. git lists paths
+      # with core.quotepath off, so a name past ASCII reaches the check as its own characters. A
+      # failed git call stops the step.
+      - name: Refused actions
+        run: |
+          python3 - <<'PY'
+          import os, subprocess, sys
+          listed = subprocess.run(["git", "-c", "core.quotepath=off", "ls-files", "-z"], capture_output=True, check=True)
+          NAMES = ("action.yml", "action.yaml")
+          found = []
+          for path in map(os.fsdecode, filter(None, listed.stdout.split(b"\0"))):
+              name = path.rsplit("/", 1)[-1]
+              folded = name.upper().lower()
+              if folded not in NAMES:
+                  continue
+              if not path.startswith(".github/actions/"):
+                  found.append(f"{path!r} is an action outside .github/actions/, where zizmor reads none, while uses: ./<path> runs one from anywhere in the checkout. Move it under .github/actions/")
+              elif name not in NAMES:
+                  found.append(f"{path!r} names an action in another case than action.yml or action.yaml, which zizmor never reads, while a case-insensitive runner opens it for uses:. Rename it {folded}")
+          for finding in found:
+              print(f"::error::{finding}.")
+          sys.exit(1 if found else 0)
+          PY
       # actionlint reads .github/actionlint.yaml or .yml from the checkout, and a paths ignore there
       # drops any finding by pattern, ShellCheck's and the stand-in's refusal included. So a
       # tracked one is refused, matched without regard to case, as the caller's gate refuses it.
@@ -173,18 +203,26 @@ jobs:
               print(f"::error::{finding}. actionlint runs ShellCheck for bash and sh alone.")
           sys.exit(1 if found else 0)
           PY
-      # mise runs a config's hooks, [env] and [vars] exec templates and a tool entry's
-      # postinstall command whenever it loads the file, so mise.toml holds [tools], [tool_config]
-      # and [settings] alone, each with the keys the caller's gate reads, and mise.lock holds the
-      # keys mise writes. Each [tools] entry is a version or a table, and each mise.lock tool a
-      # list of tables, as the caller's gate requires. Any other form is refused: mise reads an
-      # entry written as an array of tables, options included. The caller's gate compares the
-      # values; this step refuses a key before the install below loads the file. A key reaches the
-      # log through repr, so a control or bidirectional character prints as an escape.
+      # mise runs a config's hooks, [env] and [vars] exec templates and a tool entry's postinstall
+      # command whenever it loads the file, so mise.toml holds [tools], [tool_config] and
+      # [settings] alone, each with the keys the caller's gate reads, and mise.lock holds the keys
+      # mise writes. Each [tools] entry is a version or a table, and each mise.lock tool a list of
+      # tables, as the caller's gate requires. Any other form is refused: mise reads an entry
+      # written as an array of tables, options included. mise also runs options written in
+      # brackets after a mise.toml tool key or a mise.lock backend, a postinstall among them, so
+      # every tool key in both files is a registry name or github:<owner>/<repo>, and every
+      # mise.lock backend is aqua: or github:<owner>/<repo>, the shapes the set pins. Every
+      # version, a [tools] value, a table's version or a lock entry's, is a plain release: a
+      # digit, then letters, digits and . + - alone. mise reads path:, system, ref:, prefix: and
+      # sub- versions as something other than a release. The caller's gate compares the values;
+      # these two steps refuse a key or a version before the install below loads the file. A key
+      # or a version reaches the log through repr, so a control or bidirectional character prints
+      # as an escape. Each file has a step of its own because actionlint stalls on Windows handing
+      # ShellCheck a script past 4 KB.
       - name: Refused keys
         run: |
           python3 - <<'PY'
-          import sys, tomllib
+          import re, sys, tomllib
           SECTIONS = {
               "tool_config": {"locked"},
               "settings": {"locked", "lockfile", "locked_verify_provenance", "provenance_api_failures_fatal",
@@ -192,8 +230,11 @@ jobs:
           }
           AQUA = {"github_attestations"}
           OPTIONS = {"version", "version_prefix"}
-          FIELDS = {"checksum", "url", "url_api", "provenance"}
+          KEY = re.compile(r"[a-z0-9][a-z0-9-]*|github:[A-Za-z0-9-]+/[A-Za-z0-9_.-]+")
+          VERSION = re.compile(r"[0-9][0-9A-Za-z.+-]*")
           found = []
+          shapes = []
+          versions = []
           with open("mise.toml", "rb") as file:
               pins = tomllib.load(file)
           for key, value in pins.items():
@@ -210,10 +251,36 @@ jobs:
                       found += [f"mise.toml sets {name!r} under [settings.aqua]" for name in aqua if name not in AQUA]
               else:
                   for tool, entry in value.items():
+                      if not KEY.fullmatch(tool):
+                          shapes.append(f"mise.toml pins the tool key {tool!r}")
                       if isinstance(entry, dict):
                           found += [f"mise.toml gives {tool!r} the option {option!r}" for option in entry if option not in OPTIONS]
                       elif not isinstance(entry, str):
                           found.append(f"mise.toml gives {tool!r} as a {type(entry).__name__}, neither a version nor a table")
+                          continue
+                      version = entry.get("version") if isinstance(entry, dict) else entry
+                      if not (isinstance(version, str) and VERSION.fullmatch(version)):
+                          versions.append(f"mise.toml pins {tool!r} at {version!r}")
+          for finding in found:
+              print(f"::error::{finding}, which no rule reads. Remove it.")
+          for finding in shapes:
+              print(f"::error::{finding}, outside the registry names and github:<owner>/<repo> the set pins. mise runs options written in brackets there, a postinstall among them.")
+          for finding in versions:
+              print(f"::error::{finding}, outside the plain release version the set pins. mise reads a path:, system, ref:, prefix: or sub- version as something other than a release.")
+          sys.exit(1 if found or shapes or versions else 0)
+          PY
+      - name: Refused lock keys
+        run: |
+          python3 - <<'PY'
+          import re, sys, tomllib
+          OPTIONS = {"version", "version_prefix"}
+          FIELDS = {"checksum", "url", "url_api", "provenance"}
+          KEY = re.compile(r"[a-z0-9][a-z0-9-]*|github:[A-Za-z0-9-]+/[A-Za-z0-9_.-]+")
+          BACKEND = re.compile(r"(?:aqua|github):[A-Za-z0-9-]+/[A-Za-z0-9_.-]+")
+          VERSION = re.compile(r"[0-9][0-9A-Za-z.+-]*")
+          found = []
+          shapes = []
+          versions = []
           with open("mise.lock", "rb") as file:
               lock = tomllib.load(file)
           found += [f"mise.lock carries {key!r}" for key in lock if key not in ("lockfile_version", "tools")]
@@ -222,10 +289,15 @@ jobs:
               found.append(f"mise.lock gives [tools] as a {type(tools).__name__}, not a table")
               tools = {}
           for tool, entries in tools.items():
+              if not KEY.fullmatch(tool):
+                  shapes.append(f"mise.lock locks the tool key {tool!r}, outside the registry names and github:<owner>/<repo>")
               if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
                   found.append(f"mise.lock gives {tool!r} in a form other than a list of tables")
                   continue
               for entry in entries:
+                  version = entry.get("version")
+                  if not (isinstance(version, str) and VERSION.fullmatch(version)):
+                      versions.append(f"mise.lock locks {tool!r} at {version!r}")
                   for key, value in entry.items():
                       if key == "platforms" or key.startswith("platforms."):
                           nested = key == "platforms" and isinstance(value, dict)
@@ -238,10 +310,69 @@ jobs:
                       elif key == "options":
                           options = value if isinstance(value, dict) else {"(not a table)": None}
                           found += [f"mise.lock gives {tool!r} the option {option!r}" for option in options if option not in OPTIONS]
+                      elif key == "backend" and not (isinstance(value, str) and BACKEND.fullmatch(value)):
+                          shapes.append(f"mise.lock gives {tool!r} the backend {value!r}, outside aqua: and github:<owner>/<repo>")
                       elif key not in ("version", "backend", "specifiers"):
                           found.append(f"mise.lock gives {tool!r} the key {key!r}")
           for finding in found:
               print(f"::error::{finding}, which no rule reads. Remove it.")
+          for finding in shapes:
+              print(f"::error::{finding}, the shapes the set pins. mise runs options written in brackets there, a postinstall among them.")
+          for finding in versions:
+              print(f"::error::{finding}, outside the plain release version the set pins. mise reads a path:, system, ref:, prefix: or sub- version as something other than a release.")
+          sys.exit(1 if found or shapes or versions else 0)
+          PY
+      # mise installs a locked tool from the url its lock entry names. Before the download it
+      # reads only the version numbers in that url's release tag and file name, never its owner,
+      # repository or host. A registry name's lock backend decides where mise installs it from.
+      # So each entry in mise.lock and mise.semver.lock is held to one repository. A registry
+      # name's backend must be the first one the pinned mise's registry names for it, and a
+      # github:<owner>/<repo> key's backend must be the key. Each platform's url must then be a
+      # release download from that repository, and its url_api an asset of it. Both match whole,
+      # since a dot segment after a matching prefix resolves to another repository. mise reads
+      # its registry in an empty directory, so no file of the checkout reaches it. A value
+      # reaches the log through repr, so a control character prints as an escape.
+      - name: Held tool sources
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess, sys, tomllib
+          SEGMENT = r"(?!\.\.?(?:/|$))[A-Za-z0-9._+-]+"
+          SOURCE = re.compile(r"(?:aqua|github):([A-Za-z0-9-]+/[A-Za-z0-9_.-]+)")
+          registry = {}
+          found = []
+          def first(name):
+              if name not in registry:
+                  listed = subprocess.run(["mise", "registry", "--json", name], cwd=os.environ["RUNNER_TEMP"],
+                                          capture_output=True, text=True)
+                  registry[name] = (json.loads(listed.stdout)["backends"] or [None])[0] if listed.returncode == 0 else None
+              return registry[name]
+          for lock in ("mise.lock", "mise.semver.lock"):
+              if lock != "mise.lock" and not os.path.lexists(lock):
+                  continue
+              with open(lock, "rb") as file:
+                  tools = tomllib.load(file).get("tools", {})
+              for key, entries in tools.items():
+                  expected = key if key.startswith("github:") else first(key)
+                  if expected is None:
+                      found.append(f"{lock} locks {key!r}, a name the pinned mise's registry does not hold")
+                      continue
+                  source = SOURCE.fullmatch(expected)
+                  for entry in entries:
+                      backend = entry.get("backend")
+                      if backend != expected or source is None:
+                          found.append(f"{lock} gives {key!r} the backend {backend!r}, and its source is {expected!r}")
+                          continue
+                      repository = re.escape(source[1])
+                      rules = {"url": rf"https://github\.com/{repository}/releases/download/{SEGMENT}/{SEGMENT}",
+                               "url_api": rf"https://api\.github\.com/repos/{repository}/releases/assets/[0-9]+"}
+                      tables = [(name[10:], fields) for name, fields in entry.items() if name.startswith("platforms.")]
+                      for platform, fields in tables + list(entry.get("platforms", {}).items()):
+                          for field, rule in rules.items():
+                              value = fields.get(field)
+                              if not isinstance(value, str) or not re.fullmatch(rule, value):
+                                  found.append(f"{lock} gives {key!r} on {platform!r} the {field} {value!r}, outside {source[1]}'s releases")
+          for finding in found:
+              print(f"::error::{finding}.")
           sys.exit(1 if found else 0)
           PY
       # With the refusals passed, the four tools this job runs install, locked, so a tool the
@@ -254,33 +385,49 @@ jobs:
       - name: mise install
         run: mise install --locked taplo shellcheck actionlint zizmor
       # mise.lock names each artifact twice: the url mise downloads, and url_api, the same asset
-      # by id. GitHub records each asset's download address, and its sha256 for an asset uploaded
-      # since it began keeping digests. This step asks GitHub for every asset the lockfile names
-      # by id and requires the address to equal the lockfile's url and the digest, where GitHub
-      # keeps one, to equal its checksum. For a tool whose release carries no attestation,
-      # ShellCheck today, that digest is the second source for the checksum mise verifies. An
-      # asset with no digest, taplo's, is held to its address alone. Both spellings of a
-      # platform table are read, and a url_api outside the asset reference form, a failed call
-      # or a lockfile naming no asset at all fails the step. A lockfile value reaches the log
-      # through printf %q, so a control character in it prints as an escape.
+      # by id. A Rust repository's mise.semver.lock, its named exception, does the same for the
+      # tools mise.semver.toml pins. GitHub records each asset's download address, and its sha256
+      # for an asset uploaded since it began keeping digests. This step asks GitHub for every
+      # asset either lockfile names by id and requires the address to equal the lockfile's url and
+      # the digest, where GitHub keeps one, to equal its checksum. mise lock copied that digest
+      # into the lockfile, so the step holds the lockfile to GitHub's record and adds no
+      # independent source. An asset with no digest, taplo's, is held to its address alone. Both
+      # spellings of a platform table are read. A url_api outside the asset reference form, a
+      # failed call, or a lockfile read that names no asset fails the step, and each finding names
+      # its lockfile. mise.semver.lock is read in that exact spelling alone, since the Refused
+      # files step refuses it in another case and as a link. A lockfile value reaches the log
+      # through printf %q, so a control character in it prints as an escape. mise and taplo start
+      # with GH_TOKEN taken out of their environment, since only the gh call needs it. So neither
+      # holds the job token, whichever names a later mise reads a token from.
       - name: Lockfile assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          taplo=$(mise which taplo)
-          "$taplo" get -f mise.lock -o json > "$RUNNER_TEMP/lock.json"
-          jq -r '
-            .tools // {} | to_entries[] | .key as $tool | .value[] |
-            ( (to_entries[] | select(.key | startswith("platforms.")) | {platform: (.key | ltrimstr("platforms.")), entry: .value}),
-              (.platforms // {} | to_entries[] | {platform: .key, entry: .value}) ) |
-            select(.entry.url_api != null) |
-            [$tool, .platform, .entry.url_api, (.entry.url // ""), (.entry.checksum // "")] | @tsv
-          ' "$RUNNER_TEMP/lock.json" > "$RUNNER_TEMP/assets.tsv"
+          taplo=$(env -u GH_TOKEN mise which taplo)
+          : > "$RUNNER_TEMP/assets.tsv"
+          for lock in mise.lock mise.semver.lock; do
+            if [ "$lock" != mise.lock ] && [ ! -e "$lock" ]; then
+              continue
+            fi
+            env -u GH_TOKEN "$taplo" get -f "$lock" -o json > "$RUNNER_TEMP/lock.json"
+            jq -r --arg lock "$lock" '
+              .tools // {} | to_entries[] | .key as $tool | .value[] |
+              ( (to_entries[] | select(.key | startswith("platforms.")) | {platform: (.key | ltrimstr("platforms.")), entry: .value}),
+                (.platforms // {} | to_entries[] | {platform: .key, entry: .value}) ) |
+              select(.entry.url_api != null) |
+              [$lock, $tool, .platform, .entry.url_api, (.entry.url // ""), (.entry.checksum // "")] | @tsv
+            ' "$RUNNER_TEMP/lock.json" > "$RUNNER_TEMP/named.tsv"
+            if [ ! -s "$RUNNER_TEMP/named.tsv" ]; then
+              echo "::error::$lock names no release asset by id, so this step would check nothing in it."
+              exit 1
+            fi
+            cat "$RUNNER_TEMP/named.tsv" >> "$RUNNER_TEMP/assets.tsv"
+          done
           reference='^https://api\.github\.com/(repos/[A-Za-z0-9-]+/[A-Za-z0-9_.-]+/releases/assets/[0-9]+)$'
           checked=0
           failed=0
-          while IFS=$'\t' read -r tool platform api url checksum; do
-            label="$(printf '%q %q' "$tool" "$platform")"
+          while IFS=$'\t' read -r lock tool platform api url checksum; do
+            label="$(printf '%q %q %q' "$lock" "$tool" "$platform")"
             if [[ ! "$api" =~ $reference ]] || [[ "$api" == */../* ]] || [[ "$api" == */./* ]]; then
               echo "::error::$label url_api is not a release asset reference: $(printf '%q' "$api")"
               failed=1
@@ -294,19 +441,15 @@ jobs:
             fi
             IFS=$'\t' read -r served digest <<< "$asset"
             if [ "$served" != "$url" ]; then
-              echo "::error::$label: GitHub serves asset $path at $served, and mise.lock records $(printf '%q' "$url")"
+              echo "::error::$label: GitHub serves asset $path at $served, and $lock records $(printf '%q' "$url")"
               failed=1
             fi
             if [ -n "$digest" ] && [ "$digest" != "$checksum" ]; then
-              echo "::error::$label: GitHub records $digest for asset $path, and mise.lock records $(printf '%q' "$checksum")"
+              echo "::error::$label: GitHub records $digest for asset $path, and $lock records $(printf '%q' "$checksum")"
               failed=1
             fi
             checked=$((checked + 1))
           done < "$RUNNER_TEMP/assets.tsv"
-          if [ "$checked" -eq 0 ] && [ "$failed" -eq 0 ]; then
-            echo "::error::mise.lock names no release asset by id, so this step checked nothing."
-            exit 1
-          fi
           echo "Checked $checked lockfile assets against GitHub."
           exit "$failed"
       # actionlint runs ShellCheck through a stand-in this step writes to RUNNER_TEMP from this
@@ -406,6 +549,37 @@ jobs:
           ACTIONLINT: ${{ steps.shellcheck.outputs.actionlint }}
           SHELLCHECK: ${{ steps.shellcheck.outputs.command }}
         run: '"$ACTIONLINT" -pyflakes= -shellcheck="$SHELLCHECK"'
+      # zizmor keeps the last copy of an audit repeated under rules, so a later disable: true turns
+      # off an audit whose first copy a reviewer reads. So before any step reads
+      # .github/zizmor.yml, the image's yq reads it and the step refuses a key repeated in one
+      # mapping at any depth, keys compared as strings, an anchor on a key or a value, and a
+      # second document. An alias names an anchor in its own document, and yq fails on one that
+      # does not, so refusing every anchor refuses every alias. yq prints one line per document,
+      # and a file it cannot parse fails the step.
+      - name: Held zizmor config
+        run: |
+          counts='[([... | select(anchor != "")] | length),'
+          counts+=' ([.. | select(kind == "map") | select((keys | length) != (keys | unique | length))] | length)] | @tsv'
+          if ! read_back=$(yq "$counts" .github/zizmor.yml); then
+            echo "::error::yq could not read .github/zizmor.yml, so what zizmor reads from it is unknown."
+            exit 1
+          fi
+          documents=$(printf '%s\n' "$read_back" | wc -l)
+          if [ "$documents" -ne 1 ]; then
+            echo "::error::.github/zizmor.yml holds $documents documents. Keep one."
+            exit 1
+          fi
+          IFS=$'\t' read -r anchors repeated <<< "$read_back"
+          refused=0
+          if [ "$anchors" != 0 ]; then
+            echo "::error::.github/zizmor.yml holds $anchors anchors, and an alias to one stands for text written elsewhere. Write each key and value out where it applies."
+            refused=1
+          fi
+          if [ "$repeated" != 0 ]; then
+            echo "::error::.github/zizmor.yml repeats a key in $repeated mappings. zizmor keeps the last copy of a repeated audit, so a later copy can turn off an audit the first configures. Write each key once."
+            refused=1
+          fi
+          exit "$refused"
       # A secrets-inherit waiver in .github/zizmor.yml binds to a file or a line, not to the
       # workflow a job calls, so pointing a waived job at another repository keeps the waiver and
       # hands that repository every secret. zizmor runs here with no config and --no-ignores, which
@@ -488,10 +662,11 @@ jobs:
       # cannot swap it. The input is .github, the gate's own input, which holds the workflows,
       # dependabot.yml and any composite action under .github/actions. --collect=all turns
       # zizmor's ignore handling off, so no .gitignore, exclude file or global excludes file can
-      # hide one of them.
+      # hide one of them. mise starts with GH_TOKEN taken out of its environment, as in the lockfile
+      # asset check.
       - name: zizmor
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          zizmor=$(mise which zizmor)
+          zizmor=$(env -u GH_TOKEN mise which zizmor)
           "$zizmor" --no-progress --strict-collection --config .github/zizmor.yml --collect=all .github

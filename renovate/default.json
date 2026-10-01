@@ -33,10 +33,12 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "trufflesecurity/trufflehog's version input is the image tag and digest the action runs, which the github-actions manager does not read. Looked up on Docker Hub for its timestamp; the action pulls the same digest from ghcr.io.",
+      "description": "trufflesecurity/trufflehog's version input is the image tag and digest the action runs, which the github-actions manager does not read. Looked up on Docker Hub for its timestamp; the action pulls the same digest from ghcr.io. The first pattern finds the trufflehog step and the second reads its version input alone, anchored at the end of that match, so a commented version line inside the step is no dependency and the text this update rewrites is that one line. The github-actions manager moves the action's own line, its SHA and its version comment, in the same pull request.",
       "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "matchStringsStrategy": "recursive",
       "matchStrings": [
-        "uses: trufflesecurity/trufflehog@[^\\n]*\\n(?:[ \\t]+(?:#|[A-Za-z0-9_-]+:)[^\\n]*\\n)*?[ \\t]+version: (?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+        "uses: trufflesecurity/trufflehog@[^\\n]*\\n(?:[ \\t]+(?:#|[A-Za-z0-9_-]+:)[^\\n]*\\n)*?[ \\t]+version: [^\\n]*",
+        "version: (?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)@(?<currentDigest>sha256:[a-f0-9]{64})$"
       ],
       "depNameTemplate": "trufflesecurity/trufflehog",
       "datasourceTemplate": "docker"
