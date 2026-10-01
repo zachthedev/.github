@@ -203,17 +203,20 @@ jobs:
               print(f"::error::{finding}. actionlint runs ShellCheck for bash and sh alone.")
           sys.exit(1 if found else 0)
           PY
-      # mise runs a config's hooks, [env] and [vars] exec templates and a tool entry's
-      # postinstall command whenever it loads the file, so mise.toml holds [tools], [tool_config]
-      # and [settings] alone, each with the keys the caller's gate reads, and mise.lock holds the
-      # keys mise writes. Each [tools] entry is a version or a table, and each mise.lock tool a
-      # list of tables, as the caller's gate requires. Any other form is refused: mise reads an
-      # entry written as an array of tables, options included. mise also runs options written in
+      # mise runs a config's hooks, [env] and [vars] exec templates and a tool entry's postinstall
+      # command whenever it loads the file, so mise.toml holds [tools], [tool_config] and
+      # [settings] alone, each with the keys the caller's gate reads, and mise.lock holds the keys
+      # mise writes. Each [tools] entry is a version or a table, and each mise.lock tool a list of
+      # tables, as the caller's gate requires. Any other form is refused: mise reads an entry
+      # written as an array of tables, options included. mise also runs options written in
       # brackets after a mise.toml tool key or a mise.lock backend, a postinstall among them, so
       # every tool key in both files is a registry name or github:<owner>/<repo>, and every
-      # mise.lock backend is aqua: or github:<owner>/<repo>, the shapes the set pins. The caller's
-      # gate compares the values; these two steps refuse a key before the install below loads the
-      # file. A key reaches the log through repr, so a control or bidirectional character prints
+      # mise.lock backend is aqua: or github:<owner>/<repo>, the shapes the set pins. Every
+      # version, a [tools] value, a table's version or a lock entry's, is a plain release: a
+      # digit, then letters, digits and . + - alone. mise reads path:, system, ref:, prefix: and
+      # sub- versions as something other than a release. The caller's gate compares the values;
+      # these two steps refuse a key or a version before the install below loads the file. A key
+      # or a version reaches the log through repr, so a control or bidirectional character prints
       # as an escape. Each file has a step of its own because actionlint stalls on Windows handing
       # ShellCheck a script past 4 KB.
       - name: Refused keys
@@ -228,8 +231,10 @@ jobs:
           AQUA = {"github_attestations"}
           OPTIONS = {"version", "version_prefix"}
           KEY = re.compile(r"[a-z0-9][a-z0-9-]*|github:[A-Za-z0-9-]+/[A-Za-z0-9_.-]+")
+          VERSION = re.compile(r"[0-9][0-9A-Za-z.+-]*")
           found = []
           shapes = []
+          versions = []
           with open("mise.toml", "rb") as file:
               pins = tomllib.load(file)
           for key, value in pins.items():
@@ -252,11 +257,17 @@ jobs:
                           found += [f"mise.toml gives {tool!r} the option {option!r}" for option in entry if option not in OPTIONS]
                       elif not isinstance(entry, str):
                           found.append(f"mise.toml gives {tool!r} as a {type(entry).__name__}, neither a version nor a table")
+                          continue
+                      version = entry.get("version") if isinstance(entry, dict) else entry
+                      if not (isinstance(version, str) and VERSION.fullmatch(version)):
+                          versions.append(f"mise.toml pins {tool!r} at {version!r}")
           for finding in found:
               print(f"::error::{finding}, which no rule reads. Remove it.")
           for finding in shapes:
               print(f"::error::{finding}, outside the registry names and github:<owner>/<repo> the set pins. mise runs options written in brackets there, a postinstall among them.")
-          sys.exit(1 if found or shapes else 0)
+          for finding in versions:
+              print(f"::error::{finding}, outside the plain release version the set pins. mise reads a path:, system, ref:, prefix: or sub- version as something other than a release.")
+          sys.exit(1 if found or shapes or versions else 0)
           PY
       - name: Refused lock keys
         run: |
@@ -266,8 +277,10 @@ jobs:
           FIELDS = {"checksum", "url", "url_api", "provenance"}
           KEY = re.compile(r"[a-z0-9][a-z0-9-]*|github:[A-Za-z0-9-]+/[A-Za-z0-9_.-]+")
           BACKEND = re.compile(r"(?:aqua|github):[A-Za-z0-9-]+/[A-Za-z0-9_.-]+")
+          VERSION = re.compile(r"[0-9][0-9A-Za-z.+-]*")
           found = []
           shapes = []
+          versions = []
           with open("mise.lock", "rb") as file:
               lock = tomllib.load(file)
           found += [f"mise.lock carries {key!r}" for key in lock if key not in ("lockfile_version", "tools")]
@@ -282,6 +295,9 @@ jobs:
                   found.append(f"mise.lock gives {tool!r} in a form other than a list of tables")
                   continue
               for entry in entries:
+                  version = entry.get("version")
+                  if not (isinstance(version, str) and VERSION.fullmatch(version)):
+                      versions.append(f"mise.lock locks {tool!r} at {version!r}")
                   for key, value in entry.items():
                       if key == "platforms" or key.startswith("platforms."):
                           nested = key == "platforms" and isinstance(value, dict)
@@ -302,7 +318,9 @@ jobs:
               print(f"::error::{finding}, which no rule reads. Remove it.")
           for finding in shapes:
               print(f"::error::{finding}, the shapes the set pins. mise runs options written in brackets there, a postinstall among them.")
-          sys.exit(1 if found or shapes else 0)
+          for finding in versions:
+              print(f"::error::{finding}, outside the plain release version the set pins. mise reads a path:, system, ref:, prefix: or sub- version as something other than a release.")
+          sys.exit(1 if found or shapes or versions else 0)
           PY
       # mise installs a locked tool from the url its lock entry names. Before the download it
       # reads only the version numbers in that url's release tag and file name, never its owner,
