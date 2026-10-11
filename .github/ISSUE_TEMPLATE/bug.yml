@@ -1,7 +1,7 @@
 name: Bug
 description: The project does something other than what it documents.
 title: 'bug: '
-labels: ['bug']
+labels: ['bug', 'triage']
 body:
   - type: markdown
     attributes:
