@@ -42,6 +42,7 @@ version: migrating later costs more than changing now.
 | Apps         | none     | release pull requests, tags and dependency updates run as GitHub Apps, never as a user                     |
 | Tags         | none     | one ruleset over every tag restricting creation, update and deletion, the releaser app its bypass          |
 | Dependabot   | none     | alerts on everywhere, security updates on in `rust-crates`, `rust-app` and `csharp-installer` alone        |
+| Board        | allowed  | one project per repository, copied from the owner's template, linked, its workflows on                     |
 | Gate         | none     | one command per stack, run locally and called by CI, named in the Adapters table                           |
 | Workflows    | none     | every action pinned by SHA with a version comment, linted and audited in CI                                |
 | CodeQL       | none     | a committed workflow, `security-extended`, over the repository's languages plus `actions`                  |
@@ -329,11 +330,11 @@ Two active rulesets on the default branch, classic branch protection off. `defau
 - The pair reads back through `current_user_can_bypass`: `pull_requests_only` on `default-branch` and `never` on
   `default-branch checks`.
 - A repository not yet on GitHub is created in this order: the repository, its environments with their values,
-  its labels from the kickstart, the Actions settings, private vulnerability reporting on, the merge settings with
-  the wiki and projects off, the first push, the first green run, then the rulesets. The merge settings and the
-  wiki and projects switches share one `PATCH` of the repository. A workflow that names an environment holding no
-  values fails on its first run, and a ruleset that requires a check nothing has reported blocks the first pull
-  request.
+  its labels from the kickstart, its board (Board), the Actions settings, private vulnerability reporting on, the
+  merge settings with the wiki off and projects on, the first push, the first green run, then the rulesets. The
+  merge settings and the wiki and projects switches share one `PATCH` of the repository. A workflow that names an
+  environment holding no values fails on its first run, and a ruleset that requires a check nothing has reported
+  blocks the first pull request.
 - `default-branch checks` goes on first and reads back active before `default-branch` goes on. The ruleset with
   no admin bypass is then in force before the one carrying it.
 
@@ -489,6 +490,64 @@ Two private GitHub Apps, one per role, named for the role so a change of tool re
 ### Vulnerability reporting
 
 - `private_vulnerability_reporting`: `enabled`. The advisory URL every `SECURITY.md` names depends on it.
+
+### Board
+
+Each repository's planned work lives on one GitHub Project, copied from the owner's template project and linked to
+the repository.
+
+- The template is a private project on the owner's account, and `gh project list --owner <owner> --limit <count>`
+  shows its number, where `<count>` is at least the number of projects the owner holds. The list runs newest first and
+  stops at a default limit, so a shorter list can leave the template out. Every field, option and view on a board comes
+  from the template through the copy, never by hand.
+- A copy leaves behind the template's items, links and auto-add workflow. It keeps every other workflow's setting and
+  turns the workflow off. So each new board gets the browser pass below once.
+- A board's visibility matches its repository's.
+- A repository without a board records why in `REPOS.md`.
+
+Making a repository's board, in order. `<template>` is the template's number, and `<number>` is the one the copy
+prints.
+
+1. Copy the template, titled with the repository's name:
+   `gh project copy <template> --source-owner <owner> --target-owner <owner> --title <repository>`.
+2. Match the repository's visibility: `gh project edit <number> --owner <owner> --visibility PUBLIC`, or `PRIVATE`.
+3. Link it: `gh project link <number> --owner <owner> --repo <repository>`.
+4. Check that the repository holds the `triage` and `epic` labels (Labels).
+5. In the browser, on the board:
+   - Workflows: open each one, check its setting against the table below, and turn it on. Where a setting differs,
+     choose Edit, set it, and choose "Save and turn on workflow". Code changes requested and Code review approved
+     stay off.
+   - Auto-add to project: pick this repository, enter `is:issue is:open` as the filter, and turn it on.
+   - Settings: set this repository as the default repository.
+   - Compare each view with the template's and set what the copy dropped: on Board, the In Progress column limit; on
+     Backlog, the slice by Labels; on Roadmap, the Start date and Target date fields, the milestone markers and the
+     quarter zoom. Save each view with "Save view" before leaving it.
+   - Settings: the README and short description match the template's. A README written by hand keeps each paragraph
+     on one line, since the project README shows every newline as a line break.
+   - Manage access: give Write to each account that moves cards. Write on the repository does not grant it.
+6. Read it back: `gh project view <number> --owner <owner>` shows the title, visibility and README, and the
+   project's Workflows page shows each workflow on or off.
+
+| Workflow                       | Setting                                                              |
+| ------------------------------ | -------------------------------------------------------------------- |
+| Item added to project          | Issues only. Set Status to Backlog.                                  |
+| Item reopened                  | Set Status to Todo.                                                  |
+| Item closed                    | Set Status to Done.                                                  |
+| Pull request merged            | Set Status to Done.                                                  |
+| Pull request linked to issue   | Set Status to In Progress.                                           |
+| Auto-close issue               | On, for Status Done.                                                 |
+| Auto-add sub-issues to project | On.                                                                  |
+| Auto-archive items             | GitHub's default filter, `is:issue,pr is:closed updated:<@today-2w`. |
+| Code changes requested         | Off.                                                                 |
+| Code review approved           | Off.                                                                 |
+
+Changing the board:
+
+- A change lands on the template first, then on each board, so no board runs ahead of the template.
+- Fields, options, the README, the short description, and a view's name, layout, filter and columns change through
+  the API. A view's group, sort and column field change through the API only when the view is made, and in the
+  browser after that. Workflows and every setting the browser pass names change in the browser alone.
+- In an organization the template is marked as a template, and a member makes a board from it in the browser.
 
 ## Gate
 
@@ -1839,13 +1898,14 @@ restates none of the specification's rules.
 - The kickstart ships one label set with colors and descriptions. Labels are created at repository creation with
   `gh label clone` from the kickstart, so no repository defines them by hand.
 - The base set is GitHub's defaults, `accessibility` among them, without `good first issue` and `question`, plus
-  `dependencies`, `ci`, `security`, `autorelease: pending` and `autorelease: tagged`. GitHub creates its
-  defaults at repository creation, so a new repository deletes those two after the clone.
+  `dependencies`, `ci`, `security`, `triage`, `epic`, `autorelease: pending` and `autorelease: tagged`. GitHub
+  creates its defaults at repository creation, so a new repository deletes those two after the clone.
 - A repository whose label set differs records why at the drift site, the file that names the label.
 - Every label a tool applies exists before the tool runs. An undefined label is created on demand with no color
   and no description. That is how a set drifts.
-- Label names are written only where a tool reads them: the issue forms' `labels:` lines, the Renovate presets,
-  and `dependabot.yml` under Dependabot. The release tool owns `autorelease: pending` and `autorelease: tagged`.
+- Label names are written only where a tool reads them: the issue forms' `labels:` lines, the board's view filters
+  (Board), the Renovate presets, and `dependabot.yml` under Dependabot. The release tool owns `autorelease: pending`
+  and `autorelease: tagged`.
 - A release-plz repository sets `pr_labels = ["autorelease: pending"]`. After the release, a step with a
   pull-requests-write token of its own moves the merged pull request to `autorelease: tagged`, with
   `continue-on-error`, so a failed label move never fails a release.
