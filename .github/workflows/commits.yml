@@ -11,8 +11,8 @@ name: commits
 # the default branch, and the caller's daily audit run. So a tree two pull requests produce
 # together, which neither pull request's run read, meets them at the push, and a push that
 # started no run, one whose message holds [skip ci] or one made with the workflow token, meets
-# them within a day. setup-bun, the install and both commitlint steps run on a pull request
-# alone, since only a pull request carries a range and a title.
+# them at the caller's next daily audit run. setup-bun, the install and both commitlint steps
+# run on a pull request alone, since only a pull request carries a range and a title.
 #
 # A caller's uses: job grants permissions: contents: read. A called job can only lower what its
 # caller passes, and a caller passing none is refused before any step runs.

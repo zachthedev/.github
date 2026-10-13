@@ -316,24 +316,18 @@ the gate on your machine agrees with CI:
   `node_modules` under `scripts/`, since Bun resolves the gate's imports through them;
 - a tracked workflow whose path is not `.github/workflows/<name>.yml` exactly, since actionlint and zizmor read that
   spelling alone, a tracked workflow whose `shell:` is not `bash`, `sh` or `pwsh`, and one the gate cannot read as
-  YAML;
-- a tracked composite action, an `action.yml` or `action.yaml` in any case, outside `.github/actions/` in that exact
-  spelling, or under it named in another case, such as `ACTION.YML`, which zizmor never reads and a case-insensitive
-  runner opens. zizmor reads `.github` alone, in the `workflows` row and in the shared `workflows` job, while
-  `uses: ./<path>` runs an action from anywhere in the checkout, so an action at `tools/x` or under a `.GitHub`
-  would run with no audit.
+  YAML.
 
-Each name is compared with its case folded, broader than any filesystem's comparison, so a spelling that a
-case-insensitive filesystem opens as a refused name is refused too. The first check names the work tree through
-`git rev-parse --show-toplevel` and refuses one other than this checkout: git passes over a `.git` it cannot read,
-an empty directory among them, and lists a parent repository's files without a word. Every git the gate starts runs
-with no system or global config and nothing inherited from your environment.
+Each name is compared with its case folded, so a case variant of a refused name is refused too. The first check
+names the work tree through `git rev-parse --show-toplevel` and refuses one other than this checkout: git passes
+over a `.git` it cannot read, an empty directory among them, and lists a parent repository's files without a word.
+Every git the gate starts runs with no system or global config and nothing inherited from your environment.
 
 The shared `commits` and `workflows` jobs refuse, before a merge, the files that run code or waive a check before
 any gate row reads them. This repository's `ci.yml` calls both by `./`, so a pull request runs its own copy of
 each, and code-owner review of `.github/workflows/` is the control on a change to them or to the job that runs the
-gate. The `commits` job runs its refusals on every pull request, on every push to
-`main` and daily from `audit.yml`, and its commitlint steps on a pull request alone. The shared jobs refuse:
+gate. Both jobs run their refusals on every pull request, on every push to `main` and daily from `audit.yml`. The
+`commits` job runs its commitlint steps on a pull request alone. The shared jobs refuse:
 
 - a tracked `node_modules`, or a tracked path under one, and every tracked symbolic link, since `bun install` keeps
   one as it finds it and Bun reads through it to a file `bun.lock` never named;
@@ -359,7 +353,11 @@ gate. The `commits` job runs its refusals on every pull request, on every push t
   `.github/zizmor.yml`;
 - a key repeated in one mapping of `.github/zizmor.yml`, an anchor, or a second document, since zizmor keeps the
   last copy of a repeated audit and a later copy can turn off an audit the first configures;
-- a tracked action outside `.github/actions/`, or one under it named in another case, which the gate refuses too;
+- a tracked composite action, an `action.yml` or `action.yaml` in any case, outside `.github/actions/` in that exact
+  spelling, or under it named in another case, such as `ACTION.YML`. zizmor reads `.github` alone, in the
+  `workflows` row and in the `workflows` job. `uses: ./<path>` runs an action from anywhere in the checkout, so one
+  at `tools/x` or under a `.GitHub` would run with no audit. A case-insensitive runner opens `ACTION.YML` for
+  `uses:`, and zizmor never reads it;
 - a job passing `secrets: inherit` to anything but a reusable workflow of `zachthedev/.github`, and a
   `secrets-inherit` waiver that names a position or a file holding no such job, so no waiver outlives its job;
 - a root file named like a program the gate, its hooks or an install start (`bun`, `bunx`, `gh`, `git`, `mise` or

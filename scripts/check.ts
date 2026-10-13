@@ -16,20 +16,19 @@
  * a config runs with its one config named. Before any row, the gate refuses to
  * run beside a config a tool would read in place of the one the gate names, a
  * project config outside the named paths, a node_modules below the root,
- * anything that would steer how Bun resolves the gate's own imports, a
- * workflow the workflows row would not read, or a composite action outside
- * .github/actions/. No config's text is held: code-owner review is the control
- * on a change to one. The tracked files that run code or waive a check before
- * any row reads them, such as an env file, a patchedDependencies key, a
- * repeated JSON key, a bunfig.toml preload or an inline zizmor waiver, are
- * refused before a merge by the shared commits and workflows jobs. ci.yml
- * calls those jobs by relative path, so a pull request runs its own copy of
- * each, and code-owner review of .github/workflows/ is the control on a change
- * to one or to the job that runs this file. Every row that walks the tree
- * says how many files it checked and fails when that is none. The rows that
- * run the repository's own code come last, and the preflight runs again after
- * each. No row carries a deadline: the CI job's timeout-minutes bounds the
- * gate.
+ * anything that would steer how Bun resolves the gate's own imports, or a
+ * workflow the workflows row would not read. No config's text is held:
+ * code-owner review is the control on a change to one. The tracked files that
+ * run code or waive a check before any row reads them, such as an env file, a
+ * patchedDependencies key, a repeated JSON key, a bunfig.toml preload or an
+ * inline zizmor waiver, are refused before a merge by the shared commits and
+ * workflows jobs. ci.yml calls those jobs by relative path, so a pull request
+ * runs its own copy of each, and code-owner review of .github/workflows/ is the
+ * control on a change to one or to the job that runs this file. Every row that
+ * walks the tree says how many files it checked and fails when that is none.
+ * The rows that run the repository's own code come last, and the preflight runs
+ * again after each. No row carries a deadline: the CI job's timeout-minutes
+ * bounds the gate.
  */
 
 import { existsSync } from 'node:fs';
