@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/zachthedev/.github/compare/v0.4.0...v0.5.0) (2026-10-13)
+
+
+### Features
+
+* **community:** file new issues with the triage label ([#24](https://github.com/zachthedev/.github/issues/24)) ([5e533d5](https://github.com/zachthedev/.github/commit/5e533d568da39f45051a135661194881314638b9))
+
 ## [0.4.0](https://github.com/zachthedev/.github/compare/v0.3.0...v0.4.0) (2026-10-01)
 
 
