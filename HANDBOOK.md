@@ -2044,6 +2044,13 @@ bears on, the defect, and the condition that removes it.
   command while the key is present. The key is added once the pinned toolchain ships it. The per-registry form
   is `registries.<name>.min-publish-age`. A `registry.min-publish-age` key does not exist. Removed once every
   Rust repository pins a toolchain that ships the cooldown.
+- GitHub commit identity (Branch rules): a commit's author and committer are strings the pushing client supplies,
+  so anyone with write access can forge either. Push attribution records the authenticated pusher of each commit
+  and adds a `Committer must match pusher` rule. GitHub made it a limited public preview for GitHub Enterprise
+  customers on 2026-10-12 ([changelog](https://github.blog/changelog/2026-10-12-push-attribution-public-preview/)).
+  Until the rule reaches these repositories, the settings that limit a push are worth a review. They are write
+  access (collaborators and deploy keys), the bypass actors and `require_last_push_approval`, and a
+  `required_signatures` rule. Removed once the rule is generally available on the account's plan.
 
 ## Where things live
 
