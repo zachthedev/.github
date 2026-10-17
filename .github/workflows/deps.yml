@@ -80,10 +80,10 @@ jobs:
       # The action runs the Renovate image and passes every RENOVATE_ variable
       # and LOG_LEVEL through to it. The image is pinned by tag and digest.
       # This repository's own renovate.json moves both, looked up on Docker Hub.
-      - uses: renovatebot/github-action@f3a31a786096ba6b40d0f0ffe11a494ef73bfa7c # v46.3.4
+      - uses: renovatebot/github-action@f0f41e5f2e706165f6814b1d0f0d0e319de7d1d9 # v46.3.8
         with:
           token: ${{ steps.token.outputs.token }}
-          renovate-version: 44.115.10@sha256:e262ed52b23dd8c545c80faf5b1ad5c95a07b3f198888de8d7b8928f45c307c7
+          renovate-version: 44.156.0@sha256:10521c4d1136710559603b08f530ce6f264dc26ce6f95e7e20de7b2ae0e7def4
         env:
           # One repository per run, because an installation token is scoped to
           # one installation.
