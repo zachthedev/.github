@@ -100,9 +100,9 @@ jobs:
       # restores npm's cache on its own when a package.json names npm. The action verifies no
       # download, so the pin plus the cooldown is the control.
       - if: contains(fromJSON('["javascript-typescript", "javascript", "typescript"]'), matrix.language)
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24.21.0
+          node-version: 24.22.1
           package-manager-cache: false
       # This repository's own triggers carry no inputs, so submodules falls back to false there.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -120,7 +120,7 @@ jobs:
       # Falling back to 'autobuild' build mode." The caller chose none and this job runs no build,
       # so the variable set to false turns the flag off, which codeql-action reads before it asks
       # GitHub. To take the fallback again, delete the variable.
-      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         env:
           CODEQL_ACTION_DISABLE_CSHARP_BUILDLESS: 'false'
         with:
@@ -141,6 +141,6 @@ jobs:
           trap-caching: false
           dependency-caching: false
       # The category keeps one language's results from replacing another's.
-      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           category: '/language:${{ matrix.language }}'
