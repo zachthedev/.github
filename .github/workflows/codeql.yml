@@ -100,9 +100,9 @@ jobs:
       # restores npm's cache on its own when a package.json names npm. The action verifies no
       # download, so the pin plus the cooldown is the control.
       - if: contains(fromJSON('["javascript-typescript", "javascript", "typescript"]'), matrix.language)
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24.21.0
+          node-version: 24.22.2
           package-manager-cache: false
       # This repository's own triggers carry no inputs, so submodules falls back to false there.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -112,7 +112,7 @@ jobs:
       # The SDK global.json names, for an extractor that restores. The action verifies no
       # download, so that pin plus the cooldown is the control.
       - if: inputs.global-json-file != ''
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: ${{ inputs.global-json-file }}
       # While GitHub's disable_csharp_buildless flag is on, codeql-action turns a C# build-mode
@@ -120,7 +120,7 @@ jobs:
       # Falling back to 'autobuild' build mode." The caller chose none and this job runs no build,
       # so the variable set to false turns the flag off, which codeql-action reads before it asks
       # GitHub. To take the fallback again, delete the variable.
-      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+      - uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
         env:
           CODEQL_ACTION_DISABLE_CSHARP_BUILDLESS: 'false'
         with:
@@ -141,6 +141,6 @@ jobs:
           trap-caching: false
           dependency-caching: false
       # The category keeps one language's results from replacing another's.
-      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+      - uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
         with:
           category: '/language:${{ matrix.language }}'
