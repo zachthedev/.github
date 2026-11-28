@@ -54,7 +54,7 @@ jobs:
       # The action reads the working tree for a config-file input alone, so the first check
       # needs no checkout.
       - name: Against the base
-        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
         with:
           fail-on-severity: high
           fail-on-scopes: runtime, development
@@ -102,7 +102,7 @@ jobs:
       # a commit and reports live advisories per package the release adds since that tag.
       - name: Against the last release
         if: steps.release.outputs.release == 'true'
-        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
         with:
           base-ref: ${{ steps.last-release.outputs.ref }}
           head-ref: ${{ github.event.pull_request.head.sha }}
